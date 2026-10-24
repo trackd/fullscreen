@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/fullscreen.ALC/fullscreen.ALC.csproj" />
+    <Project Path="src/fullscreen.Collector/fullscreen.Collector.csproj" />
+    <Project Path="src/fullscreen/fullscreen.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/fullscreen.Tests/fullscreen.Tests.csproj" />
+  </Folder>
+</Solution>

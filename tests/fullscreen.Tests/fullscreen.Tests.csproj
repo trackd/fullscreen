@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Allocation assertions measure optimized code, without tier transitions during counting. -->
+    <TieredCompilation>false</TieredCompilation>
+    <!-- Background GC can charge unused allocation-context bytes to this thread,
+         breaking exact allocation assertions (dotnet/runtime#134724).
+         This affects the test host only; production GC policy is unchanged. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/fullscreen/fullscreen.csproj" />
+    <PackageReference Include="MSTest" Version="4.0.2" />
+    <PackageReference Include="Spectre.Console" Version="0.54.0" PrivateAssets="all" />
+    <PackageReference Include="System.Management.Automation" Version="7.6.8" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+  </ItemGroup>
+
+</Project>

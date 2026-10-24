@@ -1,0 +1,417 @@
+using System.Diagnostics;
+using System.Reflection;
+using System.Text.Json;
+using fullscreen.Development;
+using XenoAtom.Terminal;
+using XenoAtom.Terminal.Backends;
+using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Hosting;
+
+namespace fullscreen.Tests;
+
+[TestClass]
+public sealed partial class DeveloperTests {
+    [TestMethod]
+    public void ParsesNullDelimitedStatusAndRenamesWithoutQuotingOrPathspecExpansion() {
+        var changes = GitBackend.ParseStatus("## main...origin/main\0 M path with spaces.txt\0R  renamed[1].txt\0old\nname.txt\0?? :(glob)*.txt\0");
+        Assert.HasCount(3, changes);
+        Assert.AreEqual("path with spaces.txt", changes[0].Path);
+        Assert.AreEqual("renamed[1].txt", changes[1].Path);
+        Assert.AreEqual("old\nname.txt", changes[1].OldPath);
+        Assert.AreEqual(":(glob)*.txt", changes[2].Path);
+    }
+    [TestMethod]
+    public async Task GitStagesUnstagesCommitsAndReadsHistoryInAnIsolatedRepository() {
+        using var repo = new GitFixture();
+        await repo.Init();
+        string path = "file [1] -- test.txt";
+        File.WriteAllText(Path.Combine(repo.Root, path), "first\n");
+        var backend = new GitBackend(repo.Root, new CommandRunner());
+        Assert.IsEmpty((await backend.LoadAsync(2, 0, default)).Items);
+        var changes = await backend.LoadAsync(0, 0, default);
+        Assert.HasCount(1, changes.Items);
+        await backend.Operations(0, changes.Items[0]).Single(action => action.Label == "Stage file").Execute("", default);
+        var staged = await backend.LoadAsync(1, 0, default);
+        Assert.HasCount(1, staged.Items);
+        await backend.Operations(1, staged.Items[0]).Single(action => action.Label == "Unstage file").Execute("", default);
+        Assert.IsTrue(File.Exists(Path.Combine(repo.Root, path)));
+        Assert.IsEmpty((await backend.LoadAsync(1, 0, default)).Items);
+        changes = await backend.LoadAsync(0, 0, default);
+        await backend.Operations(0, changes.Items[0]).Single(action => action.Label == "Stage file").Execute("", default);
+        staged = await backend.LoadAsync(1, 0, default);
+        await backend.Operations(1, staged.Items[0]).Single(action => action.Label.StartsWith("Commit", StringComparison.Ordinal)).Execute("initial; literal $(text)", default);
+        Assert.IsEmpty((await backend.LoadAsync(0, 0, default)).Items);
+        var history = await backend.LoadAsync(2, 0, default);
+        Assert.HasCount(1, history.Items);
+        Assert.Contains("initial; literal $(text)", await backend.DetailAsync(2, history.Items[0], default));
+        File.AppendAllText(Path.Combine(repo.Root, path), "second\n");
+        changes = await backend.LoadAsync(0, 0, default);
+        Assert.Contains("+second", await backend.DetailAsync(0, changes.Items[0], default));
+        var commit = backend.Operations(0, changes.Items[0]).Single(action => action.Label.StartsWith("Commit", StringComparison.Ordinal));
+        await repo.Git("add", "--", path);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => commit.Execute("stale index", default));
+        Assert.HasCount(1, (await backend.LoadAsync(2, 0, default)).Items);
+    }
+    [TestMethod]
+    public async Task GitBranchCreationAndSwitchKeepChangesAndValidateBranchNames() {
+        using var repo = new GitFixture();
+        await repo.Init();
+        File.WriteAllText(Path.Combine(repo.Root, "a.txt"), "a");
+        await repo.Git("add", "a.txt");
+        await repo.Git("commit", "-m", "initial");
+        var backend = new GitBackend(repo.Root, new CommandRunner());
+        await backend.LoadAsync(3, 0, default);
+        var create = backend.Operations(3, null).Single(action => action.Label == "Create branch…");
+        await create.Execute("feature/test", default);
+        var branches = await backend.LoadAsync(3, 0, default);
+        Assert.IsTrue(branches.Items.Any(item => item.Key == "feature/test"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => create.Execute("--bad", default));
+        var main = branches.Items.Single(item => item.Key == "main");
+        await backend.Operations(3, main).Single(action => action.Label == "Switch branch").Execute("", default);
+        Assert.Contains("main", await repo.Git("branch", "--show-current"));
+        await repo.Git("mv", "a.txt", "renamed [2].txt");
+        var staged = await backend.LoadAsync(1, 0, default);
+        var renamed = staged.Items.Single();
+        Assert.AreEqual("a.txt", ((GitChange)renamed.State!).OldPath);
+        await backend.Operations(1, renamed).Single(action => action.Label == "Stage file").Execute("", default);
+        await backend.Operations(1, renamed).Single(action => action.Label == "Unstage file").Execute("", default);
+        Assert.IsTrue(File.Exists(Path.Combine(repo.Root, "renamed [2].txt")));
+    }
+    [TestMethod]
+    public async Task GitPushAndPullUseOnlyTheExplicitUpstreamWithoutForce() {
+        using var repo = new GitFixture();
+        await repo.Init();
+        File.WriteAllText(Path.Combine(repo.Root, "a.data"), "a");
+        await repo.Git("add", "a.data");
+        await repo.Git("commit", "-m", "initial");
+        string bare = Path.Combine(repo.Root, "remote.git");
+        await repo.Git("init", "--bare", bare);
+        await repo.Git("remote", "add", "origin", bare);
+        await repo.Git("config", "branch.main.remote", "origin");
+        await repo.Git("config", "branch.main.merge", "refs/heads/main");
+        var backend = new GitBackend(repo.Root, new CommandRunner());
+        await backend.LoadAsync(3, 0, default);
+        await backend.Operations(3, null).Single(action => action.Label == "Push").Execute("", default);
+        Assert.AreEqual((await repo.Git("rev-parse", "HEAD")).Trim(), (await repo.Git("--git-dir", bare, "rev-parse", "refs/heads/main")).Trim());
+        await backend.Operations(3, null).Single(action => action.Label == "Pull (fast-forward only)").Execute("", default);
+    }
+    [TestMethod]
+    public async Task GitHubReviewsBindToTheInspectedHeadAndUseStdinJson() {
+        var runner = new GitHubFixtureRunner();
+        var backend = new GitHubBackend(Path.GetTempPath(), "owner/repo", runner);
+        var page = await backend.LoadAsync(1, 0, default);
+        var item = page.Items.Single();
+        Assert.IsEmpty(backend.Operations(1, item));
+        Assert.Contains("+new line", await backend.DetailAsync(1, item, default));
+        var review = backend.Operations(1, item).Single(action => action.Label == "Approve PR…");
+        await review.Execute("", default);
+        var post = runner.Requests.Single(request => request.Input is not null);
+        using var payload = JsonDocument.Parse(post.Input!);
+        Assert.AreEqual("abc123", payload.RootElement.GetProperty("commit_id").GetString());
+        Assert.AreEqual("APPROVE", payload.RootElement.GetProperty("event").GetString());
+        Assert.IsTrue(post.Arguments.Contains("--input"));
+        Assert.IsEmpty(backend.Operations(1, item));
+    }
+    [TestMethod]
+    public async Task GitHubRejectsStalePullRequestReviewsAndChangedDeploymentApprovals() {
+        var runner = new GitHubFixtureRunner();
+        var backend = new GitHubBackend(Path.GetTempPath(), "owner/repo", runner);
+        var item = (await backend.LoadAsync(1, 0, default)).Items.Single();
+        await backend.DetailAsync(1, item, default);
+        var approve = backend.Operations(1, item).Single(action => action.Label == "Approve PR…");
+        runner.Head = "new-head";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => approve.Execute("", default));
+        Assert.IsFalse(runner.Requests.Any(request => request.Input is not null));
+        runner.Head = "abc123";
+        var run = (await backend.LoadAsync(2, 0, default)).Items.Single();
+        await backend.DetailAsync(2, run, default);
+        var deployment = backend.Operations(2, run).Single(action => action.Label == "Approve pending environments");
+        runner.Environment = 8;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => deployment.Execute("", default));
+        Assert.IsFalse(runner.Requests.Any(request => request.Input is not null));
+        runner.Environment = 7;
+        await backend.DetailAsync(2, run, default);
+        await backend.Operations(2, run).Single(action => action.Label == "Approve pending environments").Execute("", default);
+        using var posted = JsonDocument.Parse(runner.Requests.Single(request => request.Input is not null).Input!);
+        Assert.AreEqual(7L, posted.RootElement.GetProperty("environment_ids")[0].GetInt64());
+        Assert.AreEqual("approved", posted.RootElement.GetProperty("state").GetString());
+    }
+    [TestMethod]
+    public async Task GitHubCommentsPreserveQuotesAndNewlinesAndUsesSelectedHost() {
+        var runner = new GitHubFixtureRunner();
+        var backend = new GitHubBackend(Path.GetTempPath(), "owner/repo", runner, host: "github.example.com");
+        var item = (await backend.LoadAsync(0, 0, default)).Items.Single();
+        string body = "quote \" and newline\n$(literal)";
+        await backend.Operations(0, item).Single().Execute(body, default);
+        var post = runner.Requests.Single(request => request.Input is not null);
+        using var json = JsonDocument.Parse(post.Input!);
+        Assert.AreEqual(body, json.RootElement.GetProperty("body").GetString());
+        Assert.Contains("github.example.com", post.Arguments);
+        await Assert.ThrowsAsync<ArgumentException>(() => backend.Operations(0, item).Single().Execute(" ", default));
+    }
+    [TestMethod]
+    public async Task RunnerHonorsPreCancellationAndTerminatesAnActiveChild() {
+        var runner = new CommandRunner();
+        using var before = new CancellationTokenSource();
+        before.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => runner.RunAsync(new("git", Path.GetTempPath(), ["--version"]), before.Token));
+        if (!OperatingSystem.IsWindows()) {
+            return;
+        }
+
+        using var during = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var watch = Stopwatch.StartNew();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => runner.RunAsync(new("pwsh.exe", Path.GetTempPath(), ["-NoProfile", "-Command", "Start-Sleep -Seconds 30"]), during.Token));
+        Assert.IsLessThan(10.0, watch.Elapsed.TotalSeconds);
+    }
+    [TestMethod]
+    public async Task RunnerReturnsWhenADetachedGrandchildHoldsThePipes() {
+        if (!OperatingSystem.IsWindows()) {
+            return;
+        }
+
+        var watch = Stopwatch.StartNew();
+        // start /b leaves ping running with cmd's inherited stdout after cmd exits.
+        var result = await new CommandRunner().RunAsync(new("cmd.exe", Path.GetTempPath(), ["/c", "start /b ping -n 20 127.0.0.1 & echo done"], TimeoutSeconds: 15), default);
+        Assert.AreEqual(0, result.ExitCode);
+        Assert.Contains("done", result.Output);
+        Assert.IsLessThan(10.0, watch.Elapsed.TotalSeconds);
+    }
+
+    private static readonly int[] expected = [0];
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task MinimalDeveloperViewSkipsAutomaticDetailsButEnterLoadsThem() {
+        var data = new UiFixtureBackend();
+        using var app = new DeveloperApp(data, minimal: true);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(140, 34));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var terminal = new TerminalApp(app.Surface, session.Instance, new TerminalAppOptions { HostKind = TerminalHostKind.Fullscreen, EnableMouse = true });
+        long timestamp = Stopwatch.GetTimestamp();
+        void Tick() {
+            app.Tick();
+            timestamp += Stopwatch.Frequency / 100;
+            typeof(TerminalApp).GetMethod("Tick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, [timestamp]);
+        }
+        typeof(TerminalApp).GetMethod("BeginRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null);
+        terminal.Focus(app.Surface);
+        try {
+            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return !app.Busy; }, 5000));
+            var deadline = Stopwatch.StartNew();
+            while (deadline.ElapsedMilliseconds < 200) {
+                Tick();
+                Thread.Sleep(5);
+            }
+            Assert.AreEqual(0, data.Details);
+            CollectionAssert.AreEqual(expected, data.Loaded.ToArray());
+            backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Enter });
+            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return backend.GetOutText().Contains("+fixture diff", StringComparison.Ordinal); }, 5000));
+            Assert.AreEqual(1, data.Details);
+        }
+        finally { typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null); }
+    }
+
+    private static readonly int[] expectedArray = [0];
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task DeveloperUiLoadsOnlyActiveTabAndRequiresConfirmationBeforeAnAction() {
+        var data = new UiFixtureBackend();
+        using var app = new DeveloperApp(data);
+        var lightTheme = Themes.ThemeCatalog.Load("Light Modern");
+        lightTheme.Apply(app.Surface);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(140, 34));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var terminal = new TerminalApp(app.Surface, session.Instance, new TerminalAppOptions { HostKind = TerminalHostKind.Fullscreen, EnableMouse = true });
+        long timestamp = Stopwatch.GetTimestamp();
+        void Tick() {
+            app.Tick();
+            timestamp += Stopwatch.Frequency / 100;
+            typeof(TerminalApp).GetMethod("Tick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, [timestamp]);
+        }
+        void Wait(Func<bool> condition) =>
+            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return condition(); }, 5000));
+        void Send(TerminalEvent ev, Func<bool> condition) {
+            backend.PushEvent(ev);
+            Wait(condition);
+        }
+        typeof(TerminalApp).GetMethod("BeginRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null);
+        terminal.Focus(app.Surface);
+        try {
+            Wait(() => !app.Busy && backend.GetOutText().Contains("+fixture diff", StringComparison.Ordinal));
+            CollectionAssert.AreEqual(expectedArray, data.Loaded.ToArray());
+            app.Surface.Model.SortColumn = 0;
+            app.Surface.Model.Descending = true;
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Right, X = 5, Y = 4 }, () => backend.GetOutText().Contains("Fixture action", StringComparison.Ordinal));
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Right, X = 5, Y = 4 }, () => true);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Enter }, () => backend.GetOutText().Contains("Confirm · Fixture action", StringComparison.Ordinal));
+            Assert.AreEqual(lightTheme.Background, terminal.FocusedElement!.GetTheme().Background);
+            Assert.AreEqual(0, data.Applied);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Escape }, () => app.Surface.HasFocus);
+            Assert.AreEqual(0, data.Applied);
+            Send(new TerminalTextEvent { Text = "a" }, () => !app.Surface.HasFocus);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Enter }, () => backend.GetOutText().Contains("Confirm · Fixture action", StringComparison.Ordinal));
+            Send(new TerminalKeyEvent { Key = TerminalKey.Tab }, () => true);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Enter }, () => data.Applied == 1);
+            Wait(() => !app.Busy);
+            Assert.AreEqual(0, app.Surface.Model.SortColumn);
+            Assert.IsTrue(app.Surface.Model.Descending);
+            Send(new TerminalTextEvent { Text = "a" }, () => !app.Surface.HasFocus);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Down }, () => true);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Enter }, () => backend.GetOutText().Contains("Message body", StringComparison.Ordinal));
+            Send(new TerminalTextEvent { Text = "review text" }, () => backend.GetOutText().Contains("review text", StringComparison.Ordinal));
+            Send(new TerminalKeyEvent { Key = TerminalKey.Tab }, () => true);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Tab }, () => true);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Enter }, () => backend.GetOutText().Contains("Confirm · Message action", StringComparison.Ordinal));
+            Assert.AreEqual(1, data.Applied);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Tab }, () => true);
+            Send(new TerminalKeyEvent { Key = TerminalKey.Enter }, () => data.Applied == 2);
+            Assert.AreEqual("review text", data.LastText);
+            Wait(() => !app.Busy);
+            Send(new TerminalTextEvent { Text = "2" }, () => app.View == 1 && !app.Busy);
+            Assert.Contains(1, data.Loaded);
+        }
+        finally { typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null); }
+    }
+
+    private static readonly int[] expectedArray0 = [1, 0];
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task ReadOnlyWorktreeNavigationReloadsTheContextWithoutExposingWrites() {
+        var data = new UiFixtureBackend();
+        using var app = new DeveloperApp(data, initialView: 1, readOnly: true);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(110, 30));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var terminal = new TerminalApp(app.Surface, session.Instance, new TerminalAppOptions { HostKind = TerminalHostKind.Fullscreen, EnableMouse = true });
+        long timestamp = Stopwatch.GetTimestamp();
+        void Tick() {
+            app.Tick();
+            timestamp += Stopwatch.Frequency / 100;
+            typeof(TerminalApp).GetMethod("Tick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, [timestamp]);
+        }
+        void Wait(Func<bool> condition) =>
+            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return condition(); }, 5000));
+        typeof(TerminalApp).GetMethod("BeginRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null);
+        terminal.Focus(app.Surface);
+        try {
+            Wait(() => !app.Busy && backend.GetOutText().Contains("+fixture diff", StringComparison.Ordinal));
+            backend.PushEvent(new TerminalTextEvent { Text = "a" });
+            Wait(() => !app.Surface.HasFocus);
+            Assert.DoesNotContain("Fixture action", backend.GetOutText());
+            backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Enter });
+            Wait(() => !app.Busy && app.View == 0 && app.Surface.Title.Contains("linked", StringComparison.Ordinal));
+            Assert.AreEqual("linked", app.Surface.Model.Current!.Cells[0]);
+            Assert.AreEqual(0, data.Applied);
+            CollectionAssert.AreEqual(expectedArray0, data.Loaded.ToArray());
+        }
+        finally { typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null); }
+    }
+    private sealed class UiFixtureBackend : IDeveloperBackend {
+        public int Details;
+        public string Context = "fixture";
+        public string Title => "DEV FIXTURE · " + Context;
+        public string[] Tabs { get; } = ["Files", "History"];
+        public List<int> Loaded { get; } = [];
+        public int Applied;
+        public string LastText = "";
+        public Task<DeveloperPage> LoadAsync(int view, int page, CancellationToken token) {
+            Loaded.Add(view);
+            return Task.FromResult(new DeveloperPage(["Name"], [new("1", [Context])], "Ready"));
+        }
+        public Task<string> DetailAsync(int view, DeveloperItem item, CancellationToken token) {
+            Interlocked.Increment(ref Details);
+            return Task.FromResult("+fixture diff");
+        }
+        public DeveloperOperation[] Operations(int view, DeveloperItem? item) =>
+            [new("Fixture action", "Apply exactly once", (_, _) => { Applied++; return Task.FromResult("done"); }), new("Message action", "Post the reviewed message", (text, _) => { LastText = text; Applied++; return Task.FromResult("posted"); }, "Message body"), new("Open worktree", "Change inspection context", (_, _) => { Context = "linked"; return Task.FromResult("opened"); }, ReadOnly: true, TargetView: 0)];
+    }
+    private sealed class GitHubFixtureRunner : ICommandRunner {
+        public readonly List<CommandRequest> Requests = [];
+        public string Head = "abc123";
+        public long Environment = 7;
+        public Task<CommandResult> RunAsync(CommandRequest request, CancellationToken token) {
+            Requests.Add(request);
+            string path = request.Arguments[request.Arguments.Count - 1];
+            string response;
+            if (request.Input is not null || request.Arguments.Contains("POST")) {
+                response = "{}";
+            }
+            else if (path.EndsWith("pulls/1", StringComparison.Ordinal) && request.Arguments.Contains("Accept: application/vnd.github.diff")) {
+                response = "diff --git a/a b/a\n-old line\n+new line";
+            }
+            else if (path.EndsWith("pulls/1", StringComparison.Ordinal)) {
+                response = JsonSerializer.Serialize(new {
+                    number = 1,
+                    state = "open",
+                    title = "Improve",
+                    head = new {
+                        sha = Head
+                    },
+                    html_url = "https://github.com/owner/repo/pull/1"
+                });
+            }
+            else if (path.Contains("pulls?", StringComparison.Ordinal)) {
+                response = "[{\"number\":1,\"title\":\"Improve\",\"user\":{\"login\":\"dev\"},\"head\":{\"sha\":\"abc123\",\"ref\":\"main\"}}]";
+            }
+            else if (path.Contains("check-runs", StringComparison.Ordinal)) {
+                response = "{\"check_runs\":[]}";
+            }
+            else if (path.EndsWith("/status", StringComparison.Ordinal)) {
+                response = "{\"contexts\":[]}";
+            }
+            else if (path.Contains("/reviews?", StringComparison.Ordinal)) {
+                response = "[]";
+            }
+            else if (path.Contains("pending_deployments", StringComparison.Ordinal)) {
+                response = JsonSerializer.Serialize(new[] { new { environment = new { id = Environment, name = "production" }, current_user_can_approve = true } });
+            }
+            else if (path.Contains("/jobs?", StringComparison.Ordinal)) {
+                response = "{\"jobs\":[]}";
+            }
+            else if (path.EndsWith("actions/runs/9", StringComparison.Ordinal)) {
+                response = "{\"id\":9,\"head_sha\":\"abc123\",\"run_attempt\":1,\"status\":\"waiting\"}";
+            }
+            else if (path.Contains("actions/runs?", StringComparison.Ordinal)) {
+                response = "{\"workflow_runs\":[{\"id\":9,\"head_sha\":\"abc123\",\"run_attempt\":1,\"status\":\"waiting\"}]}";
+            }
+            else if (path.Contains("issues?", StringComparison.Ordinal)) {
+                response = "[{\"number\":2,\"title\":\"Issue\",\"user\":{\"login\":\"dev\"}}]";
+            }
+            else {
+                throw new InvalidOperationException("Unexpected fixture request: " + path);
+            }
+
+            return Task.FromResult(new CommandResult(0, response, ""));
+        }
+    }
+    private sealed class GitFixture : IDisposable {
+        public string Root { get; } = Path.Combine(Path.GetTempPath(), "Fullscreen-Git-" + Guid.NewGuid().ToString("N"));
+        public GitFixture() =>
+            Directory.CreateDirectory(Root);
+        public async Task Init() {
+            await Git("init", "--initial-branch=main");
+            await Git("config", "user.name", "Fullscreen Test");
+            await Git("config", "user.email", "test@example.invalid");
+            await Git("config", "commit.gpgsign", "false");
+            await Git("config", "core.autocrlf", "false");
+            await Git("config", "core.hooksPath", Path.Combine(Root, "no-hooks"));
+            await Git("config", "core.excludesFile", Path.Combine(Root, ".git", "info", "exclude"));
+        }
+        public async Task<string> Git(params string[] arguments) =>
+            (await new CommandRunner().RunAsync(new("git", Root, arguments), default)).RequireSuccess();
+        public void Dispose() {
+            string path = Path.GetFullPath(Root), temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+            if (Path.GetDirectoryName(path) != temp || !Path.GetFileName(path).StartsWith("Fullscreen-Git-", StringComparison.Ordinal)) {
+                throw new InvalidOperationException("Unsafe fixture cleanup.");
+            }
+
+            foreach (string file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)) {
+                File.SetAttributes(file, FileAttributes.Normal);
+            }
+
+            Directory.Delete(path, true);
+        }
+    }
+}

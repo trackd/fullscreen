@@ -1,0 +1,20 @@
+**/bin/
+**/obj/
+output/
+artifacts/
+.reference/
+BenchmarkDotNet.Artifacts/
+benchmark*.log
+.tools/
+**/TestResults/
+
+# Required project assets may match developer-wide ignore rules.
+!module/lib/
+!module/lib/**
+!docs/images/
+!docs/images/*.png
+evaluation/
+
+# Local notes, retired tools and managed worktrees.
+/.local/
+/.worktrees/
