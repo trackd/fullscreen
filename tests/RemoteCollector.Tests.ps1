@@ -50,7 +50,12 @@ Describe 'Remote collector' -Tag 'Integration' {
             ($collectorProcess.CpuPercent) | Should -BeLessOrEqual (100) -Because 'Remote CPU must use 0-100 percent.'
             $frame.Capabilities | Should -Not -BeNullOrEmpty -Because 'Capabilities must be supplied by the collector host over PSRP.'
             $commandLine = $source.ReadCommandLine($collectorProcess, [Threading.CancellationToken]::None)
-            $commandLine | Should -Match '(?i)(pwsh|powershell)' -Because 'The deployed collector must inspect command lines without the UI assembly.'
+            if ($IsMacOS -and $commandLine.StartsWith('Unavailable:')) {
+                $commandLine | Should -Be 'Unavailable: ambiguous macOS argument boundaries.'
+            }
+            else {
+                $commandLine | Should -Match '(?i)(pwsh|powershell)' -Because 'The deployed collector must inspect command lines without the UI assembly.'
+            }
             [bool](($IsWindows -or $IsLinux) -and [string]::IsNullOrEmpty($collectorProcess.UserName)) | Should -BeFalse -Because 'Remote process username was lost during collection/serialization.'
             [bool](($IsWindows -or $IsLinux) -and $null -eq $collectorProcess.ParentId) | Should -BeFalse -Because 'Remote parent process ID was lost during collection/serialization.'
             $metricsType = ($sourceType.GetMethods() | Where-Object { $_.Name -eq 'Sample' -and $_.GetParameters().Count -eq 3 } | Select-Object -First 1).GetParameters()[1].ParameterType
