@@ -1,6 +1,6 @@
 @{
     RootModule           = 'fullscreen.psm1'
-    ModuleVersion        = '0.2.0'
+    ModuleVersion        = '0.3.0'
     GUID                 = 'f3fb06ad-95c3-47ae-9469-0cc3bb5f8112'
     Author               = 'trackd'
     Copyright            = '(c) trackd. All rights reserved.'
