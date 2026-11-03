@@ -72,6 +72,9 @@ public sealed partial class MonitorSurface {
     public void SetFrame(CollectorFrame frame) {
         _columnLayoutWidth = -1;
         Frame = frame;
+        if (ColumnsOpen && _pickerCapabilities != frame.Capabilities) {
+            UpdatePickerCapabilities();
+        }
         CpuPercent = frame.CpuPercent;
         TotalMemory = frame.TotalMemory;
         AvailableMemory = frame.AvailableMemory;
@@ -80,7 +83,7 @@ public sealed partial class MonitorSurface {
         SampleMilliseconds = frame.SampleMilliseconds;
         SampleAllocation = frame.SampleAllocation;
         DateTimeOffset timestamp = frame.CapturedAt == default ? DateTimeOffset.UtcNow : frame.CapturedAt;
-        bool all = View == MonitorView.Dashboard || !Minimal && ProcessTable;
+        bool all = BackgroundSampling || View == MonitorView.Dashboard || !Minimal && ProcessTable;
         if (all) {
             _cpuHistory.Add(CpuPercent, timestamp);
             _memoryHistory.Add(MemoryPercent, timestamp);
@@ -313,6 +316,13 @@ public sealed partial class MonitorSurface {
             if (column.Sort == Model.Sort && column.Width < 10000) {
                 Write(buffer, column.X + column.Width - 1, top - 1, Model.Ascending ? "↑" : "↓", Accent);
             }
+        }
+        Write(buffer, 0, top - 1, _firstProcessColumn > 0 ? "‹" : "", Accent, 1);
+        bool overflow = _firstProcessColumn + _columnCount < AvailableProcessColumns.Count
+            || _columnCount > 0 && _columns[_columnCount - 1].Width < DescribeColumn(_columns[_columnCount - 1].Kind).Width;
+        Write(buffer, Bounds.Width - 1, top - 1, overflow ? "›" : "", Accent, 1);
+        if (AvailableProcessColumns.Count == 0) {
+            Write(buffer, 2, top - 1, "Selected columns unsupported on target · C: choose columns", Muted, Bounds.Width - 4);
         }
 
         int visible = Math.Max(0, Bounds.Height - top - Footer);

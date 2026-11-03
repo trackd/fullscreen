@@ -210,17 +210,20 @@ public sealed class EtwCollectorTests {
             using var sender = new UdpClient();
             var endpoint = (IPEndPoint)receiver.Client.LocalEndPoint!;
             byte[] payload = new byte[1024];
+            byte[] diskPayload = new byte[1024 * 1024];
             string file = Path.Combine(Path.GetTempPath(), "Fullscreen-ETW-" + Guid.NewGuid().ToString("N") + ".tmp");
             try {
-                sender.Send(payload, endpoint);
-                receiver.Receive(ref endpoint);
-                using (var output = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough)) {
-                    output.Write(new byte[4 * 1024 * 1024]);
-                    output.Flush(true);
-                }
+                using var output = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough);
                 bool sawNetwork = false, sawDisk = false;
                 Assert.IsTrue(SpinWait.SpinUntil(() => {
+                    // Keep producing events after startup or an incomplete ETW sample.
+                    sender.Send(payload, endpoint);
+                    receiver.Client.Receive(payload);
+                    output.Position = 0;
+                    output.Write(diskPayload);
+                    output.Flush(true);
                     if (!trace.TryGetLoss(out ulong lost)) {
+                        Thread.Sleep(100);
                         return false;
                     }
 
@@ -231,7 +234,7 @@ public sealed class EtwCollectorTests {
                     sawNetwork |= row.NetworkBytesPerSecond > 0;
                     sawDisk |= row.DiskBytesPerSecond > 0;
                     if (!sawNetwork || !sawDisk) {
-                        Thread.Sleep(50);
+                        Thread.Sleep(100);
                     }
 
                     return sawNetwork && sawDisk;

@@ -50,6 +50,10 @@ public sealed partial class MonitorSurface {
 
     private bool HasServiceDetails {
         get {
+            if (Frame.Platform.Contains("Windows", StringComparison.OrdinalIgnoreCase)) {
+                return false;
+            }
+
             foreach (ref readonly var row in Frame.Services.AsSpan(0, Frame.ServiceCount)) {
                 if (!string.IsNullOrWhiteSpace(row.Detail) && row.Detail != "—") {
                     return true;
@@ -131,7 +135,11 @@ public sealed partial class MonitorSurface {
         );
         var columns = ServiceColumns().ToArray();
         foreach (var column in columns) {
-            string name = column.Column == ServiceColumn.ProcessId ? "PID" : column.Column.ToString().ToUpperInvariant();
+            string name = column.Column switch {
+                ServiceColumn.ProcessId => "PID",
+                ServiceColumn.Description when Frame.Platform.Contains("Windows", StringComparison.OrdinalIgnoreCase) => "DISPLAY NAME",
+                _ => column.Column.ToString().ToUpperInvariant()
+            };
             string sort = Services.Sort == column.Column ? (Services.Ascending ? " ↑" : " ↓") : "";
             Write(
                 buffer,
@@ -266,7 +274,7 @@ public sealed partial class MonitorSurface {
                 dialog!.Close();
             })))
         };
-        dialog.Show();
+        ShowMonitorDialog(dialog, editable: true);
         App?.Focus(input);
     }
 }

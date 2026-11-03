@@ -38,58 +38,45 @@ ftui
 
 ## DESCRIPTION
 
-Builds controls inside fullscreen's private ALC; callers use ordinary PowerShell data rather than XenoAtom types.
-Definition accepts hashtables and PSCustomObjects directly, including nested native
-control definitions. Path accepts JSON or .psd1 files. PSD1 is data-only; executable
-logic and live objects are passed separately through callbacks and State.
-Bind connects controls to state keys.
-Native widget properties go in Options; Get-TuiControl exposes NativeProperties
-with their accepted names, types and enum choices. Numeric, switch, color and enum
-inputs update their bound state. Lists, trees and grids consume a bound collection
-and publish selection separately with SelectionBind. Replace collections to refresh.
-DataGridControl returns the original selected object. Native Table renders cells;
-DataGridControl defaults to ReadOnly. With Options.ReadOnly = $false, Edit events
-contain Original and a Values dictionary; apply edits explicitly in your handler.
-FTable adds fullscreen's object identity, filtering, sorting and Submit behavior.
-FLogView parses severity-colored log snapshots; LogControl is the native log widget.
+Runs a custom terminal app from a layout definition. The layout can be a
+hashtable, a PSCustomObject, or a PSD1/JSON file created with New-TuiDefinition,
+Export-TuiDefinition or Show-TuiDesigner. Layouts are data only; behavior comes
+from the script blocks you pass to the cmdlet.
 
-Dialog, Popup, CommandPalette, Toast and SearchReplacePopup use a boolean Bind key
-to open/close. Closing an overlay resets that key to false. Target optionally names
-a Popup anchor or ToastHost; SearchReplacePopup requires Target to name a LogControl.
-Define targets anywhere in the layout. Previews keep overlays closed and never run handlers.
-Text inputs, text areas, checkboxes and selects update state; text, Code, Image and progress controls display updates.
-Code highlights through the optional TextMate module; Image needs the optional Sixel module and the Sixel ChartRenderer.
-OnEvent and optional OnTick execute synchronously on the invoking PowerShell/UI thread.
-Callbacks emit no output or one hashtable containing State, Close and/or Value.
-A Close button or callback closes successfully; F10, Escape or cancellation marks the result cancelled.
-F10 exits the custom application consistently, including from embedded components.
-Escape first follows the focused control's cancel/back behavior, such as closing
-a selector or clearing an embedded monitor filter, then closes the application
-when unhandled. Tab and Shift-Tab move focus; multiline TextArea inputs retain
-Enter for newlines and allow Tab to leave the field.
-TabTitle supplies a tab page's visible caption independently of its Id and Text.
-Without TabTitle, the ID is used as the caption.
-Returns State, Value, Cancelled and LastEvent.
-Layout files are data and never execute handlers.
-User-supplied script blocks execute as normal PowerShell code.
-Long callbacks block the UI; keep them short and do not write terminal output.
+Bind connects controls to keys in the shared State dictionary. Inputs, checkboxes,
+selects and numeric controls update their bound key; text, Code, Image and
+progress controls display it. Lists, trees and grids show a bound collection and
+publish the selected item to the key named by SelectionBind. Replace a collection
+in State to refresh it. Native widget settings go in Options; Get-TuiControl lists
+each control's accepted properties, types and choices.
 
-For Spectre controls, keep the caller's renderable in State and bind it by name.
-Only that name is serialized into layouts. The adapter uses the renderable's own
-interface assembly, including a foreign AssemblyLoadContext. It buffers styled
-text privately and preserves colors and decorations without forwarding cursor,
-screen-clear, title or image escape sequences. Interactive Spectre prompts and live
-displays are outside this control's contract. Render output is limited to 1 MiB;
-page large documents. fullscreen never replaces the global Spectre console.
+Set the root control's VerticalAlignment to Stretch for a full-height layout
+with independently scrolling panes. Other root alignments allow the whole layout
+to scroll vertically when it exceeds the terminal height.
+Set the returned definition's Title to an empty string when the layout provides
+its own heading. FTable and FLogView show an independent scrollbar when their
+rows exceed the available pane height.
 
-BackgroundJob.ps1 demonstrates polling an owned thread job and cleaning it up
-when the TUI closes. HandlerMap.ps1 demonstrates controlId:event handlers plus
-:Start and :Tick lifecycle handlers. Matching handlers run instead of the fallback
-OnEvent or OnTick callback. Return one reply hashtable, or no output.
+Dialog, Popup, CommandPalette, Toast and SearchReplacePopup open when their
+boolean Bind key is true and reset it to false when closed. Target names a Popup
+anchor or ToastHost; SearchReplacePopup requires Target to name a LogControl.
+DataGridControl is read-only by default. With Options.ReadOnly = $false, Edit
+events contain Original and a Values dictionary; apply the edit in your handler.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+OnEvent, OnTick and Handler entries run on the UI thread. Each can change State
+directly or return one hashtable with State updates, Close and an optional Value.
+Keep callbacks short, do not write to the host, and run long work in a background
+job (see the BackgroundJob.ps1 example).
+
+When the app closes, Invoke-Tui returns the final State, Value, Cancelled and
+LastEvent. A Close button or reply closes successfully; F10, unhandled Escape or
+cancellation marks the result cancelled. Tab and Shift-Tab move focus; multiline
+inputs keep Enter for new lines. Set TabTitle on a tab page to show a caption
+other than its Id. Press F12 to toggle the diagnostic overlay.
+
+Spectre controls display a renderable kept in State and bound by name; only the
+name is saved in the layout. Styled text is shown, but interactive Spectre prompts
+and live displays are not supported, and output is limited to 1 MiB.
 
 ## EXAMPLES
 
@@ -160,8 +147,7 @@ HelpMessage: ''
 ### -ChartRenderer
 
 Select Auto (Sixel with native fallback), Sixel, Native or Regis (experimental
-Contour vectors). Applies to charts throughout the custom TUI. DRCS chart
-rendering is disabled.
+Contour vectors). Applies to charts throughout the custom TUI.
 
 ```yaml
 Type: fullscreen.Charts.ChartRenderer
@@ -235,7 +221,8 @@ HelpMessage: ''
 Script block receiving param($tuiEvent, $state).
 Event contains Id, Kind and Value. Kinds include Start, Change, Click, Selection,
 Submit and Close; use Get-TuiControl to see each control's supported events.
-Start has an empty Id, and Click has a null Value.
+Start has an empty Id. Menu Click events identify the selected action in Value;
+ordinary button Click events have a null Value.
 Mutate state directly or return one hashtable with State updates, Close and optional Value.
 Other success-stream output is rejected.
 Handlers execute only in Invoke-Tui, never in the designer preview.

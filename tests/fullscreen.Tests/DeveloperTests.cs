@@ -137,6 +137,32 @@ public sealed partial class DeveloperTests {
         Assert.AreEqual("approved", posted.RootElement.GetProperty("state").GetString());
     }
     [TestMethod]
+    public async Task GitHubWorkflowViewsShowStatusJobsArtifactsAndWorkflowHistory() {
+        var runner = new GitHubFixtureRunner();
+        var backend = new GitHubBackend(Path.GetTempPath(), "owner/repo", runner);
+        var runs = await backend.LoadAsync(2, 0, default);
+        Assert.AreEqual("✓ success", runs.Items.Single().Cells[3]);
+        string runDetail = await backend.DetailAsync(2, runs.Items.Single(), default);
+        Assert.Contains("✓ success", runDetail);
+        Assert.Contains("✗ failure", runDetail);
+        Assert.Contains("✓ success  1. Compile", runDetail);
+        Assert.Contains("release-bundle · 1 KB", runDetail);
+        Assert.Contains("https://api.github.com/repos/owner/repo/actions/artifacts/3/zip", runDetail);
+        var runActions = backend.Operations(2, runs.Items.Single()).Select(action => action.Label).ToArray();
+        Assert.Contains("Open run in browser", runActions);
+        Assert.Contains("Open job · build", runActions);
+        Assert.Contains("Open artifact · release-bundle", runActions);
+
+        var workflows = await backend.LoadAsync(3, 0, default);
+        string workflowDetail = await backend.DetailAsync(3, workflows.Items.Single(), default);
+        Assert.Contains("WORKFLOW  ·  CI", workflowDetail);
+        Assert.Contains("File: .github/workflows/ci.yml", workflowDetail);
+        Assert.Contains("Open recent run · Add tests", backend.Operations(3, workflows.Items.Single()).Select(action => action.Label).ToArray());
+        Assert.Contains("✓ success  Add tests", workflowDetail);
+        Assert.Contains("main · push · ci-bot", workflowDetail);
+        Assert.Contains("https://github.com/owner/repo/actions/runs/9", workflowDetail);
+    }
+    [TestMethod]
     public async Task GitHubCommentsPreserveQuotesAndNewlinesAndUsesSelectedHost() {
         var runner = new GitHubFixtureRunner();
         var backend = new GitHubBackend(Path.GetTempPath(), "owner/repo", runner, host: "github.example.com");
@@ -247,6 +273,8 @@ public sealed partial class DeveloperTests {
             Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Right, X = 5, Y = 4 }, () => true);
             Send(new TerminalKeyEvent { Key = TerminalKey.Enter }, () => backend.GetOutText().Contains("Confirm · Fixture action", StringComparison.Ordinal));
             Assert.AreEqual(lightTheme.Background, terminal.FocusedElement!.GetTheme().Background);
+            Assert.IsTrue(terminal.FocusedElement is XenoAtom.Terminal.UI.Controls.Button cancel && cancel.Content is XenoAtom.Terminal.UI.Controls.TextBlock label && label.Text == "Cancel",
+                "Confirmation should initially focus Cancel; actual focus: " + terminal.FocusedElement.GetType().Name);
             Assert.AreEqual(0, data.Applied);
             Send(new TerminalKeyEvent { Key = TerminalKey.Escape }, () => app.Surface.HasFocus);
             Assert.AreEqual(0, data.Applied);
@@ -368,13 +396,39 @@ public sealed partial class DeveloperTests {
                 response = JsonSerializer.Serialize(new[] { new { environment = new { id = Environment, name = "production" }, current_user_can_approve = true } });
             }
             else if (path.Contains("/jobs?", StringComparison.Ordinal)) {
-                response = "{\"jobs\":[]}";
+                response = JsonSerializer.Serialize(new {
+                    jobs = new[] {
+                        new {
+                            name = "build",
+                            status = "completed",
+                            conclusion = "failure",
+                            started_at = "2026-11-03T08:00:00Z",
+                            completed_at = "2026-11-03T08:01:00Z",
+                            html_url = "https://github.com/owner/repo/actions/runs/9/job/2",
+                            steps = new[] {
+                                new { number = 1, name = "Compile", status = "completed", conclusion = "success", started_at = "2026-11-03T08:00:00Z", completed_at = "2026-11-03T08:00:30Z" },
+                                new { number = 2, name = "Test", status = "completed", conclusion = "failure", started_at = "2026-11-03T08:00:30Z", completed_at = "2026-11-03T08:01:00Z" }
+                            }
+                        }
+                    }
+                });
+            }            else if (path.Contains("/artifacts?", StringComparison.Ordinal)) {
+                response = JsonSerializer.Serialize(new { artifacts = new[] { new { name = "release-bundle", size_in_bytes = 1024, expired = false, archive_download_url = "https://api.github.com/repos/owner/repo/actions/artifacts/3/zip" } } });
             }
             else if (path.EndsWith("actions/runs/9", StringComparison.Ordinal)) {
-                response = "{\"id\":9,\"head_sha\":\"abc123\",\"run_attempt\":1,\"status\":\"waiting\"}";
+                response = JsonSerializer.Serialize(new { id = 9, name = "CI", display_title = "Add tests", head_sha = "abc123", head_branch = "main", @event = "push", actor = new { login = "ci-bot" }, html_url = "https://github.com/owner/repo/actions/runs/9", run_attempt = 1, status = "completed", conclusion = "success", created_at = "2026-11-03T08:00:00Z", updated_at = "2026-11-03T08:02:00Z" });
+            }
+            else if (path.Contains("actions/workflows/101/runs?", StringComparison.Ordinal)) {
+                response = JsonSerializer.Serialize(new { workflow_runs = new[] { new { status = "completed", conclusion = "success", display_title = "Add tests", head_branch = "main", @event = "push", actor = new { login = "ci-bot" }, created_at = "2026-11-03T08:00:00Z", updated_at = "2026-11-03T08:02:00Z", html_url = "https://github.com/owner/repo/actions/runs/9" } } });
+            }
+            else if (path.EndsWith("actions/workflows/101", StringComparison.Ordinal)) {
+                response = JsonSerializer.Serialize(new { name = "CI", state = "active", path = ".github/workflows/ci.yml", created_at = "2026-10-01T00:00:00Z", updated_at = "2026-11-03T08:00:00Z", html_url = "https://github.com/owner/repo/actions/workflows/101" });
+            }
+            else if (path.Contains("actions/workflows?", StringComparison.Ordinal)) {
+                response = JsonSerializer.Serialize(new { workflows = new[] { new { id = 101, name = "CI", state = "active", path = ".github/workflows/ci.yml" } } });
             }
             else if (path.Contains("actions/runs?", StringComparison.Ordinal)) {
-                response = "{\"workflow_runs\":[{\"id\":9,\"head_sha\":\"abc123\",\"run_attempt\":1,\"status\":\"waiting\"}]}";
+                response = JsonSerializer.Serialize(new { workflow_runs = new[] { new { id = 9, head_sha = "abc123", run_attempt = 1, status = "completed", conclusion = "success", display_title = "Add tests", head_branch = "main", html_url = "https://github.com/owner/repo/actions/runs/9" } } });
             }
             else if (path.Contains("issues?", StringComparison.Ordinal)) {
                 response = "[{\"number\":2,\"title\":\"Issue\",\"user\":{\"login\":\"dev\"}}]";

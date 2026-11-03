@@ -4,19 +4,27 @@ using XenoAtom.Terminal.UI.Input;
 namespace fullscreen.Monitoring;
 
 public sealed partial class MonitorSurface {
-    private bool AvailableColumn(ProcessColumn column) {
-        if (column is not (ProcessColumn.Disk or ProcessColumn.Network)) {
-            return true;
-        }
+    private bool Supports(CollectorCapabilities capability) =>
+        !Frame.Capabilities.HasValue || (Frame.Capabilities.Value & capability) == capability;
 
-        foreach (ref readonly var row in Frame.Processes.AsSpan(0, Frame.ProcessCount)) {
-            if ((column == ProcessColumn.Disk ? row.DiskBytesPerSecond : row.NetworkBytesPerSecond).HasValue) {
-                return true;
-            }
-        }
+    private bool AvailableColumn(ProcessColumn column) => column switch {
+        ProcessColumn.ParentId => Supports(CollectorCapabilities.ProcessParent),
+        ProcessColumn.UserName => Supports(CollectorCapabilities.ProcessOwner),
+        ProcessColumn.Status => Supports(CollectorCapabilities.ProcessStatus),
+        ProcessColumn.Disk => Supports(CollectorCapabilities.ProcessDisk),
+        ProcessColumn.Network => Supports(CollectorCapabilities.ProcessNetwork),
+        ProcessColumn.Gpu => Supports(CollectorCapabilities.ProcessGpu),
+        ProcessColumn.GpuMemory => Supports(CollectorCapabilities.ProcessGpuMemory),
+        _ => true
+    };
 
-        return false;
-    }
+    private bool AvailableColumn(GpuColumn column) => column switch {
+        GpuColumn.Utilization => Supports(CollectorCapabilities.GpuUtilization),
+        GpuColumn.UsedMemory => Supports(CollectorCapabilities.GpuUsedMemory),
+        GpuColumn.TotalMemory => Supports(CollectorCapabilities.GpuTotalMemory),
+        GpuColumn.Temperature => Supports(CollectorCapabilities.GpuTemperature),
+        _ => true
+    };
 
     /// <summary>Sets or clears the filter for a process column.</summary>
     /// <param name="column">The table column to read or configure.</param>

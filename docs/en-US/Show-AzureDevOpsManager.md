@@ -30,26 +30,66 @@ fado
 
 ## DESCRIPTION
 
-Lazy Boards, Work items, Stories, Tasks, Pull requests and Pipelines tabs use Azure DevOps Services REST API 7.1 directly.
-Boards open cards filtered by board work item types and team area paths, including child areas where configured.
-Work items include state, board column, assignee, parent, priority, remaining work, iteration and tags.
-Enter opens work-item panels for metadata, description, acceptance criteria,
-discussion (latest 50 comments), and related work-item links that open inside the TUI.
-Enter on a board opens its cards. K shows Kanban columns for the current filtered
-page; select a card to inspect or move it. M toggles the server-side Assigned to me
-filter using the authenticated identity. Slash filters the loaded page.
-Actions create stories/tasks, add child tasks, rename, assign, change state, set remaining hours,
-edit descriptions/tags and add discussion. Description and discussion editors support multiple lines.
-Writes require an in-app confirmation; updates atomically test the displayed revision.
-Azure process rules apply.
-Pull requests and pipeline timelines are currently read-only.
-Tabs load only when opened; F5 refreshes; slash filters the loaded page; C selects columns; G groups; A or right-click opens actions; brackets page.
-Azure CLI (`az`) and its `azure-devops` extension on PATH are required. Reuses the signed-in account and opens browser sign-in before the TUI when needed. No application registration is required. Tokens refresh through Azure CLI; fullscreen does not store refresh credentials. Ctrl+C cancels sign-in (five-minute login timeout). PAT environment variables and explicit token parameters are not supported.
-No pipeline objects are emitted.
+Opens Azure DevOps Boards, Work items, Stories, Tasks, Pull requests,
+Pipelines and Backlog in a fullscreen terminal app. Tabs load when first opened. Lists use
+the full width by default; click Preview or press V to show a resizable detail
+pane. The command bar provides actions, view options, refresh and sprint selection.
+Buttons share rows and wrap to fit narrower terminals.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+Enter opens a work item with its fields, description, acceptance criteria,
+discussion (latest 50 comments), attachments and linked items. Parent, child and
+related work items open inside the app, with a Back button to return. Details
+open in a unified, scrollable layout with wrapped text and grouped actions. Wider
+windows place the description beside the item fields. In preview mode, drag the
+divider or press Shift+Left/Right to resize the panes.
+
+Stories and Tasks default to the team's current sprint. Click Sprint or press I
+to choose another sprint or All sprints; the selection applies to both tabs.
+If no current sprint is configured, all items are shown with an explicit notice.
+
+Enter on a board opens its Kanban columns, filtered by the board's work item
+types and team area paths. K shows the current list as a Kanban board; select a
+card to inspect or move it. M or **Filter list: assigned to me** returns to the list
+and filters by your signed-in identity; it does not assign or change a work item.
+Use **Assign** to change an item's assignee.
+/ filters the loaded page, C chooses columns, G groups, brackets change page
+and F5 refreshes.
+
+Press A or right-click for actions: create stories and tasks, add child tasks,
+rename, assign, change state, plan into an iteration, set area, priority or remaining hours, edit descriptions and tags, and
+add comments. Changes are confirmed before saving and are rejected if the work
+item changed since it was displayed; Azure DevOps process rules still apply.
+
+The Backlog tab shows the team's configured backlog levels, including portfolio
+levels such as Features and Epics, in Azure DevOps planning order across all
+sprints. Click Backlog level or press L to switch levels. Create the work-item
+types configured for that level, inspect items, add child tasks, or use the same
+confirmed edit and planning actions. Column sorting changes only the display,
+not the team's backlog order.
+
+Pull request details show reviewers, discussion and changed file names. After
+inspection, use Actions to comment, approve, approve with suggestions, wait for
+the author, reject or reset your vote. A source or target change requires a fresh
+inspection. Open in browser shows the full diff and supports inline review.
+Pipeline runs show status, job and step durations and artifacts with browser links.
+
+Click Sprint review or press U from a work-item or backlog tab to review a team
+sprint. Choose a sprint inside the review. Totals cover all its work-item types
+and pages in the team's area paths, ignoring list and assignee filters. The review
+shows completed/not-completed work, workflow states, estimates by type and recorded
+completed/remaining hours. Missing estimates and hours are identified by their coverage;
+unrecognized workflow states are reported, not assumed complete.
+
+Sprint review is a current snapshot, not historical velocity or burndown. Removed-state
+items are counted separately; items moved out of the sprint and changes in scope since
+the sprint started require historical Azure DevOps Analytics data. No separate Analytics
+OData connection is used. Pipeline **Run summary** remains a result chart of the current
+filtered page only.
+
+Requires Azure CLI (az) with the azure-devops extension on PATH. The app reuses
+your Azure CLI sign-in and opens browser sign-in before starting when needed;
+Ctrl+C cancels sign-in. Personal access tokens are not supported. The cmdlet
+writes no pipeline output. Press F12 to toggle the diagnostic overlay.
 
 ## EXAMPLES
 
@@ -75,6 +115,15 @@ For guest access, choose the organization tenant using its GUID or domain.
 
 ```powershell
 Show-AzureDevOpsManager -Organization contoso -Project Atlas -TenantId contoso.onmicrosoft.com -View Tasks -Minimal
+```
+
+### Example 4: Plan the team backlog
+
+Open the team's backlog, use L to choose its level, and open an item to edit or plan it.
+Press U for the team's sprint review.
+
+```powershell
+Show-AzureDevOpsManager -Organization contoso -Project Atlas -Team Core -View Backlog
 ```
 
 ## PARAMETERS
@@ -262,7 +311,7 @@ HelpMessage: ''
 
 Optional team name or ID.
 Limits work item queries to configured team area paths.
-Boards use the default team when omitted; opening a board applies that team scope.
+Boards and sprint selection use the default team when omitted.
 
 ```yaml
 Type: System.String
@@ -333,7 +382,7 @@ HelpMessage: ''
 
 ### -View
 
-Initial lazy tab: Boards (default), WorkItems, Stories, Tasks, PullRequests or Pipelines.
+Initial tab: Boards (default), WorkItems, Stories, Tasks, PullRequests, Pipelines or Backlog.
 
 ```yaml
 Type: fullscreen.Commands.AzureDevOpsView

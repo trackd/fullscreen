@@ -1,6 +1,9 @@
 using System.Globalization;
+using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Commands;
+using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Rendering;
 using XenoAtom.Terminal.UI.Styling;
@@ -8,6 +11,8 @@ using XenoAtom.Terminal.UI.Styling;
 namespace fullscreen.Monitoring;
 
 public sealed partial class MonitorSurface {
+    private Dialog? _monitorDialog;
+    private bool _monitorDialogEditable;
     private int FooterHelpWidth => Bounds.Width >= 40 ? 8 : 3;
     private int FooterFilterX => FooterHelpWidth + 2;
 
@@ -83,23 +88,82 @@ public sealed partial class MonitorSurface {
         Write(buffer, 1, y, FooterHelpWidth == 8 ? "[? Help]" : "[?]", accent.WithTextStyle(TextStyle.Bold), FooterHelpWidth);
     }
 
+    private void ShowMonitorDialog(Dialog dialog, bool editable = false) {
+        _monitorDialog = dialog;
+        _monitorDialogEditable = editable;
+        dialog.SetStyle(Palette.Controls);
+        dialog.KeyDownRouted += (_, e) => {
+            if (e.Key == TerminalKey.Escape || e.Char == TerminalChar.CtrlQ || (!editable && e.Char is 'q' or 'Q')) {
+                e.Handled = true;
+                dialog.Close();
+            }
+        };
+        if (!editable) {
+            dialog.TextInputRouted += (_, e) => {
+                if (e.Text is "q" or "Q") {
+                    e.Handled = true;
+                    dialog.Close();
+                }
+            };
+            foreach (char key in new[] { 'q', 'Q' }) {
+                dialog.AddCommand(new Command {
+                    Id = "Fullscreen.Monitor.Dismiss." + key,
+                    LabelMarkup = "Close dialog",
+                    Gesture = new KeyGesture(key),
+                    Execute = _ => dialog.Close()
+                });
+            }
+        }
+        dialog.Show();
+    }
+
+    internal string HelpText(int width, int height) {
+        string[] bindings = [
+            "1: processes", "2: services", "3: network", "4: GPU", "5 / F8: users", "6: dashboard",
+            "↑/↓: select or scroll", "PgUp/PgDn: select or scroll a page", "Home/End: first/last row",
+            "Enter: toggle user group / process tree, or actions", "A: process, service or session actions",
+            "D: process or user session details", "Space: mark account sessions · M: mark/unmark all · X: logoff picker",
+            "/: edit filter", "Esc: clear filter / close dialog",
+            "Ctrl+U: clear search text", "P: pause/resume", "Q / Ctrl+Q: quit (close dialogs first)",
+            "T: process tree", "←/→: process columns (Shift in tree) / user branches",
+            "Right-click: menus / expand or collapse all",
+            "C: columns", "F6: sort", "R: reverse sort", "E: exclude process name", "U: restore excluded processes",
+            "L: include user processes", "G: change graph type", "Click chart: inspect",
+            "F4: minimal view", "F12: diagnostics", "? / F1: help"
+        ];
+        string legend = "120s history · newest at right · network receive: green, send: purple\nChart: " + GraphLabel;
+        int contentWidth = Math.Max(1, width - 6);
+        string detailed = string.Join("\n", bindings) + "\n\n" + legend;
+        int lines = detailed.Split('\n').Sum(line => Math.Max(1, (line.Length + contentWidth - 1) / contentWidth));
+        if (lines <= height - 8) {
+            return detailed;
+        }
+
+        return "Views: 1 processes · 2 services · 3 network · 4 GPU · 5/F8 users · 6 dashboard\n" +
+            "↑↓ / PgUp/PgDn / Home/End: select or scroll · Enter: toggle branch/actions · A: actions · D: details\n" +
+            "Users: Space marks account · M marks/unmarks all · X selects sessions for confirmed logoff\n" +
+            "/: edit filter · Esc: clear filter/close dialog · Ctrl+U: clear search · P: pause/resume · Q/Ctrl+Q: quit (close dialogs first)\n" +
+            "T: tree · ←/→: process columns (Shift in tree) / user branches · right-click: menus\n" +
+            "C: columns · F6: sort · R: reverse · E: exclude process name · U: restore\n" +
+            "L: include user processes · G: graph type · click chart: inspect\n" +
+            "F4: minimal view · F12: diagnostics · ?/F1: help\n\n" + legend;
+    }
+
     internal void ShowHelp() {
+        int width = Math.Max(20, Math.Min(96, Bounds.Width - 4));
         Dialog? dialog = null;
-        string text = "Views: 1 processes · 2 services · 3 network · 4 GPU · 5/F8 users · 6 dashboard\n" +
-            "↑↓ / PgUp / PgDn: select or scroll · Enter/A: actions · D: session details\n" +
-            "/: edit filter · Esc: clear filter · P: pause/resume · Q: quit\n" +
-            "T: process tree · ←/→: collapse/expand selected · right-click: expand/collapse all\n" +
-            "C: columns · F6: sort · R: reverse sort · E: exclude process name · U: restore\n" +
-            "L: include user processes · G: change graph type · click chart: inspect\n" +
-            "120s history · newest at right · network receive: green, send: purple\n" +
-            "F4: minimal view · F12: diagnostics · ?: this help\n\n" +
-            "Chart: " + GraphLabel;
         dialog = new Dialog {
             Title = new TextBlock("Monitor keys and legend"),
             IsModal = true,
-            Width = Math.Max(20, Math.Min(96, Bounds.Width - 4)),
-            Content = new VStack(new Paragraph(text) { Wrap = true }, new Button("Close").Click(() => dialog!.Close()))
+            Width = width,
+            MaxHeight = Math.Max(1, Bounds.Height - 2),
+            Content = new VStack(
+                new ScrollViewer(new Paragraph(HelpText(width, Bounds.Height)) { Wrap = true }) {
+                    MaxHeight = Math.Max(1, Bounds.Height - 8)
+                },
+                new Button("Close").Click(() => dialog!.Close())
+            )
         };
-        dialog.Show();
+        ShowMonitorDialog(dialog);
     }
 }

@@ -32,7 +32,7 @@ None.
 
 Lists built-in palette names and a Colors hashtable for each. The default table shows actual theme foreground, accent, success, warning and error swatches on the theme background. Preview contains the ANSI-styled swatch text; Colors retains the editable hex values. Redirected output follows PowerShell output-rendering settings.
 Copy or edit Colors and pass it to any interactive cmdlet with Theme.
-No private CLR or XenoAtom types are returned and no terminal opens.
+Returns plain PowerShell objects and opens no terminal.
 
 ## EXAMPLES
 

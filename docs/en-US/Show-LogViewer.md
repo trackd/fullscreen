@@ -38,24 +38,21 @@ flog
 
 ## DESCRIPTION
 
-Reads up to 64 UTF-8 files on a bounded worker and merges entries by parsed timestamp.
-Recognizes common JSON and Serilog compact fields and ISO timestamp prefixes in text.
-Missing timestamps use arrival time.
-Malformed JSON remains plain text.
-Unknown severities remain visible.
-L selects minimum severity; slash filters; Space bookmarks; B toggles bookmarks; I or Enter shows source and raw details.
-F toggles scrolling to new entries; keyboard or mouse navigation stops tail scrolling.
-Follow controls whether file polling continues.
-Detects truncation, replacement and changed file prefixes.
-Pending partial lines are held until newline while following.
-Initial reads are limited to the final 8 MiB per file.
-Lines are limited to 16 KiB characters; cells show up to 4096 characters and details retain the bounded raw line.
-Evicted entries also lose bookmarks.
-Q closes and joins the reader worker.
+Opens up to 64 UTF-8 text or JSON log files in a fullscreen viewer that merges
+entries by timestamp and colors them by severity. Common JSON and Serilog compact
+fields and ISO timestamp prefixes are recognized; entries without a timestamp use
+their arrival time, and malformed JSON and unknown severities stay visible as
+plain entries.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+Filter with /, choose a minimum severity with L, bookmark entries with Space and
+show only bookmarks with B, and press Enter or I for the source and raw line. With
+Follow, new lines are read as they are written, and truncated or replaced files
+are detected. F toggles scrolling to new entries; moving the selection stops it.
+Q closes the viewer.
+
+Initial reads are limited to the last 8 MiB of each file, and lines longer than
+16 KiB characters are truncated. When old entries are discarded, their bookmarks
+are removed too.
 
 ## EXAMPLES
 

@@ -51,7 +51,7 @@ Describe 'Native definition construction' {
 Describe 'Definition import and export' {
     BeforeEach {
         $definition = New-TuiDefinition -Title 'Parts' -State @{ message = 'World' }
-        $target = Join-Path $TestDrive 'form[1].tui.json'
+        $target = Join-Path $TestDrive ("form[1].$([Guid]::NewGuid().ToString('N')).tui.json")
     }
 
     It 'Does not write a file with WhatIf' {
@@ -67,9 +67,10 @@ Describe 'Definition import and export' {
         $loaded.Title | Should -Be 'Parts'
     }
 
-    It 'Replaces an existing definition' {
+    It 'Replaces an existing definition only with Force' {
         $definition | Export-TuiDefinition -Path $target
-        New-TuiDefinition -Title 'Replacement' | Export-TuiDefinition -Path $target
+        { New-TuiDefinition -Title 'Replacement' | Export-TuiDefinition -Path $target -ErrorAction Stop } | Should -Throw '*Force*'
+        New-TuiDefinition -Title 'Replacement' | Export-TuiDefinition -Path $target -Force
         (Import-TuiDefinition -LiteralPath $target).Title | Should -Be 'Replacement'
     }
 }

@@ -95,7 +95,7 @@ public sealed partial class MonitorSurface {
         var names = network ? NetworkColumnNames : GpuColumnNames;
         int x = 1, column = -1;
         for (int i = 0; i < names.Length; i++) {
-            if (!enabled[i]) {
+            if (!enabled[i] || !network && !AvailableColumn((GpuColumn)i)) {
                 continue;
             }
 

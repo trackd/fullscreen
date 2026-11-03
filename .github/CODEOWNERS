@@ -4,11 +4,3 @@
 /build.ps1                 @trackd
 /*.build.ps1               @trackd
 *.csproj                   @trackd
-*.props                    @trackd
-*.targets                  @trackd
-/global.json               @trackd
-NuGet.Config               @trackd
-nuget.config               @trackd
-/.config/dotnet-tools.json  @trackd
-/module/fullscreen.psd1    @trackd
-/.gitmodules               @trackd

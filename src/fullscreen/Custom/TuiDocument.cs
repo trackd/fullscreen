@@ -157,21 +157,26 @@ public sealed partial class TuiDocument {
 
     /// <summary>Writes the document to a layout file.</summary>
     /// <param name="path">The filesystem or resource path.</param>
-    public void Save(string path) {
+    public void Save(string path) => Save(path, overwrite: true);
+
+    /// <summary>Writes the document to a layout file, optionally preserving an existing file.</summary>
+    /// <param name="path">The filesystem path.</param>
+    /// <param name="overwrite">Whether an existing layout may be replaced.</param>
+    public void Save(string path, bool overwrite) {
         string text = Path.GetExtension(path).Equals(".psd1", StringComparison.OrdinalIgnoreCase) ? TuiDataFile.Generate(this) : ToJson();
         if (Encoding.UTF8.GetByteCount(text) > 1024 * 1024) {
             throw new ArgumentException("TUI definitions are limited to 1 MiB.");
         }
 
-        WriteAtomic(path, text);
+        WriteAtomic(path, text, overwrite);
     }
 
-    internal static void WriteAtomic(string path, string text) {
+    internal static void WriteAtomic(string path, string text, bool overwrite = true) {
         string target = Path.GetFullPath(path);
         string temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try {
             File.WriteAllText(temporary, text, new System.Text.UTF8Encoding(false));
-            File.Move(temporary, target, true);
+            File.Move(temporary, target, overwrite);
         }
         finally {
             if (File.Exists(temporary)) {

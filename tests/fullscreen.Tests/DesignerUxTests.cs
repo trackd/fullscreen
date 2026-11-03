@@ -57,8 +57,8 @@ public sealed class DesignerUxTests {
             _time += Stopwatch.Frequency / 100;
             typeof(TerminalApp).GetMethod("Tick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(App, [_time]);
         }
-        public void Key(TerminalKey key, Func<bool> observed, TerminalModifiers modifiers = default) {
-            _backend.PushEvent(new TerminalKeyEvent { Key = key, Modifiers = modifiers });
+        public void Key(TerminalKey key, Func<bool> observed, TerminalModifiers modifiers = default, char? character = null) {
+            _backend.PushEvent(new TerminalKeyEvent { Key = key, Modifiers = modifiers, Char = character });
             Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return observed(); }, 3000), $"Key {key} did not reach expected state. Focus={App.FocusedElement?.GetType().Name}, dialogs={App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Count()}. {_backend.GetOutText()[^Math.Min(500, _backend.GetOutText().Length)..]}");
         }
         public void Text(string text, Func<bool> observed) {
@@ -83,6 +83,50 @@ public sealed class DesignerUxTests {
             _backend.Dispose();
         }
     }
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("Application title")]
+    public void MinimalChromeTogglesWithoutHidingContentForTitledAndInlineHeadingLayouts(string title) {
+        using var app = new CustomTuiApp(new TuiDocument {
+            Title = title,
+            Root = new TuiNode { Id = "content", Type = "Text", Text = "Application content" }
+        });
+        foreach (bool minimal in new[] { false, true, false }) {
+            app.SetMinimal(minimal);
+            Assert.IsTrue(app.Controls["content"].IsVisible);
+            var children = ((VStack)app.Root).Children;
+            Assert.IsTrue(children[title.Length == 0 ? 0 : 2].IsVisible);
+            Assert.AreEqual(!minimal, children[^1].IsVisible);
+            if (title.Length > 0) {
+                Assert.AreEqual(!minimal, children[0].IsVisible);
+                Assert.AreEqual(!minimal, children[1].IsVisible);
+            }
+        }
+    }
+
+    [TestMethod]
+    [DataRow("Stretch", false)]
+    [DataRow("Start", true)]
+    public void FullHeightLayoutsConstrainPaneViewportsWhileNaturalLayoutsStillScroll(string alignment, bool wholeLayoutScrolls) {
+        using var app = new CustomTuiApp(new TuiDocument {
+            Root = new TuiNode {
+                Id = "sources",
+                Type = "OptionList",
+                VerticalAlignment = alignment,
+                Items = [.. Enumerable.Range(1, 100).Select(index => $"Channel {index}")]
+            }
+        });
+        VisualSnapshotRenderer.Render(app.Root, 80, 24);
+        var source = app.Controls["sources"];
+        if (wholeLayoutScrolls) {
+            Assert.IsGreaterThan(24, source.Bounds.Height);
+        }
+        else {
+            Assert.IsLessThan(24, source.Bounds.Height);
+            Assert.IsGreaterThan(0, source.Bounds.Height);
+        }
+    }
+
     [TestMethod]
     public async Task InvalidDraftCloseRequiresConfirmationAndCancelPreservesInput() {
         using var designer = new TuiDesignerApp(TuiDocument.Starter(), (_, _) => { });
@@ -158,6 +202,60 @@ public sealed class DesignerUxTests {
         ui.Activate(Button(DialogFor(ui.App.FocusedElement)!, "Confirm"), () => writes == 2);
         Assert.IsNull(DialogFor(ui.App.FocusedElement));
     }
+
+    [TestMethod]
+    public async Task DesignerSaveCreatesACompanionAndConfirmsLayoutReplacement() {
+        string directory = Directory.CreateTempSubdirectory("fullscreen-save-").FullName;
+        try {
+            string layout = Path.Combine(directory, "app.tui.json");
+            string script = Path.ChangeExtension(layout, ".ps1");
+            int writes = 0;
+            using var designer = new TuiDesignerApp(TuiDocument.Starter(), (document, path) => {
+                TuiScriptExporter.Export(document, path, overwriteLayout: true);
+                writes++;
+            }, path: layout);
+            await using var ui = new UiSession(designer.Root, () => designer.Tick());
+            ui.Activate(Button(designer.Root, "▣"), () => writes == 1);
+            Assert.IsTrue(File.Exists(script));
+            Assert.Contains("Import-TuiDefinition", File.ReadAllText(script));
+            File.AppendAllText(script, "\n# Custom handlers");
+            byte[] before = File.ReadAllBytes(script);
+            ui.Activate(Button(designer.Root, "▣"), () => DialogFor(ui.App.FocusedElement) is not null);
+            Assert.AreEqual(1, writes);
+            ui.Key(TerminalKey.Escape, () => DialogFor(ui.App.FocusedElement) is null);
+            Assert.AreEqual(1, writes);
+            ui.Activate(Button(designer.Root, "▣"), () => DialogFor(ui.App.FocusedElement) is not null);
+            ui.Activate(Button(DialogFor(ui.App.FocusedElement)!, "Confirm"), () => writes == 2);
+            CollectionAssert.AreEqual(before, File.ReadAllBytes(script));
+            Assert.AreEqual(designer.Document.ToJson(), TuiDocument.Load(layout).ToJson());
+        }
+        finally {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task DataExportConfirmsTheExactJsonAndCompanionPaths() {
+        string? exported = null;
+        using var designer = new TuiDesignerApp(TuiDocument.Starter(), (_, _) => { },
+            exists: path => path.EndsWith(".json", StringComparison.Ordinal),
+            exportScript: (_, path, _) => exported = path);
+        await using var ui = new UiSession(designer.Root, () => designer.Tick());
+        ui.Activate(Button(designer.Root, "↗"), () => ui.App.FocusedElement is TextBox);
+        var input = Assert.IsInstanceOfType<TextBox>(ui.App.FocusedElement);
+        var dialog = DialogFor(input)!;
+        input.Text = "app.tui.json";
+        ui.Activate(Button(dialog, "Export"), () => DialogFor(ui.App.FocusedElement) != dialog);
+        var confirmation = DialogFor(ui.App.FocusedElement)!;
+        string message = string.Join("", confirmation.EnumerateVisualsDepthFirst().OfType<Paragraph>().Select(text => text.Text));
+        Assert.Contains("app.tui.json", message);
+        Assert.Contains("app.tui.ps1", message);
+        Assert.DoesNotContain(".psd1", message);
+        Assert.IsNull(exported);
+        ui.Activate(Button(confirmation, "Confirm"), () => exported is not null);
+        Assert.AreEqual("app.tui.json", exported);
+    }
+
     [TestMethod]
     public async Task MultilineTabMovesFocusAndF10ExitsBeforeAChildConsumesIt() {
         var document = new TuiDocument {

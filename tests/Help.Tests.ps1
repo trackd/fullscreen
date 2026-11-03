@@ -48,10 +48,12 @@ Describe 'Cmdlet help' {
         Compare-Object -ReferenceObject $actual -DifferenceObject $documented | Should -BeNullOrEmpty
     }
 
-    It 'Packages identical help for module discovery and the private assembly context' {
-        $rootHelp = Join-Path $PSScriptRoot '../output/en-US/fullscreen.dll-Help.xml'
-        $binaryHelp = Join-Path $PSScriptRoot '../output/lib/en-US/fullscreen.dll-Help.xml'
-        (Get-FileHash $rootHelp).Hash | Should -Be (Get-FileHash $binaryHelp).Hash
+    It 'Packages a single help file at the module root' {
+        $output = Join-Path $PSScriptRoot '../output'
+        Join-Path $output 'en-US/fullscreen.dll-Help.xml' | Should -Exist
+        Join-Path $output 'lib/en-US' | Should -Not -Exist
+        Join-Path $output 'LICENSE' | Should -Not -Exist
+        @(Get-ChildItem $output -Filter '*.xml' -File -Recurse).Count | Should -Be 1
         @(Get-ChildItem (Join-Path $PSScriptRoot '../docs/en-US') -Filter '*.md').Count | Should -Be 17
     }
 

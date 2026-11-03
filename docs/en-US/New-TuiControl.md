@@ -30,7 +30,7 @@ None.
 
 ## DESCRIPTION
 
-Builds an independent PSCustomObject containing a validated control node. Combine it with other controls using Child, or place it in New-TuiDefinition and Invoke-Tui. Property contains control-specific options listed by Get-TuiControl; it cannot override named base parameters. No XenoAtom types cross the private ALC boundary. Creating definitions does not perform file operations or start workers.
+Builds an independent PSCustomObject containing a validated control node. Combine it with other controls using Child, or place it in New-TuiDefinition and Invoke-Tui. Property contains control-specific options listed by Get-TuiControl; it cannot override named base parameters. Creating definitions does not access files or start background work.
 
 Common styling properties include Foreground and Background (#RRGGBB or empty for
 the theme), Bold for text labels, HorizontalAlignment and VerticalAlignment
@@ -92,7 +92,7 @@ New-TuiDefinition -Title 'Workbench' -Root $stack -State @{ source = 'Get-Proces
 
 ### Example 4: Reuse the file browser and monitor in tabs
 
-Workers start only when their component is displayed and stop when hidden or closed.
+Each component starts collecting data only while it is displayed and stops when hidden or closed.
 
 ```powershell
 $files = New-TuiControl FileBrowser -Id files -Property @{ Path = $PWD.Path; Height = 24 }
@@ -290,7 +290,7 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 
 ### System.Management.Automation.PSObject
 
-Builds an independent PSCustomObject containing a validated control node. Combine it with other controls using Child, or place it in New-TuiDefinition and Invoke-Tui. Property contains control-specific options listed by Get-TuiControl; it cannot override named base parameters. No XenoAtom types cross the private ALC boundary. Creating definitions does not perform file operations or start workers.
+Builds an independent PSCustomObject containing a validated control node. Combine it with other controls using Child, or place it in New-TuiDefinition and Invoke-Tui. Property contains control-specific options listed by Get-TuiControl; it cannot override named base parameters. Creating definitions does not access files or start background work.
 
 ## NOTES
 

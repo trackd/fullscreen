@@ -28,10 +28,15 @@ Describe 'CI ownership and release boundaries' {
         $codeOwnersContent = Get-Content -LiteralPath (Join-Path $projectRoot '.github/CODEOWNERS') -Raw
     }
 
-    It 'Assigns CI, release metadata and build configuration to trackd' {
-        foreach ($pattern in @('/.github/', '/build.ps1', '/*.build.ps1', '*.csproj', '*.props', '*.targets', '/global.json', 'NuGet.Config', 'nuget.config', '/.config/dotnet-tools.json', '/module/fullscreen.psd1')) {
+    It 'Assigns CI and project builds to trackd without the excluded configuration rules' {
+        foreach ($pattern in @('/.github/', '/build.ps1', '/*.build.ps1', '*.csproj')) {
             $codeOwnersContent | Should -Match ('(?m)^' + [regex]::Escape($pattern) + '\s+@trackd\s*$')
         }
+        foreach ($pattern in @('*.props', '*.targets', '/global.json', 'NuGet.Config', 'nuget.config', '/.config/dotnet-tools.json', '/module/fullscreen.psd1', '/.gitmodules')) {
+            $codeOwnersContent | Should -Not -Match ('(?m)^' + [regex]::Escape($pattern) + '\s+')
+        }
+        $codeOwnersContent | Should -Match '(?m)^# Changes to CI, release and build configuration require the repository owner''s review\.\r?$'
+        $codeOwnersContent | Should -Match '(?m)^# Enforcement requires a branch rule with "Require review from Code Owners" enabled\.\r?$'
     }
 
     It 'Restricts the <JobName> release job to the canonical repository and default branch' -ForEach @(

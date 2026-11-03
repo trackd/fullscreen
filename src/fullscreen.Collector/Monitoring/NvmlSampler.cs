@@ -10,15 +10,23 @@ internal sealed class NvmlSampler : IDisposable {
     private readonly string[] _names = new string[32];
     private bool _initialized;
     private readonly int _count;
+    internal CollectorCapabilities Capabilities { get; private set; }
     internal unsafe NvmlSampler() {
         _api = Driver.Value;
-        if (_api is null || _api.Init() != 0) {
+        if (_api is null) {
+            return;
+        }
+        Capabilities = CollectorCapabilities.DeviceGraphics;
+        if (_api.Init() != 0) {
             return;
         }
 
         _initialized = true;
         if (_api.Count(out uint count) != 0) {
             return;
+        }
+        if (count == 0) {
+            Capabilities = CollectorCapabilities.None;
         }
 
         byte[] name = new byte[128];
@@ -43,11 +51,21 @@ internal sealed class NvmlSampler : IDisposable {
             return;
         }
 
+        if (_count > 0) {
+            Capabilities = CollectorCapabilities.None;
+        }
         for (int i = 0; i < _count; i++) {
             nint device = _devices[i];
-            double? busy = _api!.Utilization(device, out Utilization value) == 0 ? value.Gpu : null;
-            bool hasMemory = _api.Memory(device, out Memory memory) == 0;
-            double? temperature = _api.Temperature(device, 0, out uint temp) == 0 ? temp : null;
+            int utilizationStatus = _api!.Utilization(device, out Utilization value);
+            int memoryStatus = _api.Memory(device, out Memory memory);
+            int temperatureStatus = _api.Temperature(device, 0, out uint temp);
+            // NVML_ERROR_NOT_SUPPORTED is structural; permissions and temporary errors are not.
+            if (utilizationStatus != 3) { Capabilities |= CollectorCapabilities.GpuUtilization; }
+            if (memoryStatus != 3) { Capabilities |= CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory; }
+            if (temperatureStatus != 3) { Capabilities |= CollectorCapabilities.GpuTemperature; }
+            double? busy = utilizationStatus == 0 ? value.Gpu : null;
+            bool hasMemory = memoryStatus == 0;
+            double? temperature = temperatureStatus == 0 ? temp : null;
             frame.Gpus = CollectorFrame.EnsureCapacity(frame.Gpus, frame.GpuCount + 1);
             frame.Gpus[frame.GpuCount++] = new(
                 _names[i],

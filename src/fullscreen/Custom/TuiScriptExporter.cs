@@ -2,9 +2,25 @@ using System.Globalization;
 using System.Text;
 
 namespace fullscreen.Custom;
-/// <summary>Executable scaffolding is exported separately from the data-only layout contract.</summary>
+/// <summary>Exports runnable scaffolding while preserving existing application scripts.</summary>
 public static class TuiScriptExporter {
-    /// <summary>Writes a runnable PowerShell TUI script and optionally a linked layout file.</summary>
+    /// <summary>Gets the script and optional layout paths for an export.</summary>
+    /// <param name="path">The requested .ps1, .psd1 or .json export path.</param>
+    /// <param name="linkedLayout">Whether a .ps1 export uses a sibling .tui.psd1 file.</param>
+    /// <returns>The script path and optional linked layout path.</returns>
+    public static (string Script, string? Layout) Paths(string path, bool linkedLayout = false) {
+        string target = Path.GetFullPath(path);
+        string extension = Path.GetExtension(target);
+        if (extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase)) {
+            return (target, linkedLayout ? Path.ChangeExtension(target, ".tui.psd1") : null);
+        }
+        if (extension.Equals(".psd1", StringComparison.OrdinalIgnoreCase) || extension.Equals(".json", StringComparison.OrdinalIgnoreCase)) {
+            return (Path.ChangeExtension(target, ".ps1"), target);
+        }
+        throw new ArgumentException("Export to a .ps1, .psd1 or .json path.");
+    }
+
+    /// <summary>Writes a scaffold or linked definition without overwriting existing scripts.</summary>
     /// <param name="document">The layout document to validate, render, or serialize.</param>
     /// <param name="path">The filesystem or resource path.</param>
     /// <param name="linkedLayout">Whether to write a separate layout file loaded by the script. Defaults to
@@ -16,32 +32,52 @@ public static class TuiScriptExporter {
         string path,
         bool linkedLayout = false,
         bool overwriteLayout = false
-    ) {
-        string target = Path.GetFullPath(path);
-        if (!Path.GetExtension(target).Equals(".ps1", StringComparison.OrdinalIgnoreCase)) {
-            throw new ArgumentException("Export scripts to a .ps1 path.");
-        }
+    ) => Export(document, path, linkedLayout, overwriteLayout, createScript: true);
 
-        if (!linkedLayout) {
-            TuiDocument.WriteAtomic(target, Generate(document));
+    /// <summary>Exports a scaffold or definition with optional companion generation.</summary>
+    /// <param name="document">The validated layout to export.</param>
+    /// <param name="path">The requested .ps1, .psd1 or .json path.</param>
+    /// <param name="linkedLayout">Whether a .ps1 export uses a sibling layout.</param>
+    /// <param name="overwriteLayout">Whether existing layout data may be replaced.</param>
+    /// <param name="createScript">Whether to create a missing scaffold.</param>
+    public static void Export(
+        TuiDocument document,
+        string path,
+        bool linkedLayout,
+        bool overwriteLayout,
+        bool createScript
+    ) {
+        var (script, layout) = Paths(path, linkedLayout);
+        if (layout is null) {
+            if (!createScript) {
+                throw new ArgumentException("A .ps1 export requires a script. Use .psd1 or .json for a data-only export.");
+            }
+            if (File.Exists(script)) {
+                throw new IOException($"Script '{script}' already exists and will not be overwritten. Choose a new .ps1 path, or export a .psd1 or .json layout with its own companion script.");
+            }
+            TuiDocument.WriteAtomic(script, Generate(document), overwrite: false);
             return;
         }
 
-        string layout = Path.ChangeExtension(target, ".tui.psd1"), name = Path.GetFileName(layout);
+        if (!createScript && linkedLayout) {
+            throw new ArgumentException("LinkedLayout cannot be combined with Script:$false.");
+        }
+        string name = Path.GetFileName(layout);
         string marker = "# Fullscreen linked layout: " + System.Management.Automation.Language.CodeGeneration.EscapeSingleQuotedStringContent(name);
-        bool exists = File.Exists(target);
-        if (exists && !File.ReadLines(target).Contains(marker, StringComparer.Ordinal)) {
+        bool exists = File.Exists(script);
+        bool scriptTarget = Path.GetExtension(path).Equals(".ps1", StringComparison.OrdinalIgnoreCase);
+        if (scriptTarget && exists && !File.ReadLines(script).Contains(marker, StringComparer.Ordinal)) {
             throw new IOException("The existing script is not linked to this layout. Choose a new .ps1 path to preserve its code.");
         }
 
-        if (!exists && File.Exists(layout) && !overwriteLayout) {
-            throw new IOException($"Layout '{layout}' already exists. Choose another script path or explicitly approve replacing the layout.");
+        if (File.Exists(layout) && !overwriteLayout) {
+            throw new IOException($"Layout '{layout}' already exists. Use Force or explicitly approve replacing the layout.");
         }
 
-        string script = Generate(document, name);
-        document.Save(layout);
-        if (!exists) {
-            TuiDocument.WriteAtomic(target, script);
+        string? source = createScript && !exists ? Generate(document, name) : null;
+        document.Save(layout, overwriteLayout);
+        if (source is not null) {
+            TuiDocument.WriteAtomic(script, source, overwrite: false);
         }
     }
 
@@ -99,9 +135,9 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not (Get-Module fullscreen)) { Import-Module fullscreen -ErrorAction Stop }
 
-# Linked exports load a sibling PSD1. Re-exporting updates that layout and keeps
-# this script intact. Inline exports embed the layout below; export future inline
-# edits to a new script and copy the definition to preserve custom handlers.
+# Linked exports load a sibling PSD1 or JSON file. Re-exporting updates that layout
+# and keeps this script intact. Inline exports embed the layout below; export future
+# inline edits to a new script and copy the definition to preserve custom handlers.
 $definition =
 
 """);

@@ -155,6 +155,11 @@ public sealed class TableModel(string[] columns) {
     /// <summary>Selects a visible table row and adjusts the scroll offset.</summary>
     /// <param name="index">The zero-based entry index.</param>
     /// <param name="height">The number of visible body rows.</param>
+    public void ScrollTo(int offset, int height) {
+        Offset = Math.Clamp(offset, 0, Math.Max(0, Visible.Count - height));
+        Selected = Math.Clamp(Selected, Offset, Math.Min(Math.Max(0, Visible.Count - 1), Offset + height - 1));
+    }
+
     public void Select(int index, int height) {
         Selected = Math.Clamp(index, 0, Math.Max(0, Visible.Count - 1));
         height = Math.Max(1, height);

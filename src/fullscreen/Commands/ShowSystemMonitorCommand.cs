@@ -8,6 +8,15 @@ using fullscreen.Charts;
 namespace fullscreen.Commands;
 
 internal static class RemoteSessionOptions {
+    internal static ErrorRecord Failure(Exception error, object? target) {
+        if (error is ActionPreferenceStopException stopped && stopped.ErrorRecord is { } original) {
+            return new ErrorRecord(original.Exception, original.FullyQualifiedErrorId, original.CategoryInfo.Category, original.TargetObject ?? target) {
+                ErrorDetails = original.ErrorDetails
+            };
+        }
+        return new ErrorRecord(error, "FullscreenMonitorFailed", ErrorCategory.ResourceUnavailable, target);
+    }
+
     internal static Hashtable Build(string computerName, object? credential, string? configurationName) {
         var options = new Hashtable {
             ["ComputerName"] = computerName,
@@ -41,6 +50,12 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
     [ValidateRange(100, 60000)]
     public int SampleInterval { get; set; } = 1000;
 
+    /// <summary>Keep CPU, memory, network and GPU dashboard histories current while viewing other tabs,
+    /// including in minimal mode. Uses SampleInterval and stops while paused. Adds sampling cost and
+    /// remote traffic; does not collect hidden services, sessions or extra per-process counters.</summary>
+    [Parameter]
+    public SwitchParameter BackgroundSampling { get; set; }
+
     /// <summary>Initial case-insensitive name, PID or username substring. Press / to edit and Enter to
     /// finish. Escape clears the search and active table&apos;s column filters; Ctrl+U clears only the
     /// search text and keeps editing when the search is open. Header dropdown filters combine with this
@@ -51,7 +66,7 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
 
     /// <summary>Cpu, Memory, Id, Name, Threads, Gpu, GpuMemory, UserName, ParentId, CpuTime, Status, Disk
     /// or Network. Default Cpu. Use SortBy Memory to sort processes by memory usage. Missing counters stay
-    /// last in either direction.</summary>
+    /// last in either direction. In Users, sorts account totals and the processes within each expanded account.</summary>
     [Parameter]
     public ProcessSort SortBy { get; set; } = ProcessSort.Cpu;
 
@@ -59,7 +74,8 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
     /// Processes. Keys 1 through 6 switch to Processes, Services, Network, GPU, Users and Dashboard
     /// respectively. F8 also opens Users. Processes is the default. Press A or right-click a
     /// process/service for confirmed actions. Service headers provide sorting and column filters; F6 cycles
-    /// sort columns and R reverses. P pauses; Q or Ctrl+Q exits.</summary>
+    /// sort columns and R reverses. The Users view groups named Windows WTS sessions in any state, including disconnected sessions.
+    /// P pauses; Q or Ctrl+Q exits. Q or Escape closes help and read-only dialogs without exiting.</summary>
     [Parameter]
     [MonitorViewTransformation]
     public MonitorView View { get; set; } = MonitorView.Processes;
@@ -87,8 +103,10 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
 
     /// <summary>Ordered process columns. Id, ParentId, UserName, Cpu, Memory, MemoryPercent, Gpu,
     /// GpuMemory, Threads, Name, CpuTime, Status, Disk, Network. CpuTime is cumulative CPU time and is off
-    /// by default. Unsupported disk/network columns are hidden. C opens the current table column
-    /// chooser.</summary>
+    /// by default. Defaults to Name, UserName, Cpu, Memory, Network, Gpu, Threads, Id. Columns unsupported
+    /// by the target are hidden; supported counters with missing samples show as unknown.
+    /// C opens the chooser; Left/Right scrolls fixed-width overflow columns
+    /// (Shift+Left/Right in tree mode). D opens details, including command-line arguments.</summary>
     [Parameter]
     [ValidateNotNullOrEmpty]
     public ProcessColumn[]? Column { get; set; }
@@ -184,7 +202,8 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
                 ExcludeNetworkColumn,
                 GpuColumn,
                 ExcludeGpuColumn,
-                Minimal.IsPresent
+                Minimal.IsPresent,
+                backgroundSampling: BackgroundSampling.IsPresent
             );
             app.GraphType = GraphType;
             FullscreenHost.Run(app, PipelineStopToken, ResolveTheme(), Minimal.IsPresent, ChartRenderer);
@@ -193,7 +212,7 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
             throw;
         }
         catch (Exception error) {
-            ThrowTerminatingError(new ErrorRecord(error, "FullscreenMonitorFailed", ErrorCategory.ResourceUnavailable, null));
+            ThrowTerminatingError(RemoteSessionOptions.Failure(error, ComputerName ?? (object?)Session));
         }
         finally {
             if (ownedSession is not null) {

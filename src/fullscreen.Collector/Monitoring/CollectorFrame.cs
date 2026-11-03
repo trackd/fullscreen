@@ -35,9 +35,9 @@ public readonly record struct GpuRow(
 );
 /// <summary>Stores a service&apos;s display metadata and optional process ownership.</summary>
 /// <param name="Name">The display name.</param>
-/// <param name="Description">The human-readable description.</param>
+/// <param name="Description">The Windows display name or platform service description.</param>
 /// <param name="State">The state exposed to the current view or callback.</param>
-/// <param name="Detail">The additional display text for the row.</param>
+/// <param name="Detail">Additional platform state details, empty for Windows services.</param>
 /// <param name="ProcessId">The associated process identifier, or null when unavailable.</param>
 /// <param name="UserName">The account name associated with the session or process. Defaults to null.</param>
 public readonly record struct ServiceRow(
@@ -80,13 +80,18 @@ public readonly record struct UserSessionRow(
     DateTimeOffset? DisconnectTime = null,
     string ClientName = "",
     string Protocol = ""
-);
+) {
+    /// <summary>Gets whether this WTS row has a named user outside the services session.</summary>
+    public bool IsNamedWindowsSession => SessionId > 0 && !string.IsNullOrWhiteSpace(UserName);
+}
 /// <summary>Reusable snapshot. Counts delimit valid array entries; arrays never escape the source's gate.</summary>
 public sealed class CollectorFrame {
     /// <summary>Gets or sets the machine that produced the snapshot.</summary>
     public string MachineName { get; set; } = "";
     /// <summary>Gets or sets the operating-system label reported by the collector.</summary>
     public string Platform { get; set; } = "";
+    /// <summary>Gets or sets the collector host's supported optional columns; null means not yet reported.</summary>
+    public CollectorCapabilities? Capabilities { get; set; }
     /// <summary>Gets or sets the timestamp of metric capture.</summary>
     public DateTimeOffset CapturedAt { get; set; }
     /// <summary>Gets or sets the CPU utilization percentage.</summary>
@@ -140,6 +145,7 @@ public sealed class CollectorFrame {
     public void CopyFrom(CollectorFrame other) {
         MachineName = other.MachineName;
         Platform = other.Platform;
+        Capabilities = other.Capabilities;
         CapturedAt = other.CapturedAt;
         CpuPercent = other.CpuPercent;
         TotalMemory = other.TotalMemory;

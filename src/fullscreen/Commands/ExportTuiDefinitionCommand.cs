@@ -1,10 +1,9 @@
 using System.Collections;
 using System.Management.Automation;
 using fullscreen.Custom;
-using IOPath = System.IO.Path;
 
 namespace fullscreen.Commands;
-/// <summary>Validate and save a native PowerShell TUI definition.</summary>
+/// <summary>Export a TUI application scaffold or a layout with a companion script.</summary>
 [Cmdlet(VerbsData.Export, "TuiDefinition", SupportsShouldProcess = true)]
 [OutputType(typeof(PSObject))]
 public sealed class ExportTuiDefinitionCommand : TuiDefinitionCommand {
@@ -13,8 +12,8 @@ public sealed class ExportTuiDefinitionCommand : TuiDefinitionCommand {
     [ValidateNotNull]
     public PSObject Definition { get; set; } = null!;
 
-    /// <summary>Literal output FileSystem path; LiteralPath is an alias. Existing files are replaced
-    /// atomically after ShouldProcess approves the write.</summary>
+    /// <summary>Literal .ps1, .psd1 or .json output path; LiteralPath is an alias. Scripts are never
+    /// overwritten. Replacing layout data requires Force.</summary>
     [Parameter(Mandatory = true, Position = 1, ValueFromPipelineByPropertyName = true)]
     [Alias("LiteralPath")]
     [ValidateNotNullOrEmpty]
@@ -25,39 +24,41 @@ public sealed class ExportTuiDefinitionCommand : TuiDefinitionCommand {
     [Parameter]
     public SwitchParameter PassThru { get; set; }
 
-    /// <summary>Export runnable, commented PowerShell scaffolding. Without LinkedLayout, the script embeds
-    /// a native hashtable and needs no external layout file. With LinkedLayout, it loads a sibling
-    /// .tui.psd1 and later exports preserve custom handlers.</summary>
+    /// <summary>Retained for compatibility; scaffolding is now created by default. Use Script:$false
+    /// with .psd1 or .json to export only layout data.</summary>
     [Parameter]
     public SwitchParameter Script { get; set; }
 
-    /// <summary>With Script, export a runnable .ps1 that loads a sibling .tui.psd1 layout. Later exports
-    /// update the layout and preserve the linked script byte for byte. An unrelated existing script is
-    /// rejected. Without LinkedLayout, Script embeds the layout inline. All individual file writes use
-    /// temporary-file replacement.</summary>
+    /// <summary>For .ps1, load a sibling .tui.psd1 instead of embedding the layout. Data-file exports
+    /// already use a companion script. Existing linked scripts are preserved byte for byte.</summary>
     [Parameter]
     public SwitchParameter LinkedLayout { get; set; }
+
+    /// <summary>Allow replacement of existing layout data. Never overwrites application scripts and
+    /// never bypasses WhatIf or Confirm.</summary>
+    [Parameter]
+    public SwitchParameter Force { get; set; }
 
     /// <inheritdoc/>
     protected override void ProcessRecord() {
         try {
             var document = TuiDocument.FromObject(Definition);
             string target = ResolvePath(Path);
-            if (LinkedLayout.IsPresent && !Script.IsPresent) {
-                throw new ArgumentException("LinkedLayout requires Script.");
+            bool createScript = !MyInvocation.BoundParameters.ContainsKey(nameof(Script)) || Script.IsPresent;
+            var (script, layout) = TuiScriptExporter.Paths(target, LinkedLayout.IsPresent);
+            if (!createScript && (layout is null || LinkedLayout.IsPresent)) {
+                throw new ArgumentException("Script:$false requires a .psd1 or .json path without LinkedLayout.");
             }
-
-            string outputs = LinkedLayout.IsPresent ? target +
-                " and " + IOPath.ChangeExtension(target, ".tui.psd1") : target;
+            string outputs = layout is null ? script : layout +
+                (createScript && !File.Exists(script) ? " and new companion script " + script : "");
             if (ShouldProcess(
                 outputs,
-                Script.IsPresent ? "Export commented PowerShell TUI scaffold" : "Save TUI definition"
+                layout is null ? "Create commented PowerShell TUI scaffold" :
+                    "Save TUI definition (existing scripts are preserved)"
             )) {
-                if (Script.IsPresent) {
-                    TuiScriptExporter.Export(document, target, LinkedLayout.IsPresent, overwriteLayout: true);
-                }
-                else {
-                    document.Save(target);
+                TuiScriptExporter.Export(document, target, LinkedLayout.IsPresent, Force.IsPresent, createScript);
+                if (createScript && layout is not null && File.Exists(script)) {
+                    WriteVerbose($"Scaffold '{script}' is available; existing scripts are preserved. Edit its Handler and OnTick blocks to add behavior.");
                 }
 
                 if (PassThru.IsPresent) {

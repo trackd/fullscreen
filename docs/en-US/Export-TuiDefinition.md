@@ -13,14 +13,14 @@ title: Export-TuiDefinition
 
 ## SYNOPSIS
 
-Validate and save a native PowerShell TUI definition.
+Export a TUI application scaffold or a layout with a companion script.
 
 ## SYNTAX
 
 ### __AllParameterSets
 
 ```
-Export-TuiDefinition [-Definition] <psobject> [-Path] <string> [-PassThru] [-Script] [-LinkedLayout] [-WhatIf] [-Confirm]
+Export-TuiDefinition [-Definition] <psobject> [-Path] <string> [-PassThru] [-Script] [-LinkedLayout] [-Force] [-WhatIf] [-Confirm]
  [<CommonParameters>]
 ```
 
@@ -31,30 +31,43 @@ None.
 
 ## DESCRIPTION
 
-Writes versioned layout data atomically as UTF-8 without a BOM.
-Paths ending in .psd1 select a native PowerShell data file; other paths retain JSON output.
-PSD1 exports contain literal hashtables, arrays and scalar values and can be read
-with Import-TuiDefinition or Import-PowerShellDataFile (SkipLimitCheck for large layouts).
-Accepts a hashtable, PSCustomObject or JSON definition and preserves the original input object.
-Supports WhatIf and Confirm.
-The parent directory must exist.
-No terminal opens and no handlers run.
-With Script, writes a runnable PowerShell script with an event stub for each
-control event, a shared state dictionary and a periodic-update stub. The default
-script embeds its layout; exporting over an existing inline script replaces it.
-Inline scaffolds omit default control properties while preserving IDs, types,
-nondefault settings and all state defaults. Generated scripts accept Theme,
+Exports a validated layout as UTF-8 to the required literal Path. The extension
+chooses the output: .ps1 creates a runnable script with the layout embedded;
+.psd1 or .json saves layout data and creates a same-stem .ps1 companion if missing.
+For example, MyTool.tui.json creates MyTool.tui.ps1, which loads that exact JSON
+file. PSD1 files can also be read with Import-PowerShellDataFile (use
+SkipLimitCheck for large layouts). The parent directory must exist. No terminal
+opens and no handlers run during export.
+
+Scaffolds include help, shared state, control-event stubs and an OnTick callback.
+Edit the .ps1 to add application behavior. Generated scripts accept Theme,
 Minimal, State, TickInterval and DefinitionOnly. Runtime State overrides layout
-defaults; DefinitionOnly returns portable data without applying live overrides.
-Add LinkedLayout to put layout data in a sibling .tui.psd1 instead. Later linked
-exports update that data and preserve the script byte for byte. An unrelated
-existing script is rejected in linked mode.
-WhatIf and Confirm identify both the script and sibling layout in linked mode.
-An approved linked export can replace an existing sibling layout; use WhatIf
-or Confirm when reviewing the target paths. Each file is replaced atomically;
-the script and layout are separate writes.
+defaults; DefinitionOnly returns the layout without running the UI.
+
+For .ps1 exports, LinkedLayout uses a sibling .tui.psd1 instead of embedding
+the layout. Data-file exports are already linked to their companion. Script
+remains accepted for compatibility but is no longer required; use Script:$false
+with .psd1 or .json when you want data only.
+
+Existing scripts are never overwritten, even with Force. Re-exporting layout data
+requires Force; existing companion scripts keep all custom code. An inline .ps1
+cannot be re-exported to the same path: choose a new path and transfer the layout
+edits yourself, or use a linked layout for future updates. A linked .ps1 export
+rejects an existing script that is not linked to its expected layout.
+Existing companions are preserved as-is, so if one loads a different definition,
+update its import path yourself. WhatIf changes nothing; Confirm shows the
+affected targets. PassThru returns the validated definition only after saving.
 
 ## EXAMPLES
+
+### Export a self-contained application
+
+The script contains the layout, help and event/update stubs to customize.
+
+```powershell
+New-TuiDefinition -Title 'My tool' | Export-TuiDefinition -Path ./MyTool.ps1
+./MyTool.ps1 -DefinitionOnly | Show-TuiDesigner
+```
 
 ### Export a portable PowerShell data file
 
@@ -62,52 +75,42 @@ the script and layout are separate writes.
 $layout = New-TuiDefinition -Root @{ Id = 'hello'; Type = 'Text'; Text = 'Hello' }
 $layout | Export-TuiDefinition -Path ./MyTool.tui.psd1
 $layout = Import-PowerShellDataFile -LiteralPath ./MyTool.tui.psd1
-$layout | Invoke-Tui
+./MyTool.tui.ps1
 ```
 
 ### Export a commented application scaffold
 
 ```powershell
 New-TuiDefinition -Title 'My tool' |
-    Export-TuiDefinition -Path ./MyTui.ps1 -Script -LinkedLayout
+    Export-TuiDefinition -Path ./MyTui.ps1 -LinkedLayout
 ./MyTui.ps1 -DefinitionOnly | Show-TuiDesigner
 ./MyTui.ps1 -Minimal -State @{ name = 'Ada' } -TickInterval 500
 ```
 
-### Example 1: Save a starter form
+### Update a layout without changing application code
 
-The parent directory must already exist.
+Force replaces only the layout file. MyTool.tui.ps1 remains unchanged.
+WhatIf previews both the target and operation without changing files.
 
 ```powershell
-New-TuiDefinition -Title 'My tool' | Export-TuiDefinition -Path ./tool.tui.json
+$edited | Export-TuiDefinition -Path ./MyTool.tui.psd1 -Force -WhatIf
+$saved = $edited | Export-TuiDefinition -Path ./MyTool.tui.psd1 -Force -PassThru
 ```
 
-### Example 2: Preview a save
-
-WhatIf validates the definition and skips the file write.
+### Export layout data without a scaffold
 
 ```powershell
-New-TuiDefinition | Export-TuiDefinition -Path ./tool.tui.json -WhatIf
-```
-
-### Example 3: Save and retain the validated definition
-
-PassThru returns a native definition after the atomic save.
-
-```powershell
-$layout = New-TuiDefinition |
-    Export-TuiDefinition -LiteralPath './tool[1].tui.json' -PassThru
-$layout | Invoke-Tui
+$layout | Export-TuiDefinition -Path ./layout.json -Script:$false
 ```
 
 ## PARAMETERS
 
 ### -LinkedLayout
 
-With Script, export a runnable .ps1 that loads a sibling .tui.psd1 layout.
-Later exports update the layout and preserve the linked script byte for byte.
-An unrelated existing script is rejected. Without LinkedLayout, Script embeds
-the layout inline. All individual file writes use temporary-file replacement.
+For a .ps1 path, load a sibling .tui.psd1 instead of embedding the layout.
+Script is not required. Data-file exports already use a companion script.
+Existing linked scripts remain unchanged; replacing layout data requires Force.
+Cannot be combined with Script:$false.
 
 ```yaml
 Type: System.Management.Automation.SwitchParameter
@@ -128,9 +131,28 @@ HelpMessage: ''
 
 ### -Script
 
-Export runnable, commented PowerShell scaffolding. Without LinkedLayout, the script
-embeds a native hashtable and needs no external layout file. With LinkedLayout,
-it loads a sibling .tui.psd1 and later exports preserve custom handlers.
+Retained for compatibility; scaffolding is now created by default according to
+the output extension. Use -Script:$false with .psd1 or .json to export data only,
+without creating a companion script. Existing scripts remain unchanged.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+```
+
+### -Force
+
+Allow replacement of existing layout data. Never overwrites application scripts
+and never bypasses WhatIf or Confirm.
 
 ```yaml
 Type: System.Management.Automation.SwitchParameter
@@ -214,8 +236,9 @@ HelpMessage: ''
 
 ### -Path
 
-Literal output FileSystem path; LiteralPath is an alias.
-Existing files are replaced atomically after ShouldProcess approves the write.
+Required literal .ps1, .psd1 or .json FileSystem path; LiteralPath is an alias.
+There is no default filename. Scripts are never overwritten. Use Force to replace
+existing layout data and WhatIf or Confirm to review the affected targets.
 
 ```yaml
 Type: System.String

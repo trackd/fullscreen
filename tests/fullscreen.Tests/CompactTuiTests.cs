@@ -38,6 +38,18 @@ public sealed class CompactTuiTests {
         Assert.IsFalse(app.Tick());
     }
     [TestMethod]
+    public async Task SharedCloseRemainsClickableOutsideAnOpenModal() {
+        using var app = new TestApp();
+        var chrome = new FullscreenChrome(app, ThemePalette.Default);
+        await using var ui = new DesignerUxTests.UiSession(chrome, () => app.Tick(), 100, 40);
+        var dialog = new Dialog { Content = new TextBlock("Modal overlay"), IsModal = true, Width = 100, Height = 40 };
+        dialog.Show();
+        ui.Tick();
+        ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, chrome.CloseBounds.X + 1, chrome.CloseBounds.Y, () => app.Closed);
+        Assert.IsTrue(app.Closed);
+    }
+
+    [TestMethod]
     public void ClosingChartCancelsPassThru() {
         using var app = new ObjectChartApp([PSObject.AsPSObject(3)]);
         app.Surface.PassThru = true;

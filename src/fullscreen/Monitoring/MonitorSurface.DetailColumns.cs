@@ -56,6 +56,8 @@ public sealed partial class MonitorSurface {
     private readonly bool[] _networkColumns = [true, true, true, true, true, true, true];
     private readonly bool[] _gpuColumns = [true, true, true, true, true, true];
     private readonly List<ProcessColumn> _pickerProcesses = [];
+    private readonly List<GpuColumn> _pickerGpu = [];
+    private CollectorCapabilities? _pickerCapabilities;
     private MonitorView _pickerView;
     /// <summary>Checks whether a detail-table column is currently shown.</summary>
     /// <param name="column">The table column to read or configure.</param>
@@ -66,7 +68,7 @@ public sealed partial class MonitorSurface {
     /// <param name="column">The table column to read or configure.</param>
     /// <returns>True when the column is visible.</returns>
     public bool IsColumnVisible(GpuColumn column) =>
-        _gpuColumns[(int)column];
+        _gpuColumns[(int)column] && AvailableColumn(column);
     /// <summary>Applies included and excluded columns for network and GPU views.</summary>
     /// <param name="network">The network-interface columns included in display.</param>
     /// <param name="excludedNetwork">The network-interface columns excluded from display.</param>
@@ -113,7 +115,7 @@ public sealed partial class MonitorSurface {
         next.CopyTo(selected, 0);
     }
 
-    private int PickerCount => _pickerView == MonitorView.Network ? NetworkColumnNames.Length : _pickerView == MonitorView.Gpu ? GpuColumnNames.Length : _pickerProcesses.Count;
+    private int PickerCount => _pickerView == MonitorView.Network ? NetworkColumnNames.Length : _pickerView == MonitorView.Gpu ? _pickerGpu.Count : _pickerProcesses.Count;
     private string PickerTitle => _pickerView switch {
         MonitorView.Network => "NETWORK COLUMNS",
         MonitorView.Gpu => "GPU COLUMNS",
@@ -121,9 +123,9 @@ public sealed partial class MonitorSurface {
     };
 
     private string PickerName(int index) =>
-        _pickerView == MonitorView.Network ? NetworkColumnNames[index] : _pickerView == MonitorView.Gpu ? GpuColumnNames[index] : _pickerProcesses[index].ToString();
+        _pickerView == MonitorView.Network ? NetworkColumnNames[index] : _pickerView == MonitorView.Gpu ? _pickerGpu[index].ToString() : _pickerProcesses[index].ToString();
     private bool PickerContains(int index) =>
-        _pickerView == MonitorView.Network ? _networkColumns[index] : _pickerView == MonitorView.Gpu ? _gpuColumns[index] : ColumnSettings.Contains(_pickerProcesses[index]);
+        _pickerView == MonitorView.Network ? _networkColumns[index] : _pickerView == MonitorView.Gpu ? _gpuColumns[(int)_pickerGpu[index]] : ColumnSettings.Contains(_pickerProcesses[index]);
     /// <summary>Opens the column-selection interface for the current view.</summary>
     public void OpenColumns() {
         if (View is MonitorView.Dashboard or MonitorView.Services) {
@@ -132,22 +134,31 @@ public sealed partial class MonitorSurface {
 
         _pickerView = View;
         _columnPickerIndex = 0;
+        UpdatePickerCapabilities();
+        ColumnsOpen = true;
+        Refresh();
+    }
+
+    private void UpdatePickerCapabilities() {
+        _pickerCapabilities = Frame.Capabilities;
         _pickerProcesses.Clear();
         foreach (var column in Enum.GetValues<ProcessColumn>()) {
             if (AvailableColumn(column)) {
                 _pickerProcesses.Add(column);
             }
         }
-
-        ColumnsOpen = true;
-        Refresh();
+        _pickerGpu.Clear();
+        _pickerGpu.AddRange(Enum.GetValues<GpuColumn>().Where(AvailableColumn));
+        _columnPickerIndex = Math.Clamp(_columnPickerIndex, 0, Math.Max(0, PickerCount - 1));
     }
 
     private void ToggleActiveColumn(int index) {
         if (_pickerView is MonitorView.Network or MonitorView.Gpu) {
             var columns = _pickerView == MonitorView.Network ? _networkColumns : _gpuColumns;
-            if (!columns[index] || columns.Count(x => x) > 1) {
-                columns[index] = !columns[index];
+            int mapped = _pickerView == MonitorView.Gpu ? (int)_pickerGpu[index] : index;
+            int shown = _pickerView == MonitorView.Gpu ? _pickerGpu.Count(column => columns[(int)column]) : columns.Count(x => x);
+            if (!columns[mapped] || shown > 1) {
+                columns[mapped] = !columns[mapped];
             }
         }
         else {

@@ -80,8 +80,10 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
         foreach (var chart in _plots) {
             AttachChild(chart);
         }
+        InitializeUserButtons();
 
         Focusable = true;
+        AutoFocus = true;
         HorizontalAlignment = Align.Stretch;
         VerticalAlignment = Align.Stretch;
     }
@@ -90,15 +92,16 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
     public void Refresh() =>
         Revision++;
     /// <inheritdoc/>
-    protected override int ChildrenCount => _plots.Length;
+    protected override int ChildrenCount => _plots.Length + 2;
 
     /// <inheritdoc/>
     protected override Visual GetChild(int index) =>
-        _plots[index];
+        index < _plots.Length ? _plots[index] : index == _plots.Length ? _markSessionsButton : _logoffSessionsButton;
     /// <inheritdoc/>
     protected override SizeHints MeasureCore(in LayoutConstraints constraints) {
         _ = Revision;
         PrepareCharts(Math.Min(constraints.MaxWidth, 2000), Math.Min(constraints.MaxHeight, 1000));
+        MeasureUserButtons(constraints.MaxWidth, constraints.MaxHeight);
         for (int i = 0; i < _plots.Length; i++) {
             _plots[i].Measure(new Size(_chartBounds[i].Width, _chartBounds[i].Height));
         }
@@ -114,6 +117,7 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
             _plots[i].Measure(new Size(bounds.Width, bounds.Height));
             _plots[i].Arrange(new(finalRect.X + bounds.X, finalRect.Y + bounds.Y, bounds.Width, bounds.Height));
         }
+        ArrangeUserButtons(finalRect);
     }
 
     private void Write(
@@ -156,6 +160,16 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
 
     /// <inheritdoc/>
     protected override void OnKeyDown(KeyEventArgs e) {
+        if (e.Handled) {
+            return;
+        }
+        if (_monitorDialog?.App is not null) {
+            if (e.Key == TerminalKey.Escape || e.Char == TerminalChar.CtrlQ || (!_monitorDialogEditable && e.Char is 'q' or 'Q')) {
+                _monitorDialog.Close();
+            }
+            e.Handled = true;
+            return;
+        }
         if (e.RoutingPhase != RoutingPhase.Preview && e.Key == TerminalKey.F1) {
             ShowHelp();
             e.Handled = true;
@@ -226,11 +240,17 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
             case TerminalKey.Escape:
                 ClearFilter();
                 break;
-            case TerminalKey.Left when Model.Tree && ProcessTable:
+            case TerminalKey.Left when Model.Tree && ProcessTable && (e.Modifiers & TerminalModifiers.Shift) == 0:
                 Dirty |= Model.CollapseSelected(true);
                 break;
-            case TerminalKey.Right when Model.Tree && ProcessTable:
+            case TerminalKey.Right when Model.Tree && ProcessTable && (e.Modifiers & TerminalModifiers.Shift) == 0:
                 Dirty |= Model.CollapseSelected(false);
+                break;
+            case TerminalKey.Left when ProcessTable:
+                ScrollProcessColumns(-1);
+                break;
+            case TerminalKey.Right when ProcessTable:
+                ScrollProcessColumns(1);
                 break;
             case TerminalKey.Enter when Model.Tree && ProcessTable:
                 Dirty |= Model.ToggleSelected();
@@ -267,11 +287,21 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
 
     /// <inheritdoc/>
     protected override void OnTextInput(TextInputEventArgs e) {
+        if (e.Handled || e.RoutingPhase == RoutingPhase.Preview) {
+            return;
+        }
+        if (_monitorDialog?.App is not null) {
+            if (!_monitorDialogEditable && e.Text is "q" or "Q") {
+                _monitorDialog.Close();
+            }
+            e.Handled = true;
+            return;
+        }
         if (ColumnsOpen) {
             if (e.Text == " ") {
                 TogglePickerColumn();
             }
-            else if (e.Text is "c" or "C") {
+            else if (e.Text is "c" or "C" or "q" or "Q") {
                 ColumnsOpen = false;
             }
             else if (e.Text is "d" or "D") {
@@ -302,11 +332,24 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
                     break;
                 case "d":
                 case "D":
+                    if (ProcessTable) {
+                        ShowSelectedProcessDetails();
+                        break;
+                    }
                     if (View != MonitorView.Users) {
                         return;
                     }
 
                     ShowUserDetails();
+                    break;
+                case " " when View == MonitorView.Users:
+                    ToggleSelectedSessions();
+                    break;
+                case "m" or "M" when View == MonitorView.Users:
+                    MarkAllSessions();
+                    break;
+                case "x" or "X" when View == MonitorView.Users:
+                    ShowSessionSelection();
                     break;
                 case "l":
                 case "L":
@@ -557,6 +600,11 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
             return;
         }
         else if (y == TableTop - 1 && ProcessTable) {
+            if (x == 0 || x == Bounds.Width - 1) {
+                ScrollProcessColumns(x == 0 ? -1 : 1);
+                e.Handled = true;
+                return;
+            }
             foreach (ref readonly var header in Columns) {
                 if (x >= header.X + header.Width - 2 && x < header.X + header.Width) {
                     OpenHeaderMenu(header.Kind, e);

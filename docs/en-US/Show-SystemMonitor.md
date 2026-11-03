@@ -24,7 +24,7 @@ Show-SystemMonitor [-RefreshRate <int>] [-SampleInterval <int>] [-Filter <string
  [-SortBy <ProcessSort>] [-View <MonitorView>] [-GraphType <GraphKind>] [-ChartRenderer <ChartRenderer>] [-Tree] [-Column <ProcessColumn[]>]
  [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
- [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal]
+ [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling]
  [<CommonParameters>]
 ```
 
@@ -35,7 +35,7 @@ Show-SystemMonitor -Session <PSSession> [-RefreshRate <int>] [-SampleInterval <i
  [-Filter <string>] [-SortBy <ProcessSort>] [-View <MonitorView>] [-GraphType <GraphKind>] [-ChartRenderer <ChartRenderer>] [-Tree]
  [-Column <ProcessColumn[]>] [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
- [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal]
+ [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling]
  [<CommonParameters>]
 ```
 
@@ -47,7 +47,7 @@ Show-SystemMonitor -ComputerName <string> [-RefreshRate <int>] [-SampleInterval 
  [-Column <ProcessColumn[]>] [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
  [-ExcludeGpuColumn <GpuColumn[]>] [-Credential <pscredential>] [-ConfigurationName <string>]
- [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
+ [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -57,75 +57,75 @@ ftop
 
 ## DESCRIPTION
 
-Shows Processes, Services, Network, GPU, Users and Dashboard views; starts on Processes.
+Opens an interactive system monitor, similar to top or Task Manager, with
+Processes, Services, Network, GPU, Users and Dashboard views; it starts on
+Processes. Use 1-6 to switch views, / to search, C to choose columns, F6 or the
+column headers to sort, R to reverse the sort, T to toggle process trees, G to
+cycle chart styles, P to pause and Q to quit. Header dropdowns filter each column
+together with the search. Press ? for the full key reference. Q closes read-only
+dialogs before quitting; Escape or Ctrl+Q dismisses dialogs, including editable
+filters where Q remains ordinary input.
 
-Users shows account process totals and expandable process rows. L toggles process
-collection, D opens session details, and +/− expands or collapses an account.
-Windows session details include login/idle times, last input, connection times,
-client name and protocol where available. Linux/macOS use who -u; dates without a
-year stay as reported and unavailable fields display as unknown. Session timing
-comes from login records, not from process start times. Custom TUIs can embed
-UserList on its own; its IncludeProcesses property defaults to false.
-Client, idle time and logon time also appear as table columns at 120 columns
-with process totals, or 110 columns with processes hidden. Narrower terminals
-retain selected-account details and D opens the full session list.
-Includes process trees, usernames, status and optional cumulative CPU time.
-Process CPU is normalized to 0-100 percent.
-Header dropdowns sort and filter each table.
-Press A or right-click a process/service for confirmed stop-process or service start/stop/restart actions.
-Graphs use Sixel when supported and XenoAtom line charts otherwise; G cycles Sixel styles.
-Windows disk and TCP/UDP attribution uses ETW when permitted by the current token; unavailable columns are hidden.
-Remote sessions receive collector bytes in memory.
-The same dependency-free .NET Standard 2.0 collector runs on modern targets and Windows PowerShell 5.1 on .NET Framework 4.7.2+.
-The TUI requires PowerShell 7.6+ locally.
+Processes defaults to Name, User, CPU, RSS, Net/s, GPU, Threads and PID, with fixed
+column widths. Left/Right scrolls through overflow columns; in tree mode use
+Shift+Left/Right, or click the header edge arrows. Memory and transfer rates use
+scaled units such as MiB and GiB. Press D or right-click for process details,
+including wrapped command-line arguments. Missing or inaccessible command lines
+show an unavailable message; long command lines are explicitly truncated.
+On macOS, ambiguous padding or an empty first argument also reports unavailable
+so environment variables cannot be mistaken for command-line arguments.
 
-Use 1-6 to select Processes, Services, Network, GPU, Users or Dashboard. Press / to search,
-C to choose the current table's columns, F6 to cycle sort columns, R to reverse,
-T to toggle process trees, P to pause and Q to quit. Header dropdowns combine
-column filters with the global search. G cycles chart styles.
+Users lists accounts with a login session, including disconnected sessions, and
+groups each account's processes with CPU and memory totals. Sorting moves whole
+accounts by their totals and sorts the processes inside each account. Plus/Right
+expands and Minus/Left collapses an account, L toggles process rows, and D shows
+session details such as logon and idle time, client name and protocol. On Linux
+and macOS, sessions come from who -u.
 
-F8 or 5 selects Users; Dashboard is always the final tab (6). Session inventory is collected only while this view is
-selected, cached for five seconds, and transported as structured records from
-the monitored target. Windows uses WTS; Linux/macOS use /usr/bin/who. No
-TerminalSessions module is required. Empty login databases and errors remain
-explicit; process ownership can still be shown without login records.
-Each account groups its known login sessions and owned processes, with CPU and
-RSS totals. Summed RSS includes shared pages. Plus/Right expands, Minus/Left
-collapses; Enter toggles an account or opens actions for a process. A and
-right-click also open confirmed process actions, retaining PID/start-time checks
-and target permissions. Slash filters accounts or child process names/IDs.
-On an account, A or right-click opens session details and a Log off entry for
-each Windows session. Confirmation identifies the account, session ID and target;
-logging off closes that session's applications and can lose unsaved work. The
-target rechecks the account and logon time before requesting logoff. This works
-locally and through the monitored PSSession, using the target account's permissions.
-Sessions with unknown identity and non-Windows targets cannot be logged off here.
-Accounts without login records and unknown process owners are labeled separately;
-processes are grouped by owner, not assigned to an inferred login session.
+In Users, Space marks an account's sessions and M marks or unmarks all visible
+sessions. The shaded Mark all and Log off buttons sit at the right of the Users
+header and support mouse or keyboard activation. Click Log off or press X to select individual sessions, including
+disconnected ones. Mark all and Clear marks are also available in the picker.
+The final confirmation lists the target computer, session count and identities.
+Logoff requires Windows sessions with a verified logon time; changed identities
+are rejected, and each selected session's result is reported separately.
 
-Service actions use the current account's permissions without requesting elevation.
-Windows reads Service Control Manager; Linux lists loaded systemd service units;
-macOS lists launchd jobs in the current bootstrap domain. Missing providers show
-an unavailable state. Service collection runs only while that view is visible,
-at most once every five seconds. Remote service data and actions use the target.
+Services lists Windows services by display name, systemd units on Linux and
+launchd jobs on macOS. Press A or right-click a process, service or account for
+confirmed actions such as stopping a process, starting or restarting a service,
+or logging off a Windows session. Logging off closes that session's applications
+and can lose unsaved work. Actions use your current permissions and never request
+elevation.
 
-CPU percentages measure 0-100 percent of total logical-processor capacity.
-CpuTime sums user and kernel time across threads and can advance faster than wall
-time. RSS includes shared pages; summing process RSS does not measure physical RAM.
-Denied and unsupported counters remain unknown rather than becoming zero.
+CPU is shown as 0-100 percent of total processor capacity. CpuTime adds user and
+kernel time across threads, so it can advance faster than wall time. RSS includes
+shared pages, so summed RSS overstates physical memory use. Values the current
+account cannot read show as unknown. Columns unsupported by the target platform,
+architecture or metric provider are hidden from the table and chooser; supported
+columns remain visible during warm-up or temporary access/sampling failures.
+Remote views use the target computer's capabilities, not the local terminal's.
 
-Use a dedicated remote session that permits in-memory assembly loading. A supplied
-Session stays open after the monitor closes; ComputerName creates and removes its
-own session. The remote collector assembly remains loaded until that process exits.
-Remote sampling failures preserve the last snapshot, display its age and retry
-with bounded backoff. All metrics come from the target.
+Per-process network rates require 64-bit Windows 8 / Server 2012 or later and
+access to kernel tracing. Per-process GPU utilization and memory require Windows
+10 version 1709 or later and an exposed WDDM counter provider. Linux and macOS
+support per-process disk rates but not per-process network or GPU metrics.
+GPU device telemetry is separate: NVIDIA NVML and Linux DRM/sysfs can supply
+device counters without per-process GPU support. Device memory and temperature
+columns depend on the provider. On 32-bit Windows targets, parent PID, process
+state and per-process disk/network rates are unavailable.
 
-Auto selects Sixel or native charts. DRCS chart rendering is disabled; its font
-and encoder code is retained for reuse.
+Use BackgroundSampling to keep CPU, memory, network and GPU dashboard histories
+current while another view is open, including in Minimal mode. Sampling still
+uses SampleInterval and stops while paused or the terminal is too small to
+display the monitor. This increases collection work and remote traffic; it does
+not load hidden service/session lists or additional per-process counters.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+Use ComputerName or Session to monitor a remote computer over PowerShell
+remoting; all metrics and actions then use the remote target. The target can run
+PowerShell 7 or Windows PowerShell 5.1 with .NET Framework 4.7.2 or later, and
+must allow loading assemblies in memory. A Session you supply stays open after
+the monitor closes. If sampling fails, the last data stays visible with its age
+while the monitor retries. Press F12 to toggle the diagnostic overlay.
 
 ## EXAMPLES
 
@@ -157,14 +157,46 @@ try {
 finally { Remove-PSSession -Session $session }
 ```
 
+### Example 4: Keep dashboard histories current while managing sessions
+
+Start in Users and continue sampling dashboard metrics when switching views.
+
+```powershell
+ftop -View Users -BackgroundSampling -SampleInterval 2000
+```
+
 ## PARAMETERS
+
+### -BackgroundSampling
+
+Keep CPU, memory, network and GPU dashboard histories current while viewing other
+tabs, including in Minimal mode. Respects SampleInterval and Pause. Sampling
+stops when the terminal is too small to display the monitor. Adds collection
+cost and remote traffic without loading hidden service/session lists or extra
+per-process counters.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
 
 
 ### -ChartRenderer
 
 Select Auto (Sixel with native fallback), Sixel, Native or Regis (experimental
 Contour vectors). Use GraphType independently to choose the plot shape.
-DRCS chart rendering is disabled.
 
 ```yaml
 Type: fullscreen.Charts.ChartRenderer
@@ -191,9 +223,10 @@ HelpMessage: ''
 
 Ordered process columns.
 Id, ParentId, UserName, Cpu, Memory, MemoryPercent, Gpu, GpuMemory, Threads, Name, CpuTime, Status, Disk, Network.
-CpuTime is cumulative CPU time and is off by default.
-Unsupported disk/network columns are hidden.
-C opens the current table column chooser.
+Defaults to Name, UserName, Cpu, Memory, Network, Gpu, Threads, Id.
+CpuTime is cumulative CPU time and is off by default. Unsupported target columns
+are hidden; supported counters with missing samples show as unknown. C opens the chooser. Left/Right scrolls overflow columns
+(Shift+Left/Right in tree mode); column widths remain fixed between samples.
 
 ```yaml
 Type: fullscreen.Monitoring.ProcessColumn[]

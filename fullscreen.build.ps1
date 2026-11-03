@@ -61,7 +61,6 @@ task ModuleFiles {
     Get-ChildItem -LiteralPath $folders.ModuleSourcePath -File |
         Copy-Item -Destination $folders.OutputPath -Force
     Copy-Item -LiteralPath (Join-Path $folders.ModuleSourcePath 'lib' 'XenoAtom.txt') -Destination $folders.LibraryPath -Force
-    Copy-Item -LiteralPath (Join-Path $folders.ProjectRoot 'LICENSE') -Destination $folders.OutputPath -Force
 }
 
 task GenerateHelp -If (-not $SkipHelp.IsPresent) {
@@ -83,12 +82,14 @@ task GenerateHelp -If (-not $SkipHelp.IsPresent) {
     Get-ChildItem -LiteralPath $tempOutputPath -Filter '*.xml' -File -Recurse |
         Move-Item -Destination $helpOutputPath -Force
     Remove-Item -LiteralPath $tempOutputPath -Recurse -Force
-    Copy-Item -LiteralPath $helpOutputPath -Destination $folders.LibraryPath -Recurse -Force
 }
 
 task CleanAfter {
     Get-ChildItem -LiteralPath $folders.OutputPath -File -Recurse |
         Where-Object { $_.Extension -in @('.pdb', '.json') } |
+        Remove-Item -Force
+    # Compiler XML docs are not shipped; cmdlet help lives in en-US at the module root.
+    Get-ChildItem -LiteralPath $folders.LibraryPath -Filter '*.xml' -File |
         Remove-Item -Force
 }
 

@@ -36,7 +36,7 @@ public sealed class ShowTuiDesignerCommand : CustomTuiCommand {
             using var app = new TuiDesignerApp(document, (
                 layout,
                 target
-            ) => layout.Save(FilePath(target)), path, target => {
+            ) => TuiScriptExporter.Export(layout, FilePath(target), overwriteLayout: true), path, target => {
                 try {
                     return File.Exists(FilePath(target));
                 }

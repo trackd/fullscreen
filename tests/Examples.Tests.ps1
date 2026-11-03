@@ -108,7 +108,13 @@ Describe 'Custom TUI examples' {
         $definition = & $ExamplePath -DefinitionOnly
         $validated = $definition | New-TuiDefinition
         $validated.Root | Should -BeOfType ([hashtable])
-        $validated.Title | Should -Not -BeNullOrEmpty
+        if ($ExampleName -eq 'EventViewer.ps1') {
+            $validated.Title | Should -Be ''
+            $validated.Root.Children[0].Children[0].Children[0].Text.Trim() | Should -Be 'EVENT VIEWER'
+        }
+        else {
+            $validated.Title | Should -Not -BeNullOrEmpty
+        }
         @(Get-Job).Count | Should -Be $before
     }
 

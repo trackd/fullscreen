@@ -1,17 +1,21 @@
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
+using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Styling;
 
 namespace fullscreen.Hosting;
 /// <summary>One shared close target over the existing first row; consumes no content rows.</summary>
 internal sealed class FullscreenChrome : Visual {
+    private readonly IFullscreenApp _app;
     private readonly Visual _content;
     private readonly Button _close;
+    private Visual? _layer;
     internal Rectangle CloseBounds => _close.Bounds;
 
     internal FullscreenChrome(IFullscreenApp app, Themes.ThemePalette palette) {
+        _app = app;
         _content = app.Root;
         _close = new Button("×") {
             MinHeight = 1,
@@ -31,6 +35,37 @@ internal sealed class FullscreenChrome : Visual {
         VerticalAlignment = Align.Stretch;
         AttachChild(_content);
         AttachChild(_close);
+    }
+
+    // Modal windows live in the app window layer (our parent) and scope hit-testing
+    // to themselves; preview pointer presses there so the close target stays live.
+    protected override void OnAttachedToApp(TerminalApp app) {
+        base.OnAttachedToApp(app);
+        _layer = Parent;
+        if (_layer is not null) {
+            _layer.PointerPressedRouted += OnLayerPointerPressed;
+        }
+    }
+
+    protected override void OnDetachedFromApp(TerminalApp app) {
+        if (_layer is not null) {
+            _layer.PointerPressedRouted -= OnLayerPointerPressed;
+            _layer = null;
+        }
+        base.OnDetachedFromApp(app);
+    }
+
+    private void OnLayerPointerPressed(object? sender, PointerEventArgs e) {
+        if (e.Handled
+            || e.RoutingPhase != RoutingPhase.Preview
+            || e.RawEvent?.Button != XenoAtom.Terminal.TerminalMouseButton.Left
+            || ReferenceEquals(e.OriginalSource, _close)
+            || !_close.IsVisible
+            || !_close.Bounds.Contains(e.UiX, e.UiY)) {
+            return;
+        }
+        e.Handled = true;
+        _app.RequestClose();
     }
 
     protected override int ChildrenCount => 2;

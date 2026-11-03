@@ -14,7 +14,8 @@ public sealed class PerformanceCollector : IDisposable {
     /// <summary>Gets the reusable metric snapshot to read or fill.</summary>
     public CollectorFrame Frame { get; } = new() {
         MachineName = Environment.MachineName,
-        Platform = System.Runtime.InteropServices.RuntimeInformation.OSDescription
+        Platform = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        Capabilities = CollectorCapabilityDetection.Current()
     };
 
     /// <summary>Refreshes requested metrics in the collector&apos;s reusable frame.</summary>
@@ -25,6 +26,10 @@ public sealed class PerformanceCollector : IDisposable {
     /// <param name="metrics">The metric groups requested for this capture.</param>
     /// <returns>The reusable frame; copy it before retaining it across later captures.</returns>
     public CollectorFrame Capture(CollectorMetrics metrics) {
+        var supportedMetrics = Frame.Capabilities!.Value;
+        if ((supportedMetrics & CollectorCapabilities.ProcessGraphics) == 0) { metrics &= ~CollectorMetrics.ProcessGpu; }
+        if ((supportedMetrics & CollectorCapabilities.ProcessDisk) == 0) { metrics &= ~CollectorMetrics.ProcessDisk; }
+        if ((supportedMetrics & CollectorCapabilities.ProcessNetwork) == 0) { metrics &= ~CollectorMetrics.ProcessNetwork; }
         long start = Stopwatch.GetTimestamp();
         long allocated = Compat.AllocatedBytes();
         Frame.ProcessCount = Frame.NetworkCount = Frame.GpuCount = 0;
@@ -59,6 +64,14 @@ public sealed class PerformanceCollector : IDisposable {
                 (metrics & CollectorMetrics.Gpu) != 0,
                 (metrics & CollectorMetrics.ProcessGpu) != 0
             );
+            var supported = Frame.Capabilities!.Value;
+            if ((metrics & CollectorMetrics.ProcessGpu) != 0) {
+                supported = (supported & ~CollectorCapabilities.ProcessGraphics) | _gpu.ProcessCapabilities;
+            }
+            if ((metrics & CollectorMetrics.Gpu) != 0) {
+                supported = (supported & ~CollectorCapabilities.DeviceGraphics) | _gpu.DeviceCapabilities;
+            }
+            Frame.Capabilities = supported;
         }
         else {
             _gpu?.Dispose();
@@ -90,6 +103,10 @@ public sealed class PerformanceCollector : IDisposable {
                     Frame.ProcessCount,
                     _processes.ThreadCount
                 );
+                if (Platform.IsWindows()) {
+                    const CollectorCapabilities io = CollectorCapabilities.ProcessDisk | CollectorCapabilities.ProcessNetwork;
+                    Frame.Capabilities &= ~io | _io.Capabilities;
+                }
             }
             else {
                 _io?.Dispose();

@@ -29,40 +29,29 @@ None.
 
 ## DESCRIPTION
 
-PropertyDetails contains native PowerShell metadata for each applicable property:
-its type, default value, enum choices, group and explanation. The designer uses
-the same catalog to display applicable fields.
+Lists the controls that can be used in custom TUI layouts, with their category,
+state binding, events and properties. Use it to discover what a control does and
+which properties it accepts before adding it with New-TuiControl or in the
+designer. Discovery never opens a terminal.
 
-The default table groups controls by Category and shows Name, Binding and Description. Use Format-List * to see the full metadata.
+The default view groups controls by category and shows Name, Binding and
+Description. Use Format-List * for the full metadata: PropertyDetails gives each
+property's type, default and allowed values, and NativeProperties lists the
+settings a native widget accepts in Options. An unknown literal name writes an
+ObjectNotFound error; an unmatched wildcard returns nothing.
 
-Returns Name, Category, Description, ReusedBy, Binding, Events, Properties, PropertyDetails, NativeProperties and Live metadata. Discovery never opens a terminal, reads directories or starts collectors. Unknown literal names emit an ObjectNotFound error; unmatched wildcards return no output.
-
-The catalog contains 90 controls: 76 native widgets from the bundled XenoAtom UI
-version, plus fullscreen controls and convenience names. CodeEditor is excluded. Run
-`examples/ControlGallery.ps1` from the repository to explore every catalog
-control, or add DefinitionOnly to inspect its layout without opening a terminal.
-
-Native widgets keep their framework names. FTable and FLogView are fullscreen's
-object table and parsed log snapshot; Table and LogControl are the native widgets.
-NativeProperties lists the scalar properties accepted in Options, including enum
-choices. Grid also accepts Options.Rows/Columns arrays such as @('Auto', '*', '2*').
-EnumSelect accepts EnumType from its PropertyDetails choices. No native widget
-requires an additional module. CodeEditor is intentionally excluded.
-
-Use examples/NativeControls.ps1 -Name Grid,Slider,TreeView for a focused native
-gallery, or -All for all native widgets. F12 opens diagnostics.
-
-UserList collects login sessions on its own. IncludeProcesses enables account-owned
-process totals, expansion and confirmed process actions; L toggles this at runtime.
-SelectionBind receives a UserViewRow with typed Logins and an optional Process.
-FileCommander exposes the dual-pane file manager. ObjectExplorer exposes the same
-formatted, expanded and JSON inspection with back navigation as fobject.
+Native widgets keep their XenoAtom names. FTable and FLogView are fullscreen's
+object table and log view; Table and LogControl are the native widgets. Grid
+accepts Options.Rows and Options.Columns arrays such as @('Auto', '*', '2*').
+UserList shows login sessions; set IncludeProcesses to add account processes and
+process actions. Run examples/ControlGallery.ps1 or examples/NativeControls.ps1
+from the repository to see the controls with sample data.
 
 ## EXAMPLES
 
 ### Example 1: List reusable controls
 
-Inspect the catalog without opening a terminal or starting workers.
+Inspect the catalog without opening a terminal.
 
 ```powershell
 Get-TuiControl

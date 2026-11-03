@@ -8,6 +8,11 @@ internal sealed class WindowsIoSampler : IDisposable {
     private EtwIoCounters? _counters;
     private long _timestamp;
     private bool _attempted, _disposed;
+    internal CollectorCapabilities Capabilities { get; private set; } =
+        CollectorCapabilities.ProcessDisk | CollectorCapabilities.ProcessNetwork;
+    internal static bool UnsupportedProvider(Exception error) =>
+        error is PlatformNotSupportedException or DllNotFoundException or EntryPointNotFoundException
+        || error is Win32Exception native && native.NativeErrorCode is 1 or 50 or 120 or 127;
     internal void Enrich(
         ProcessRow[] rows,
         WindowsThreadIdentity[] threads,
@@ -29,6 +34,9 @@ internal sealed class WindowsIoSampler : IDisposable {
             }
             catch (Exception error) when (error is Win32Exception or PlatformNotSupportedException or DllNotFoundException
                 or EntryPointNotFoundException) {
+                if (UnsupportedProvider(error)) {
+                    Capabilities = CollectorCapabilities.None;
+                }
                 return;
             }
         }
