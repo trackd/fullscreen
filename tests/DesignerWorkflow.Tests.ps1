@@ -78,7 +78,7 @@ Describe 'Designer workflow' {
         $changed = $definition | New-TuiDefinition
         $changed.Title = 'Updated layout'
         $changed.Root.Children += @{ Id = 'status'; Type = 'Text'; Text = 'Ready' }
-        $changed | Export-TuiDefinition -Path $scriptPath -Script -LinkedLayout
+        $changed | Export-TuiDefinition -Path $scriptPath -Script -LinkedLayout -Force
         [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath)) | Should -Be ([Convert]::ToBase64String($before))
         $next = & $scriptPath -DefinitionOnly
         $next.Title | Should -Be 'Updated layout'
@@ -91,7 +91,7 @@ Describe 'Designer workflow' {
         { $definition | Export-TuiDefinition -Path $scriptPath -Script -LinkedLayout -ErrorAction Stop } | Should -Throw '*not linked*'
         Get-Content -LiteralPath $scriptPath -Raw | Should -BeExactly $before
         Test-Path -LiteralPath ([IO.Path]::ChangeExtension($scriptPath, '.tui.psd1')) | Should -BeFalse
-        { $definition | Export-TuiDefinition -Path $scriptPath -LinkedLayout -ErrorAction Stop } | Should -Throw '*requires Script*'
+        { $definition | Export-TuiDefinition -Path $scriptPath -LinkedLayout -Force -ErrorAction Stop } | Should -Throw '*not linked*'
     }
     It 'Exposes typed property metadata with choices and defaults as native PowerShell data' {
         $chart = Get-TuiControl Chart
@@ -128,5 +128,99 @@ Describe 'Designer workflow' {
         $definition | Export-TuiDefinition -Path $scriptPath -Script -LinkedLayout -WhatIf
         [IO.File]::ReadAllText($layoutPath) | Should -BeExactly 'Keep existing layout'
         Test-Path -LiteralPath $scriptPath | Should -BeFalse
+    }
+
+    It 'Creates inline scaffolding by default for a ps1 path and never replaces an existing script' {
+        $scriptPath = Join-Path $TestDrive 'Default.ps1'
+        $definition | Export-TuiDefinition -Path $scriptPath
+        (Get-Content -LiteralPath $scriptPath -Raw) | Should -Match '\.SYNOPSIS'
+        (& $scriptPath -DefinitionOnly).Root.Children.Count | Should -Be 2
+        Test-Path -LiteralPath ([IO.Path]::ChangeExtension($scriptPath, '.tui.psd1')) | Should -BeFalse
+        Add-Content -LiteralPath $scriptPath -Value '# User handler'
+        $before = [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath))
+        foreach ($parameters in @(@{}, @{ Force = $true }, @{ Script = $true; Force = $true })) {
+            { $definition | Export-TuiDefinition -Path $scriptPath @parameters -ErrorAction Stop } | Should -Throw '*will not be overwritten*'
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath)) | Should -BeExactly $before
+        }
+    }
+
+    It 'Exports data and a runnable same-stem companion for PSD1 and JSON without switches' {
+        $index = 0
+        foreach ($extension in @('psd1', 'json', 'PSD1', 'JSON')) {
+            $index++
+            $directory = New-Item -ItemType Directory -Path (Join-Path $TestDrive "$index-$extension")
+            $layoutPath = Join-Path $directory.FullName "My tool's [one].tui.$extension"
+            $scriptPath = [IO.Path]::ChangeExtension($layoutPath, '.ps1')
+            $output = @($definition | Export-TuiDefinition -Path $layoutPath -WhatIf -PassThru)
+            $output.Count | Should -Be 0
+            Test-Path -LiteralPath $layoutPath | Should -BeFalse
+            Test-Path -LiteralPath $scriptPath | Should -BeFalse
+            $definition | Export-TuiDefinition -Path $layoutPath
+            Test-Path -LiteralPath $scriptPath | Should -BeTrue
+            $loaded = & $scriptPath -DefinitionOnly
+            $loaded.Root.Children.Count | Should -Be 2
+            if ($extension -ieq 'json') {
+                (Get-Content -LiteralPath $layoutPath -Raw | ConvertFrom-Json).Root.Id | Should -Be 'root'
+            }
+            else {
+                (Import-PowerShellDataFile -LiteralPath $layoutPath).Root.Id | Should -Be 'root'
+            }
+            Add-Content -LiteralPath $scriptPath -Value '# Keep my handlers exactly'
+            $scriptBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath))
+            $layoutBefore = [IO.File]::ReadAllText($layoutPath)
+            $changed = $definition | New-TuiDefinition
+            $changed.Title = 'Changed data'
+            { $changed | Export-TuiDefinition -Path $layoutPath -ErrorAction Stop } | Should -Throw '*Force*'
+            [IO.File]::ReadAllText($layoutPath) | Should -BeExactly $layoutBefore
+            $changed | Export-TuiDefinition -Path $layoutPath -Force -WhatIf
+            [IO.File]::ReadAllText($layoutPath) | Should -BeExactly $layoutBefore
+            $changed | Export-TuiDefinition -Path $layoutPath -Force
+            (& $scriptPath -DefinitionOnly).Title | Should -BeExactly 'Changed data'
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath)) | Should -BeExactly $scriptBefore
+        }
+    }
+
+    It 'Preserves an unrelated companion when exporting a definition or creating a missing definition' {
+        foreach ($extension in @('psd1', 'json')) {
+            $layoutPath = Join-Path $TestDrive "Protected.$extension"
+            $scriptPath = [IO.Path]::ChangeExtension($layoutPath, '.ps1')
+            [IO.File]::WriteAllText($scriptPath, '# Existing application')
+            $before = [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath))
+            $definition | Export-TuiDefinition -Path $layoutPath
+            $definition | Export-TuiDefinition -Path $layoutPath -Script -Force
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath)) | Should -BeExactly $before
+        }
+    }
+
+    It 'Accepts LinkedLayout without Script and protects the linked definition unless Force is specified' {
+        $scriptPath = Join-Path $TestDrive 'LinkedDefault.ps1'
+        $layoutPath = [IO.Path]::ChangeExtension($scriptPath, '.tui.psd1')
+        $definition | Export-TuiDefinition -Path $scriptPath -LinkedLayout
+        (& $scriptPath -DefinitionOnly).Root.Children.Count | Should -Be 2
+        $before = [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath))
+        { $definition | Export-TuiDefinition -Path $scriptPath -LinkedLayout -ErrorAction Stop } | Should -Throw '*Force*'
+        $definition | Export-TuiDefinition -Path $scriptPath -LinkedLayout -Force
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($scriptPath)) | Should -BeExactly $before
+        $layoutPath | Should -Exist
+    }
+
+    It 'Allows explicit data-only export and rejects conflicting switches or unsupported extensions' {
+        foreach ($extension in @('psd1', 'json')) {
+            $layoutPath = Join-Path $TestDrive "DataOnly.$extension"
+            $scriptPath = [IO.Path]::ChangeExtension($layoutPath, '.ps1')
+            $definition | Export-TuiDefinition -Path $layoutPath -Script:$false
+            $layoutPath | Should -Exist
+            Test-Path -LiteralPath $scriptPath | Should -BeFalse
+            $definition | Export-TuiDefinition -Path $layoutPath -Script:$false -Force
+            Test-Path -LiteralPath $scriptPath | Should -BeFalse
+        }
+        foreach ($parameters in @(
+                @{ Path = (Join-Path $TestDrive 'invalid.ps1'); Script = $false },
+                @{ Path = (Join-Path $TestDrive 'invalid.json'); Script = $false; LinkedLayout = $true },
+                @{ Path = (Join-Path $TestDrive 'invalid.txt') }
+            )) {
+            { $definition | Export-TuiDefinition @parameters -ErrorAction Stop } | Should -Throw
+            Test-Path -LiteralPath $parameters.Path | Should -BeFalse
+        }
     }
 }

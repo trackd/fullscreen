@@ -4,7 +4,7 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>14.0</LangVersion>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
@@ -15,9 +15,9 @@
     <InternalsVisibleTo Include="fullscreen.Tests" />
     <ProjectReference Include="../fullscreen.Collector/fullscreen.Collector.csproj" />
     <PackageReference Include="XenoAtom.Terminal.UI" Version="3.10.0" />
-    <PackageReference Include="System.Management.Automation" Version="7.6.8" PrivateAssets="all"
+    <PackageReference Include="System.Management.Automation" Version="7.6.9" PrivateAssets="all"
       ExcludeAssets="runtime" />
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13"
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14"
       PrivateAssets="all" ExcludeAssets="runtime" />
     <ProjectReference Include="../fullscreen.ALC/fullscreen.ALC.csproj" />
   </ItemGroup>

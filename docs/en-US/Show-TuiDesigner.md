@@ -31,72 +31,33 @@ fdesign
 
 ## DESCRIPTION
 
-Opens a large design canvas, a slim control palette on the right, and a
-shallow property panel across the bottom.
-The design prioritizes terminals with at least 40 rows; 120 columns by 40 rows is
-recommended. Smaller windows remain editable without a blocking size notice.
-The sidebar contains only controls to add; select existing items on the canvas.
-Items share their category's theme-aware color. Bold uppercase category headings
-use solid color bars to distinguish groups from addable controls. The palette shows its total
-control count (or matching/total counts when searching); scroll for additional
-categories. Hover a control for its full name and description. Search includes
-names, categories and descriptions; Enter prefers an exact control name.
-There is no footer. Brief action/error messages appear in the single-row header.
-F2 focuses the right control list, F3 opens/focuses properties, F4 expands the
-canvas, F5 rebuilds the preview, and F7 opens actions for the selected item.
-Tab and Shift-Tab move focus, including out of multiline fields. Escape closes
-menus/dialogs first, or hides properties when editing them; F10 closes the designer.
-Properties follow the selection by default. View lets you choose Always visible,
-On demand (F3), or Hidden (close again when selection changes). The panel's minus
-and plus buttons change its maximum height. The borderless panel shrinks to its
-content, normally four or five rows, without reserved blank rows. Visibility and height are remembered in
-Fullscreen/designer.json under the local application-data directory, separately
-from layout files. Content, Layout, Appearance and Behavior group the selected
-control's fields; Document contains the app title. The question-mark button shows
-help for the current group. Blank width/height fields show Automatic.
-The heading shows the current filename and saved/unsaved state.
-The header occupies one row. Its icon buttons provide controls (☰), properties
-(≡), item actions (⋮), view preferences (⚙), undo/redo (↶/↷), save (▣), export
-(↗) and close (×). Hover an icon for its name and shortcut.
-Drag controls from the right palette into the preview. Drop onto a container to
-append a child, or onto a leaf to insert before/after it. Drag existing preview
-controls to move them. Click preview controls to select their properties.
-Placement follows VStack/HStack/Tabs layout rather than absolute screen positions.
-Right-click a canvas item or press F7 for properties, parent selection, duplicate,
-wrap in a row/column/border, move and delete actions. Duplicate assigns fresh IDs
-and preserves existing state bindings; layout changes support undo/redo.
-Edit text/fill colors (#RRGGBB), bold text, alignment, dimensions and spacing.
-Export app writes a commented runnable scaffold with event and periodic-update
-stubs. The default linked export keeps handlers in the script and layout data in
-a sibling .tui.psd1. Re-exporting a linked app updates its layout and preserves the
-script byte for byte; unrelated existing scripts are rejected. Disable the linked
-layout option for a portable inline script; overwriting inline scripts requires
-confirmation. Replacing an existing linked layout also requires confirmation,
-with the layout and script paths shown. Failed saves/exports keep the filename
-and options open for correction and retry. Writes use temporary-file replacement.
-Add, delete, reorder, indent and outdent controls; undo/redo edits; edit IDs, text, state bindings, dimensions and values.
-Changes update the preview after a short debounce.
-Select a container on the canvas (or use Select parent), then click a palette item to add a control,
-or drag it onto the preview. Drag existing preview controls to move them.
-Property selectors open menus; overlapping menus do not select the canvas underneath.
-The preview never executes PowerShell handlers.
-Save writes versioned PSD1 or JSON atomically according to the file extension;
-new layouts default to .tui.psd1. Inline script export embeds a native hashtable and
-commented callbacks in one script. Closing unsaved edits, including invalid or
-not-yet-applied property drafts, offers confirmation. Undo commits a valid draft
-as an undoable edit; invalid drafts stay in the inspector until corrected.
-Property errors appear beside the relevant field; Save and navigation reveal
-and focus that field. Set TabTitle on a tab page to separate its caption from its ID.
-The palette includes layouts, inputs, charts, tables, logs, embedded applications
-and the optional Spectre adapter. Use Get-TuiControl for the current catalog.
-Layouts contain data only, with no serialized CLR types or scripts.
-PassThru returns a plain PowerShell definition after closing.
-Invoke-Tui loads the result or saved PSD1/JSON.
-Theme and theme completion are shared with other apps.
+Opens a visual designer for building custom TUI layouts. Pick controls from the
+palette on the right and click or drag them onto the canvas. Drop on a container
+to add a child, or on another control to insert before or after it; drag existing
+controls to move them. The preview updates as you edit but never runs PowerShell
+handlers. Edits support undo and redo.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+The property panel along the bottom groups the selected control's settings into
+Content, Layout, Appearance and Behavior; Document holds the app title. Errors
+appear beside the field. Use View to keep properties always visible, on demand
+(F3) or hidden; the choice and panel height are remembered.
+
+Right-click a canvas item or press F7 for actions such as select parent,
+duplicate, wrap in a row, column or border, move and delete. F2 focuses the
+palette, F4 expands the canvas, F5 rebuilds the preview and F10 closes the
+designer. Hover the header icons for their names and shortcuts.
+
+Save layouts as PSD1 or JSON; new layouts default to .tui.psd1. Saving also creates
+a same-stem .ps1 scaffold if missing, with help and event/update stubs to edit in
+your code editor. Existing scripts are never overwritten. Export app accepts
+.ps1, .psd1 or .json; its linked option keeps a .ps1 export's layout in a sibling
+.tui.psd1 so later exports update only layout data. Turn off that option for a
+new, single portable script. Data paths always get linked companions. Replacing
+layouts and closing with unsaved changes ask for confirmation.
+
+120 columns by 40 rows is recommended; smaller windows remain usable. Use
+PassThru to return the definition when the designer closes, then run it with
+Invoke-Tui. Press F12 to toggle the diagnostic overlay.
 
 ## EXAMPLES
 

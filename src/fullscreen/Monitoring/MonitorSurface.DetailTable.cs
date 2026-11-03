@@ -12,7 +12,7 @@ public sealed partial class MonitorSurface {
         Span<int> widths = stackalloc int[7];
         int x = 1;
         for (int i = 0; i < names.Length; i++) {
-            if (!enabled[i]) {
+            if (!enabled[i] || !network && !AvailableColumn((GpuColumn)i)) {
                 continue;
             }
 

@@ -2,6 +2,7 @@ using fullscreen.Tables;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Layout;
+using XenoAtom.Terminal.UI.Controls;
 
 namespace fullscreen.Custom;
 /// <summary>Existing Fullscreen table surface, composed as a custom-TUI widget.</summary>
@@ -9,6 +10,9 @@ public sealed class ReusableTable : Visual {
     private readonly TuiNode _node;
     private object? _pending;
     private bool _dirty;
+    private readonly VScrollBar _scrollBar = new() { IsVisible = false, IsTabStop = false };
+    private bool _syncingScroll;
+    private int ViewportRows => Surface.VisibleRowCount;
     /// <summary>Gets the visual surface rendered by the application.</summary>
     public TableSurface Surface { get; }
     /// <summary>Gets the selected chart point and its original source reference.</summary>
@@ -34,6 +38,13 @@ public sealed class ReusableTable : Visual {
         }
 
         AttachChild(Surface);
+        AttachChild(_scrollBar);
+        _scrollBar.ValueChangedRouted += (_, _) => {
+            if (!_syncingScroll) {
+                Surface.Model.ScrollTo(_scrollBar.Value, ViewportRows);
+                Surface.Refresh();
+            }
+        };
         HorizontalAlignment = Align.Stretch;
         VerticalAlignment = Align.Stretch;
     }
@@ -49,11 +60,24 @@ public sealed class ReusableTable : Visual {
     /// <param name="root">The root visual whose descendants are inspected.</param>
     /// <param name="token">The token used to cancel the operation. Defaults to default.</param>
     public void Tick(Visual root, CancellationToken token = default) {
-        if (!_dirty || !TuiComponentHost.IsVisibleWithin(this, root)) {
+        if (!TuiComponentHost.IsVisibleWithin(this, root)) {
             return;
         }
 
-        LoadSnapshotCore(token);
+        if (_dirty) {
+            LoadSnapshotCore(token);
+        }
+        _syncingScroll = true;
+        try {
+            _scrollBar.Maximum = Math.Max(0, Surface.Model.Visible.Count - ViewportRows);
+            _scrollBar.ViewportSize = ViewportRows;
+            _scrollBar.LargeChange = ViewportRows;
+            _scrollBar.Value = Surface.Model.Offset;
+            _scrollBar.IsVisible = Surface.Model.Visible.Count > ViewportRows;
+        }
+        finally {
+            _syncingScroll = false;
+        }
     }
 
     internal void LoadSnapshot() {
@@ -110,18 +134,22 @@ public sealed class ReusableTable : Visual {
     }
 
     /// <inheritdoc/>
-    protected override int ChildrenCount => 1;
+    protected override int ChildrenCount => 2;
 
     /// <inheritdoc/>
     protected override Visual GetChild(int index) =>
-        index == 0 ? Surface : throw new ArgumentOutOfRangeException(nameof(index));
+        index switch { 0 => Surface, 1 => _scrollBar, _ => throw new ArgumentOutOfRangeException(nameof(index)) };
     /// <inheritdoc/>
     protected override SizeHints MeasureCore(in LayoutConstraints constraints) {
         Surface.Measure(constraints);
+        _scrollBar.Measure(constraints);
         return SizeHints.Flex(new(12, 5), new(70, 14), new(int.MaxValue, int.MaxValue), 1, 1, 1, 1);
     }
 
     /// <inheritdoc/>
-    protected override void ArrangeCore(in Rectangle finalRect) =>
-        Surface.Arrange(finalRect);
+    protected override void ArrangeCore(in Rectangle finalRect) {
+        int width = _scrollBar.IsVisible ? 1 : 0;
+        Surface.Arrange(new Rectangle(finalRect.X, finalRect.Y, Math.Max(0, finalRect.Width - width), finalRect.Height));
+        _scrollBar.Arrange(new Rectangle(finalRect.Right - width, finalRect.Y + Surface.FirstRowY, width, ViewportRows));
+    }
 }

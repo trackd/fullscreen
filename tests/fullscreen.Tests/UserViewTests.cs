@@ -20,17 +20,19 @@ public sealed class UserViewTests {
         var frame = Frame();
         var view = new UserView { Sort = sort, Ascending = ascending };
         view.Update(frame);
+        view.SelectedKey = @"user:HOST\Ada";
         view.Expand(true);
         view.SelectedKey = "user:HOST\\Bob";
         view.Expand(true);
         view.Update(frame);
-        Assert.AreEqual("HOST\\Ada", view.Rows[0].UserName);
-        Assert.AreEqual(firstId, view.Rows[1].Process!.Value.Id);
-        Assert.AreEqual("HOST\\Bob", view.Rows[3].UserName);
-        Assert.IsNull(view.Rows[3].Process);
-        Assert.AreEqual(13, view.Rows[4].Process!.Value.Id);
-        Assert.AreEqual(5d, view.Rows[0].CpuPercent);
-        Assert.AreEqual(2, view.Rows[0].ProcessCount);
+        var ada = view.Rows.Single(row => row.UserName == "HOST\\Ada" && row.Process is null);
+        var children = view.Rows.Where(row => row.Process is not null && row.UserName == "HOST\\Ada").ToArray();
+        Assert.AreEqual(firstId, children[0].Process!.Value.Id);
+        Assert.AreEqual(5d, ada.CpuPercent);
+        Assert.AreEqual(2, ada.ProcessCount);
+        Assert.AreEqual(13, view.Rows.Single(row => row.UserName == "HOST\\Bob" && row.Process is not null).Process!.Value.Id);
+        string firstAccount = sort == ProcessSort.Name || !ascending ? "HOST\\Ada" : "HOST\\Bob";
+        Assert.AreEqual(firstAccount, view.Rows[0].UserName);
     }
 
     [TestMethod]
@@ -45,6 +47,7 @@ public sealed class UserViewTests {
         frame.ProcessCount = 4;
         var view = new UserView { Tree = true };
         view.Update(frame);
+        view.SelectedKey = @"user:HOST\Ada";
         view.Expand(true);
         view.SelectedKey = "user:HOST\\Bob";
         view.Expand(true);
@@ -107,7 +110,7 @@ public sealed class UserViewTests {
         ui.Text("t", () => !surface.Users.Tree);
         Assert.AreEqual(12, surface.Users.Rows[1].Process!.Value.Id);
         ui.Text("r", () => surface.Model.Ascending);
-        Assert.AreEqual(11, surface.Users.Rows[1].Process!.Value.Id);
+        Assert.AreEqual(11, surface.Users.Rows.First(row => row.Process.HasValue).Process!.Value.Id);
         ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, 3, 3,
             () => surface.Model.Sort == ProcessSort.Name);
         ui.Mouse(TerminalMouseKind.Up, TerminalMouseButton.Left, 3, 3, () => true);
@@ -237,7 +240,7 @@ public sealed class UserViewTests {
     }
     [TestMethod]
     public void SessionOnlyUsersIgnoreStaleProcessesAndSearchClientDetails() {
-        var frame = Frame();
+        var frame = Frame(bobLogin: false);
         frame.Users[0] = frame.Users[0] with {
             ClientName = "workstation-7",
             LogonTime = DateTimeOffset.Parse("2026-10-29T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture),
@@ -261,7 +264,7 @@ public sealed class UserViewTests {
         view.Update(frame);
         view.Expand(true);
         view.Update(frame);
-        Assert.HasCount(4, view.Rows);
+        Assert.HasCount(3, view.Rows);
         view.IncludeProcesses = false;
         view.Update(frame);
         Assert.HasCount(1, view.Rows);
@@ -379,7 +382,7 @@ public sealed class UserViewTests {
         Assert.IsTrue(SpinWait.SpinUntil(() => source.Requests.Contains(CollectorMetrics.Network), 3000));
         Assert.IsFalse(source.Requests.Any(mask => mask.HasFlag(CollectorMetrics.Users)));
         surface.ShowUserSessions();
-        Assert.IsTrue(SpinWait.SpinUntil(() => { app.Tick(); return surface.Frame.UserCount == 2; }, 3000));
+        Assert.IsTrue(SpinWait.SpinUntil(() => { app.Tick(); return surface.Frame.UserCount == 3; }, 3000));
         Assert.AreEqual("fixture target", surface.Frame.MachineName);
         Assert.AreEqual("HOST\\Ada", surface.Frame.Users[0].UserName);
         surface.View = MonitorView.Network;
@@ -399,12 +402,12 @@ public sealed class UserViewTests {
         public void Dispose() {
         }
     }
-    private static CollectorFrame Frame() =>
+    private static CollectorFrame Frame(bool bobLogin = true) =>
         new() {
             Platform = "Windows",
-            UserCount = 2,
+            UserCount = bobLogin ? 3 : 2,
             ProcessCount = 3,
-            Users = [new("HOST\\Ada", "Console", "Active", "", "", 1), new("HOST\\Ada", "RDP", "Disconnected", "", "", 2)],
+            Users = [new("HOST\\Ada", "Console", "Active", "", "", 1), new("HOST\\Ada", "RDP", "Disconnected", "", "", 2), new("HOST\\Bob", "RDP", "Disconnected", "", "", 3)],
             Processes = [new(11, "editor", 2, 1024, 1, UserName: "HOST\\Ada", StartTimeTicks: 111),
             new(12, "shell", 3, 2048, 1, UserName: "host\\ada", StartTimeTicks: 112), new(13, "other", 1, 512, 1, UserName: "HOST\\Bob", StartTimeTicks: 113)]
         };
@@ -450,7 +453,7 @@ public sealed class UserViewTests {
         var copy = new CollectorFrame();
         FrameCodec.Decode(FrameCodec.Encode(original), copy);
         Assert.AreEqual(original.Users[1], copy.Users[1]);
-        Assert.AreEqual(2, copy.UserCount);
+        Assert.AreEqual(3, copy.UserCount);
         var snapshot = new CollectorFrame();
         snapshot.CopyFrom(copy);
         Assert.AreEqual(original.Users[0], snapshot.Users[0]);
@@ -479,7 +482,8 @@ public sealed class UserViewTests {
     [DataRow(true)]
     public async Task UsersLoadOnlyOnSelectionAndExpandedProcessesReuseConfirmedActions(bool remote) {
         var surface = new MonitorSurface { IsRemote = remote, ActionsEnabled = true, SourceLabel = "fixture", Frame = Frame() };
-        Assert.AreEqual(CollectorMetrics.Processes, new MonitorSurface { Minimal = true }.RequiredMetrics);
+        Assert.AreEqual(CollectorMetrics.Processes | CollectorMetrics.Owners | CollectorMetrics.ProcessGpu | CollectorMetrics.ProcessNetwork,
+            new MonitorSurface { Minimal = true }.RequiredMetrics);
         await using var ui = new DesignerUxTests.UiSession(surface, () => { });
         ui.Key(TerminalKey.F8, () => surface.View == MonitorView.Users);
         Assert.AreEqual(CollectorMetrics.Users | CollectorMetrics.Processes | CollectorMetrics.Owners, surface.RequiredMetrics);
@@ -498,6 +502,6 @@ public sealed class UserViewTests {
         Assert.AreEqual(selected.Id, requested!.ProcessId);
         Assert.AreEqual(selected.StartTimeTicks, requested.StartTimeTicks);
         surface.ActionsEnabled = false;
-        Assert.IsFalse(surface.ProcessActions(selected).Single().IsEnabled);
+        Assert.IsFalse(surface.ProcessActions(selected).First().IsEnabled);
     }
 }

@@ -24,7 +24,7 @@ public interface IMonitorSource : IDisposable {
 }
 
 /// <summary>Collects local machine metrics and executes local monitor actions.</summary>
-public sealed class LocalMonitorSource : IMonitorSource, IMonitorControlSource {
+public sealed class LocalMonitorSource : IMonitorSource, IMonitorControlSource, IMonitorProcessDetailSource {
     private readonly PerformanceCollector _collector = new();
     /// <summary>Gets the human-readable label.</summary>
     public string Label => Environment.MachineName;
@@ -55,4 +55,8 @@ public sealed class LocalMonitorSource : IMonitorSource, IMonitorControlSource {
             _collector.InvalidateUsers();
         }
     }
+
+    /// <inheritdoc/>
+    public string ReadCommandLine(ProcessRow process, CancellationToken token) =>
+        ProcessOwnerReader.ReadCommandLine(process.Id, process.StartTimeTicks, token);
 }

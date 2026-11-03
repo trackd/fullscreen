@@ -1,6 +1,7 @@
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Rendering;
 using System.Globalization;
@@ -13,6 +14,49 @@ public sealed partial class MonitorSurface {
     private int UserTop => Minimal || UsersOnly ? 2 : 4;
     private int UserDetailsHeight => Bounds.Height >= 24 ? 4 : 0;
     private int UserPage => Math.Max(1, Bounds.Height - UserTop - Math.Max(1, Footer) - UserDetailsHeight);
+    private readonly Button _markSessionsButton = new("Mark all");
+    private readonly Button _logoffSessionsButton = new("Log off…");
+    private Themes.ThemePalette? _userButtonPalette;
+    private int UserActionStart(int width) => Math.Max(1, width - (_markSessionsButton.IsVisible ? 22 : 11));
+
+    private void InitializeUserButtons() {
+        _markSessionsButton.Click(MarkAllSessions);
+        _logoffSessionsButton.Click(ShowSessionSelection);
+        foreach (var button in new[] { _markSessionsButton, _logoffSessionsButton }) {
+            button.MinHeight = button.MaxHeight = 1;
+            AttachChild(button);
+        }
+    }
+
+    private void MeasureUserButtons(int width, int height) {
+        bool visible = View == MonitorView.Users && width >= 35 && height >= 12;
+        _markSessionsButton.IsVisible = visible;
+        _logoffSessionsButton.IsVisible = visible;
+        if (!ReferenceEquals(_userButtonPalette, Palette)) {
+            _userButtonPalette = Palette;
+            _markSessionsButton.SetStyle(Palette.CompactActionButton);
+            _logoffSessionsButton.SetStyle(Palette.CompactActionButton);
+        }
+        bool sessions = false;
+        if (View == MonitorView.Users) {
+            foreach (var login in Frame.Users.AsSpan(0, Frame.UserCount)) {
+                if (CanLogoff(login)) {
+                    sessions = true;
+                    break;
+                }
+            }
+        }
+        _markSessionsButton.IsEnabled = !ActionBusy && sessions;
+        _logoffSessionsButton.IsEnabled = ActionsEnabled && !ActionBusy && sessions;
+        _markSessionsButton.Measure(new(10, 1));
+        _logoffSessionsButton.Measure(new(10, 1));
+    }
+
+    private void ArrangeUserButtons(in Rectangle bounds) {
+        int top = bounds.Y + (Minimal || UsersOnly ? 0 : 2);
+        _logoffSessionsButton.Arrange(new(bounds.Right - 11, top, 10, 1));
+        _markSessionsButton.Arrange(new(bounds.Right - 22, top, 10, 1));
+    }
 
     private void ProjectUsers() {
         Users.Filter = Model.Filter;
@@ -20,6 +64,7 @@ public sealed partial class MonitorSurface {
         Users.Sort = Model.Sort;
         Users.Ascending = Model.Ascending;
         Users.Update(Frame);
+        PruneSessionMarks();
     }
 
     internal void ShowUserSessions() {
@@ -96,10 +141,7 @@ public sealed partial class MonitorSurface {
                 SessionId = login.SessionId ?? -1,
                 SessionLogonTime = login.LogonTime?.ToFileTime() ?? 0
             })
-        ) { IsEnabled = ActionsEnabled && !ActionBusy
-        && Frame.Platform.Contains("Windows", StringComparison.OrdinalIgnoreCase)
-        && login.SessionId >= 0
-        && login.LogonTime.HasValue })];
+        ) { IsEnabled = ActionsEnabled && !ActionBusy && CanLogoff(login) })];
     private void ShowUserActions(int x, int y) {
         if (Users.Selected is not { } row) {
             return;
@@ -115,6 +157,9 @@ public sealed partial class MonitorSurface {
             [
                 new MenuItem(row.UserName) { IsEnabled = false },
                 new MenuItem("Session details…", ShowUserDetails),
+                new MenuItem("Select sessions / log off… (X)", ShowSessionSelection),
+                new MenuItem("Mark / unmark this account (Space)", ToggleSelectedSessions),
+                new MenuItem("Mark / unmark all visible sessions (M)", MarkAllSessions),
                 ..UserSessionActions(row)
             ],
             x,
@@ -165,7 +210,10 @@ public sealed partial class MonitorSurface {
 
         var row = Users.Rows[index];
         Users.SelectedKey = row.Key;
-        if (e.Button == TerminalMouseButton.Right) {
+        if (e.Button == TerminalMouseButton.Left && e.LocalX < 5 && row.Process is null) {
+            ToggleSelectedSessions();
+        }
+        else if (e.Button == TerminalMouseButton.Right) {
             ShowUserActions(e.UiX, e.UiY);
         }
         else if (e.Button == TerminalMouseButton.Left
@@ -182,17 +230,32 @@ public sealed partial class MonitorSurface {
 
     private UserColumns UserColumnLayout() {
         int right = Bounds.Width - 1;
-        var logins = Users.Rows.Where(row => row.Process is null).SelectMany(row => row.Logins).ToArray();
+        bool hasLogon = false, hasIdle = false, hasClient = false;
+        if (Bounds.Width >= 110) {
+            foreach (var row in Users.Rows) {
+                if (row.Process is not null) {
+                    continue;
+                }
+                foreach (var login in row.Logins) {
+                    hasLogon |= login.LogonTime.HasValue;
+                    hasIdle |= login.IdleTime.HasValue;
+                    hasClient |= ClientName(login) != "—";
+                }
+                if (hasLogon && hasIdle && hasClient) {
+                    break;
+                }
+            }
+        }
         int logon = -1, idle = -1, client = -1;
-        if (Bounds.Width >= 110 && logins.Any(login => login.LogonTime.HasValue)) {
+        if (hasLogon) {
             logon = right - 20;
             right = logon - 1;
         }
-        if (Bounds.Width >= 110 && logins.Any(login => login.IdleTime.HasValue)) {
+        if (hasIdle) {
             idle = right - 12;
             right = idle - 1;
         }
-        if (Bounds.Width >= 110 && logins.Any(login => ClientName(login) != "—")) {
+        if (hasClient) {
             client = right - 16;
             right = client - 1;
         }
@@ -218,14 +281,8 @@ public sealed partial class MonitorSurface {
             Rule(buffer, 1);
         }
 
-        Write(
-            buffer,
-            1,
-            top,
-            IncludeUserProcesses ? "USERS · account totals · ←/→ branches · F6 sort · R reverse · T tree" : "USERS · login sessions · L load processes",
-            Accent,
-            Bounds.Width - 2
-        );
+        int titleWidth = (_logoffSessionsButton.IsVisible ? UserActionStart(Bounds.Width) : Bounds.Width - 1) - 2;
+        Write(buffer, 1, top, $"USERS · {_markedSessions.Count} marked · Space mark · D details · L processes", Accent, titleWidth);
         var columns = UserColumnLayout();
         string SortLabel(string label, ProcessSort sort) {
             if (!IncludeUserProcesses || Model.Sort != sort) {
@@ -233,7 +290,7 @@ public sealed partial class MonitorSurface {
             }
             return label + (Model.Ascending ? " ↑" : " ↓");
         }
-        Write(buffer, 2, top + 1, SortLabel("USER / PROCESS", ProcessSort.Name), Muted,
+        Write(buffer, 2, top + 1, SortLabel("    USER / PROCESS", ProcessSort.Name), Muted,
             (IncludeUserProcesses ? columns.Id : columns.State) - 3);
         if (IncludeUserProcesses) {
             Write(buffer, columns.Id, top + 1, SortLabel("PID/#", ProcessSort.Id), Muted, 8);
@@ -266,6 +323,10 @@ public sealed partial class MonitorSurface {
             }
             else if (IncludeUserProcesses) {
                 label = (Users.IsExpanded(row.Key) ? "− " : "+ ") + row.UserName;
+            }
+            if (row.Process is null) {
+                int marked = row.Logins.Count(login => _markedSessions.ContainsKey(SessionKey(login)));
+                label = (marked == 0 ? "[ ] " : marked == row.Logins.Count ? "[✓] " : "[−] ") + label;
             }
             Write(buffer, 2, y, label, style, (IncludeUserProcesses ? columns.Id : columns.State) - 3);
             if (IncludeUserProcesses) {
@@ -378,9 +439,10 @@ public sealed partial class MonitorSurface {
             IsModal = true,
             Content = new VStack(
                 new ScrollViewer(new Paragraph(text) { Wrap = true }) { MaxHeight = Math.Max(5, Bounds.Height - 8) },
+                new Button("Select sessions / log off…").Click(() => { dialog!.Close(); ShowSessionSelection(); }),
                 new Button("Close").Click(() => dialog!.Close())
             )
         };
-        dialog.Show();
+        ShowMonitorDialog(dialog);
     }
 }

@@ -344,19 +344,19 @@ public sealed partial class TuiDesignerApp {
             IsVisible = false
         };
         Dialog? dialog = null;
-        var linked = new CheckBox("Separate PSD1 layout; preserve handlers on later exports", _linkedLayout);
+        var linked = new CheckBox("For .ps1: separate PSD1 layout (data paths are always linked)", _linkedLayout);
         dialog = new Dialog {
             Title = new TextBlock("Export runnable PowerShell"),
             IsModal = true,
             Width = 70,
-            Content = new VStack(new Paragraph("Linked export writes the .ps1 and its sibling .tui.psd1. Existing linked scripts keep their handlers.") { Wrap = true }, input, linked, error, new HStack(new Button("Cancel").Click(() => dialog!.Close()), new Button("Export").Click(() => {
+            Content = new VStack(new Paragraph("Export .ps1, .psd1 or .json. Data files get a companion .ps1 if missing. Existing scripts are never overwritten.") { Wrap = true }, input, linked, error, new HStack(new Button("Cancel").Click(() => dialog!.Close()), new Button("Export").Click(() => {
                 string path = input.Text ?? "";
                 _exportPath = path;
                 _linkedLayout = linked.IsChecked;
                 void Write() {
                     try {
                         _exportScript(Document, path, linked.IsChecked);
-                        _status.Text = "Exported " + path + (linked.IsChecked ? " · linked layout updated; existing handlers preserved" : " · edit Handler / OnTick in PowerShell");
+                        _status.Text = "Exported " + path + " · edit Handler / OnTick in .ps1; existing scripts preserved";
                         dialog!.Close();
                     }
                     catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException) {
@@ -368,17 +368,14 @@ public sealed partial class TuiDesignerApp {
                 }
 
                 try {
-                    string layoutPath = IOPath.ChangeExtension(path, ".tui.psd1");
-                    if (linked.IsChecked && _exists(layoutPath)) {
+                    var (scriptPath, layoutPath) = TuiScriptExporter.Paths(path, linked.IsChecked);
+                    if (layoutPath is not null && _exists(layoutPath)) {
                         Confirm(
                             "Replace layout '" + layoutPath +
-                            "'? Linked script '" + path +
+                            "'? Script '" + scriptPath +
                             "' keeps its existing handlers.",
                             Write
                         );
-                    }
-                    else if (_exists(path) && !linked.IsChecked) {
-                        Confirm("Replace script '" + path + "', including its handlers?", Write);
                     }
                     else {
                         Write();

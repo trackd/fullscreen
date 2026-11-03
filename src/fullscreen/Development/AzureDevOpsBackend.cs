@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace fullscreen.Development;
 /// <summary>Loads Azure DevOps resources and actions for the developer TUI.</summary>
-public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
+public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
     internal readonly System.Collections.Concurrent.ConcurrentDictionary<string, JsonElement> Details = new();
     internal readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Discussions = new();
     private bool _mine;
@@ -15,6 +15,7 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
     private readonly IAzureDevOpsClient _client;
     private readonly string _project;
     private readonly string _team;
+    private string _defaultTeam = "";
     private readonly string _storyType;
     private readonly int _pageSize;
     private readonly Dictionary<(int View, int Page), int> _cursors = [];
@@ -22,13 +23,24 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
     private string _boardColumn = "System.BoardColumn";
     private string? _board;
     private string[] _boardTypes = [];
+    private string[] _boardColumns = [];
+    internal string[] BoardColumns => _boardColumns;
+    internal bool BoardOpen => _board is not null;
     private string[] _areas = [];
     private bool _areasLoaded;
     private string _defaultArea = "";
+    private string? _iterationSelection;
+    private string? _currentIteration;
+    private (string Name, string Path)[] _iterations = [];
+    private readonly Dictionary<string, JsonElement> _iterationDetails = new(StringComparer.OrdinalIgnoreCase);
+    internal string SprintLabel => _iterationSelection == "" ? "All sprints"
+        : _iterationSelection ?? _currentIteration ?? "No current sprint · all items";
     /// <summary>Gets the displayed heading.</summary>
     public string Title => $"AZURE DEVOPS · {_project}" + (_board is null ? "" : $" · {_board}") + (_mine ? " · ASSIGNED TO ME" : "");
     /// <summary>Gets the available tab headings.</summary>
-    public string[] Tabs { get; } = ["Boards", "Work items", "Stories", "Tasks", "Pull requests", "Pipelines"];
+    public string[] Tabs { get; } = ["Boards", "Work items", "Stories", "Tasks", "Pull requests", "Pipelines", "Backlog"];
+
+    internal static bool IsWorkItemView(int view) => view is >= 1 and <= 3 or 6;
 
     /// <summary>Initializes a new AzureDevOpsBackend instance.</summary>
     /// <param name="client">The Azure DevOps request client.</param>
@@ -63,11 +75,21 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
         "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
     private string Api(string resource) =>
         E(_project) + "/_apis/" + resource;
-    private string TeamApi(string resource) =>
-        E(_project) +
-        "/" + (_team.Length == 0 ? "" : E(_team) +
-        "/") +
-        "_apis/work/" + resource;
+    private string TeamApi(string resource) {
+        string team = _team.Length == 0 ? _defaultTeam : _team;
+        return E(_project) + "/" + (team.Length == 0 ? "" : E(team) + "/") + "_apis/work/" + resource;
+    }
+
+    private async Task EnsureTeam(CancellationToken token) {
+        if (_team.Length != 0 || _defaultTeam.Length != 0) {
+            return;
+        }
+        var project = await Get("_apis/projects/" + E(_project), token).ConfigureAwait(false);
+        _defaultTeam = S(P(project, "defaultTeam"), "id");
+        if (_defaultTeam.Length == 0) {
+            throw new InvalidOperationException("The project's default team could not be resolved. Specify -Team and retry.");
+        }
+    }
     private Task<JsonElement> Get(
         string path,
         CancellationToken token
@@ -125,6 +147,9 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
 
         if (view is >= 1 and <= 3) {
             return await WorkItems(view, page, token).ConfigureAwait(false);
+        }
+        if (view == 6) {
+            return await Backlog(page, token).ConfigureAwait(false);
         }
 
         if (view == 4) {
@@ -195,7 +220,7 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
                     [
                         S(x, "buildNumber"),
                         S(P(x, "definition"), "name"),
-                        S(x, "status"),
+                        GitHubBackend.StatusLabel(S(x, "status"), S(x, "result")),
                         S(x, "result"),
                         S(x, "sourceBranch"),
                         S(x, "startTime")
@@ -210,6 +235,9 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
     }
 
     private async Task<DeveloperPage> WorkItems(int view, int page, CancellationToken token) {
+        if (view is 2 or 3 && page == 0) {
+            await LoadIterations(token).ConfigureAwait(false);
+        }
         if (!_areasLoaded && (_team.Length != 0 || _board is not null)) {
             var settings = await Get(TeamApi("teamsettings/teamfieldvalues"), token).ConfigureAwait(false);
             _defaultArea = S(settings, "defaultValue");
@@ -218,6 +246,10 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
         }
 
         string where = "[System.TeamProject] = @project";
+        string? iteration = _iterationSelection ?? _currentIteration;
+        if (view is 2 or 3 && !string.IsNullOrEmpty(iteration)) {
+            where += " AND [System.IterationPath] = " + Q(iteration);
+        }
         if (_mine) {
             where += " AND [System.AssignedTo] = @Me";
         }
@@ -265,22 +297,33 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
         ).ConfigureAwait(false);
         int[] ids = [.. Values(query, "workItems").Select(x => Number(x, "id"))];
         if (ids.Length == 0) {
-            return new(WorkColumns, [], "No work items in this page.");
+            return new(WorkColumns, [], "No work items in this page." + (view is 2 or 3 ? " · " + SprintLabel + " · I choose sprint" : ""));
         }
 
         _cursors[(view, page + 1)] = ids[^1];
+        var rows = await LoadWorkItemRows(ids, _boardColumn, token, S(query, "asOf")).ConfigureAwait(false);
+        return new(
+            WorkColumns,
+            rows,
+            (_board is null ? "Project work items" : "Board · " + _board) +
+            (view is 2 or 3 ? " · " + SprintLabel : "") + " · descending ID · C columns · / filters",
+            WorkWidths
+        );
+    }
+
+    private async Task<DeveloperItem[]> LoadWorkItemRows(int[] ids, string column, CancellationToken token, string? asOf = null) {
+        var request = new Dictionary<string, object> { ["ids"] = ids, ["$expand"] = "Relations" };
+        if (!string.IsNullOrEmpty(asOf)) {
+            request["asOf"] = asOf;
+        }
         var batch = await _client.SendAsync(
             HttpMethod.Post,
             Api("wit/workitemsbatch?api-version=7.1"),
-            new Dictionary<string, object> {
-                ["ids"] = ids,
-                ["asOf"] = S(query, "asOf"),
-                ["$expand"] = "Relations"
-            },
+            request,
             token
         ).ConfigureAwait(false);
         var indexed = Values(batch).ToDictionary(x => Number(x, "id"));
-        var rows = ids.Where(indexed.ContainsKey).Select(id => {
+        return [.. ids.Where(indexed.ContainsKey).Select(id => {
             var item = indexed[id];
             var fields = P(item, "fields");
             string parent = Values(item, "relations").Where(x => S(x, "rel") == "System.LinkTypes.Hierarchy-Reverse").Select(x => S(x, "url").Split('/').Last()).FirstOrDefault() ?? "";
@@ -291,7 +334,7 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
                     S(fields, "System.WorkItemType"),
                     S(fields, "System.Title"),
                     S(fields, "System.State"),
-                    S(fields, _boardColumn),
+                    S(fields, column),
                     Identity(P(fields, "System.AssignedTo")),
                     parent,
                     S(fields, "Microsoft.VSTS.Common.Priority"),
@@ -301,28 +344,10 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
                 ],
                 item.Clone()
             );
-        }).ToArray();
-        return new(
-            WorkColumns,
-            rows,
-            (_board is null ? "Project work items" : "Board · " + _board) +
-            " · descending ID · G groups · / filters · A actions",
-            [
-                8,
-                18,
-                40,
-                14,
-                18,
-                20,
-                9,
-                10,
-                12,
-                25,
-                20
-            ]
-        );
+        })];
     }
 
+    private static readonly int[] WorkWidths = [8, 18, 40, 14, 18, 20, 9, 10, 12, 25, 20];
     private static readonly string[] WorkColumns = [
         "ID",
         "Type",
@@ -336,6 +361,32 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
         "Iteration",
         "Tags"
     ];
+
+    private async Task LoadIterations(CancellationToken token) {
+        var iterations = await Get(TeamApi("teamsettings/iterations"), token).ConfigureAwait(false);
+        _iterations = [.. Values(iterations).Where(iteration => S(iteration, "path").Length > 0)
+            .Select(iteration => (S(iteration, "name"), S(iteration, "path")))];
+        _iterationDetails.Clear();
+        foreach (var iteration in Values(iterations)) {
+            _iterationDetails[S(iteration, "path")] = iteration.Clone();
+        }
+        var current = await Get(TeamApi("teamsettings/iterations?$timeframe=current"), token).ConfigureAwait(false);
+        _currentIteration = Values(current).Select(iteration => S(iteration, "path")).FirstOrDefault(path => path.Length > 0);
+    }
+
+    internal DeveloperOperation[] SprintOperations(int view) {
+        DeveloperOperation Select(string label, string? path) => new(label,
+            "Filter stories and tasks by the selected team sprint.", (_, _) => {
+                _iterationSelection = path;
+                _cursors.Clear();
+                return Task.FromResult("Sprint changed");
+            }, ReadOnly: true, TargetView: view);
+        return [
+            Select("Current sprint" + (_currentIteration is null ? " · not configured" : " · " + _currentIteration), null),
+            Select("All sprints", ""),
+            .. _iterations.Select(iteration => Select(iteration.Name + " · " + iteration.Path, iteration.Path))
+        ];
+    }
     /// <inheritdoc cref="fullscreen.Development.IDeveloperBackend.DetailAsync"/>
     public async Task<string> DetailAsync(int view, DeveloperItem item, CancellationToken token) {
         var state = (JsonElement)item.State!;
@@ -350,7 +401,7 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
                 "\n\nA → Open board cards to browse and move work items.";
         }
 
-        if (view is >= 1 and <= 3) {
+        if (IsWorkItemView(view)) {
             var detail = await Get(Api("wit/workitems/" + E(item.Key) + "?$expand=all"), token).ConfigureAwait(false);
             var fields = P(detail, "fields");
             Details[item.Key] = detail.Clone();
@@ -417,35 +468,22 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
         }
 
         if (view == 4) {
-            var pull = await Get(
-                Api($"git/repositories/{E(S(P(state, "repository"), "id"))}/pullrequests/{E(item.Key)}"),
-                token
-            ).ConfigureAwait(false);
-            return "#" + item.Key +
-                " · " + S(pull, "title") +
-                "\n" + S(pull, "status") +
-                " · " + Identity(P(pull, "createdBy")) +
-                "\n" + S(pull, "sourceRefName") +
-                " → " + S(pull, "targetRefName") +
-                "\n\nDESCRIPTION\n" + Plain(S(pull, "description")) +
-                "\n\nREVIEWERS\n" + string.Join(
-                    '\n',
-                    Values(pull, "reviewers").Select(reviewer => Identity(reviewer) +
-                " · vote " + S(reviewer, "vote"))
-                );
+            return await PullRequestDetail(item, state, token).ConfigureAwait(false);
         }
 
-        var timeline = await Get(Api($"build/builds/{E(item.Key)}/timeline"), token).ConfigureAwait(false);
-        return string.Join(
-            '\n',
-            Values(timeline, "records").OrderBy(x => Number(x, "order")).Select(x => $"{S(x, "type"),-12} {S(x, "name")} · {S(x, "state")} · {S(x, "result")}\n" + string.Join('\n', Values(x, "issues").Select(issue => "  " + S(issue, "message"))))
-        );
+        return await PipelineDetail(item, token).ConfigureAwait(false);
     }
 
     private static string Plain(string text) =>
         WebUtility.HtmlDecode(Regex.Replace(text, "<[^>]*>", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)));
     /// <inheritdoc cref="fullscreen.Development.IDeveloperBackend.Operations"/>
     public DeveloperOperation[] Operations(int view, DeveloperItem? item) {
+        if (view == 4) {
+            return PullRequestOperations(item);
+        }
+        if (view == 5) {
+            return PipelineOperations(item);
+        }
         if (view == 0 && item?.State is JsonElement board) {
             return [new("Open board cards", "Show this board's work item types and team area paths.", async (
                 _,
@@ -453,11 +491,19 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
             ) =>
             {
                 var detail = await Get(TeamApi("boards/" + E(item.Key)), token).ConfigureAwait(false);
-                var types = P(detail, "allowedMappings");
-                _boardTypes = types.ValueKind == JsonValueKind.Object ? [..types.EnumerateObject().Select(x => x.Name)] : [];
-                if (_boardTypes.Length == 0)
-                {
-                    throw new InvalidOperationException("This board did not provide work item type mappings.");
+                _boardColumns = [.. Values(detail, "columns").Select(column => S(column, "name")).Where(name => name.Length > 0)];
+                _boardTypes = [.. Values(detail, "columns")
+                    .SelectMany(column => {
+                        var mappings = P(column, "stateMappings");
+                        return mappings.ValueKind == JsonValueKind.Object
+                            ? mappings.EnumerateObject().Select(mapping => mapping.Name)
+                            : [];
+                    })
+                    .Concat(Values(detail, "workItemTypes").Select(type => S(type, "name")))
+                    .Where(type => type.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)];
+                if (_boardTypes.Length == 0) {
+                    throw new InvalidOperationException("This board has no configured work-item type mappings in its columns.");
                 }
 
                 _boardColumn = S(P(P(detail, "fields"), "columnField"), "referenceName");
@@ -472,28 +518,35 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
             }, ReadOnly: true, TargetView: 1)];
         }
 
-        if (view is < 1 or > 3) {
+        if (!IsWorkItemView(view)) {
             return [];
         }
 
         var actions = new List<DeveloperOperation>
         {
-            new(_mine ? "Show everyone's items" : "Assigned to me", "Filter work items on the server using the authenticated Azure DevOps identity.", (
+            new(_mine ? "Filter list: all assignees" : "Filter list: assigned to me", "Return to the list and filter by the signed-in user. This does not change any work item's assignment.", (
                 _,
                 _
             ) =>
             {
                 _mine = !_mine;
                 _cursors.Clear();
+                _backlogIds = null;
                 return Task.FromResult("Assignment filter changed");
-            }, ReadOnly: true, TargetView: view),
-            Create("Create " + _storyType, _storyType, null),
-            Create("Create task", "Task", null)
+            }, ReadOnly: true, TargetView: view)
         };
-        if (_board is not null) {
+        if (view == 6) {
+            actions.AddRange(_backlogTypes.Select(type => Create("Create " + type, type, null)));
+        }
+        else {
+            actions.Add(Create("Create " + _storyType, _storyType, null));
+            actions.Add(Create("Create task", "Task", null));
+        }
+        if (view != 6 && _board is not null) {
             actions.Add(new("Show all work items", "Clear the selected board type filter.", (_, _) => {
                 _board = null;
                 _boardTypes = [];
+                _boardColumns = [];
                 _boardColumn = "System.BoardColumn";
                 if (_team.Length == 0) {
                     _areas = [];
@@ -512,7 +565,7 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
             actions.Add(Create("Add child task", "Task", item.Key, P(state, "fields")));
             actions.Add(Edit("Rename", "System.Title", "Title", item, revision));
             actions.Add(Edit("Change state", "System.State", "State (exact process state name)", item, revision));
-            if (_board is not null) {
+            if (view != 6 && _board is not null) {
                 actions.Add(Edit(
                     "Move to board column",
                     _boardColumn,
@@ -523,6 +576,9 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
             }
 
             actions.Add(Edit("Assign", "System.AssignedTo", "Identity email or unique name", item, revision));
+            actions.Add(Edit("Plan into iteration", "System.IterationPath", "Iteration path", item, revision));
+            actions.Add(Edit("Set area", "System.AreaPath", "Area path", item, revision));
+            actions.Add(Edit("Set priority", "Microsoft.VSTS.Common.Priority", "Priority (1 highest – 4 lowest)", item, revision));
             actions.Add(Edit(
                 "Set remaining work",
                 "Microsoft.VSTS.Scheduling.RemainingWork",
@@ -553,7 +609,13 @@ public sealed class AzureDevOpsBackend : IDeveloperBackend, IDisposable {
         ) => {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         object value = text;
-        if (numeric) {
+        if (field == "Microsoft.VSTS.Common.Priority") {
+            if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int priority) || priority is < 1 or > 4) {
+                throw new ArgumentException("Enter a priority from 1 (highest) to 4 (lowest).");
+            }
+            value = priority;
+        }
+        else if (numeric) {
             if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double hours)
                 || !double.IsFinite(hours)
                 || hours < 0) {

@@ -5,12 +5,47 @@ using fullscreen.Files;
 using fullscreen.Monitoring;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Rendering;
+using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Styling;
 
 namespace fullscreen.Tests;
 
 [TestClass]
 [DoNotParallelize]
 public sealed class ThemeTests {
+    [TestMethod]
+    public async Task NativeInputsInheritResolvedPaletteWithoutLiteralColorOverridesAcrossStates() {
+        var input = new TextBox { Placeholder = "Loaded event metadata", MinWidth = 30 };
+        var other = new Button("Next");
+        var root = new VStack(input, other);
+        await using var ui = new DesignerUxTests.UiSession(root, () => { });
+        var palettes = ThemeCatalog.Names.Select(ThemeCatalog.Load).Append(
+            ThemeCatalog.FromDictionary(new Hashtable { ["Base"] = "Light Modern", ["Panel"] = "#abc", ["Foreground"] = "#123" }));
+        foreach (var palette in palettes) {
+            palette.Apply(root);
+            Assert.AreSame(palette.Controls, input.GetTheme(), palette.Name);
+            var style = input.GetStyle<TextBoxStyle>();
+            Assert.IsNull(style.Background, "Native state fills must not be pinned by literal style overrides.");
+            ui.App.Focus(other);
+            ui.Tick();
+            Assert.IsFalse(input.HasFocus);
+            Assert.IsTrue(style.BackgroundStyle(input.GetTheme(), input.HasFocus).TryGetBackground(out var normal));
+            Assert.AreEqual(palette.Controls.InputFill, normal);
+            Assert.AreNotEqual(palette.Background, normal, palette.Name);
+            ui.App.Focus(input);
+            ui.Tick();
+            Assert.IsTrue(input.HasFocus);
+            Assert.IsTrue(style.BackgroundStyle(input.GetTheme(), input.HasFocus).TryGetBackground(out var focused));
+            Assert.AreEqual(palette.Controls.InputFillFocused, focused);
+            Assert.AreNotEqual(normal, focused, palette.Name);
+            input.IsEnabled = false;
+            ui.Tick();
+            Assert.IsFalse(input.IsEnabled);
+            Assert.AreEqual(palette.Controls.Disabled, input.GetTheme().Disabled);
+            input.IsEnabled = true;
+        }
+    }
+
     [TestMethod]
     public void InlineThemesRenderAllSurfaceFamiliesWithoutGlobalState() {
         Assert.HasCount(20, ThemeCatalog.Names);

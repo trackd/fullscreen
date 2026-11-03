@@ -33,6 +33,8 @@ public sealed partial class DeveloperApp : IFullscreenApp {
     private string _detail = "";
     private string _summary = "";
     private int _page;
+    private bool _previewEnabled;
+    private static readonly string[] AzureOptionalColumns = ["Type", "Board column", "Parent", "Priority", "Remaining", "Iteration", "Tags"];
     /// <summary>Gets the resource or monitor view index.</summary>
     public int View { get; private set; }
     /// <summary>Gets whether a background operation is in progress.</summary>
@@ -59,6 +61,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         bool minimal = false
     ) {
         _backend = backend;
+        _previewEnabled = backend is not AzureDevOpsBackend;
         _refreshInterval = TimeSpan.FromSeconds(refreshSeconds);
         _readOnly = readOnly;
         Surface = new(new TableModel(["Loading"]), backend.Title) {
@@ -75,7 +78,24 @@ public sealed partial class DeveloperApp : IFullscreenApp {
                 return null;
             }
 
-            return row.Cells[column].ToLowerInvariant() switch {
+            string value = row.Cells[column];
+            if (value.StartsWith("✓ ", StringComparison.Ordinal)) {
+                return Surface.Palette.Success;
+            }
+
+            if (value.StartsWith("✗ ", StringComparison.Ordinal)) {
+                return Surface.Palette.Error;
+            }
+
+            if (value.StartsWith("● ", StringComparison.Ordinal)) {
+                return Surface.Palette.Warning;
+            }
+
+            if (value.StartsWith("○ ", StringComparison.Ordinal)) {
+                return Surface.Palette.Foreground;
+            }
+
+            return value.ToLowerInvariant() switch {
                 "success" or "succeeded" or "completed" or "active" => Surface.Palette.Success,
                 "failure" or "failed" or "timed_out" or "startup_failure" or "action_required" => Surface.Palette.Error,
                 "queued" or "pending" or "in_progress" or "inprogress" or "waiting" or "requested"
@@ -112,8 +132,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
             }
         };
         if (backend is AzureDevOpsBackend) {
-            Surface.ExtraHelp += " · K kanban · M assigned to me";
-            Surface.PriorityShortcuts = ["k", "K"];
+            UpdateAzureCommands();
         }
 
         Surface.ContextRequested += ShowActions;
@@ -124,17 +143,37 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         };
         Surface.Shortcut += key => {
             switch (key.ToLowerInvariant()) {
+                case "u":
+                    if (_backend is AzureDevOpsBackend && (AzureDevOpsBackend.IsWorkItemView(View) || View == 5)) {
+                        ShowAnalytics();
+                    }
+                    break;
+                case "v":
+                    if (_backend is AzureDevOpsBackend) {
+                        TogglePreview();
+                    }
+                    break;
+                case "i":
+                    if (_backend is AzureDevOpsBackend && View is 2 or 3 && !Busy) {
+                        ShowSprints();
+                    }
+                    break;
                 case "k":
-                    if (_backend is AzureDevOpsBackend && View is >= 1 and <= 3) {
+                    if (_backend is AzureDevOpsBackend && AzureDevOpsBackend.IsWorkItemView(View)) {
                         ShowKanban();
                     }
 
                     break;
                 case "m":
-                    if (!Busy && _backend is AzureDevOpsBackend && View is >= 1 and <= 3) {
+                    if (!Busy && _backend is AzureDevOpsBackend && AzureDevOpsBackend.IsWorkItemView(View)) {
                         Execute(_backend.Operations(View, null).First(), "");
                     }
 
+                    break;
+                case "l":
+                    if (!Busy && _backend is AzureDevOpsBackend && View == 6) {
+                        ShowBacklogLevels();
+                    }
                     break;
                 case "a":
                     ShowActions(Surface.Bounds.X + 2, Surface.Bounds.Y + 3);
@@ -221,11 +260,16 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         }
 
         View = view;
+        _analyticsRequested = false;
         _page = 0;
         Surface.ActiveTab = view;
         _expanded = false;
         Surface.SetDocument(null);
         Surface.ResetColumns();
+        Surface.StretchColumn = _backend is AzureDevOpsBackend && AzureDevOpsBackend.IsWorkItemView(view) ? 2 : -1;
+        if (_backend is AzureDevOpsBackend) {
+            UpdateAzureCommands();
+        }
         if (_pages.TryGetValue((view, 0), out var model)) {
             Surface.Model = model;
             Surface.PreferredWidths = model.PreferredWidths;
@@ -256,7 +300,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         _selectedKey = null;
         _loadingDetailKey = null;
         _detail = "";
-        Surface.SetPreview("DETAILS", "Loading…");
+        Surface.SetPreview("DETAILS", _previewEnabled ? "Loading…" : null);
         long version = Interlocked.Increment(ref _version);
         int view = View, page = _page;
         Surface.Status = "Loading " + _backend.Tabs[view] + $" · page {page + 1}";
@@ -327,9 +371,20 @@ public sealed partial class DeveloperApp : IFullscreenApp {
                 Surface.Model = model;
                 Surface.PreferredWidths = result.Widths;
                 Surface.Title = _backend.Title + (_readOnly ? " · READ ONLY" : "");
+                if (_backend is AzureDevOpsBackend && AzureDevOpsBackend.IsWorkItemView(view)) {
+                    foreach (string column in AzureOptionalColumns) {
+                        int columnIndex = Array.IndexOf(model.Columns, column);
+                        if (columnIndex >= 0 && !previous.Columns.Contains(column, StringComparer.Ordinal)) {
+                            model.Enabled[columnIndex] = false;
+                        }
+                    }
+                }
                 _summary = result.Summary;
                 Surface.Status = result.Summary;
                 Busy = false;
+                if (_backend is AzureDevOpsBackend) {
+                    UpdateAzureCommands();
+                }
                 Surface.Refresh();
                 if (_showBoardWhenLoaded && view == 1) {
                     _showBoardWhenLoaded = false;
@@ -344,7 +399,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         int view = View;
         Busy = true;
         _loadingDetailKey = item.Key;
-        Surface.SetPreview("DETAILS · " + item.Key, "Loading details…");
+        Surface.SetPreview("DETAILS · " + item.Key, _previewEnabled ? "Loading details…" : null);
         Queue(new(version, async token => {
             string text = await _backend.DetailAsync(view, item, token).ConfigureAwait(false);
             return () => {
@@ -353,7 +408,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
                 Busy = false;
                 _error = false;
                 Surface.Status = _summary;
-                Surface.SetPreview("DETAILS · " + item.Key + " · Enter expand", text);
+                Surface.SetPreview("DETAILS · " + item.Key + " · Enter expand", _previewEnabled ? text : null);
                 if (_expanded) {
                     ShowExpanded(item, text);
                 }
@@ -391,12 +446,13 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         }
 
         Dialog? dialog = null;
-        var description = new TextBlock(Files.FileReader.Sanitize(operation.Description, true));
+        var description = new TextBlock(Files.FileReader.Sanitize(operation.Description, true)) { Wrap = true };
         TextBox? input = operation.InputLabel is null ? null : new TextBox {
             Text = operation.InitialText
         };
         TextArea? multiline = operation.Label.Contains("description", StringComparison.OrdinalIgnoreCase)
-            || operation.Label.Contains("discussion", StringComparison.OrdinalIgnoreCase) ? new TextArea {
+            || operation.Label.Contains("discussion", StringComparison.OrdinalIgnoreCase)
+            || operation.Label.Contains("comment", StringComparison.OrdinalIgnoreCase) ? new TextArea {
                 Text = operation.InitialText,
                 MinHeight = 6,
                 MaxHeight = 12
@@ -409,7 +465,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
             content.Add((Visual?)multiline ?? input);
         }
 
-        content.Add(new HStack(new Button("Cancel").Click(() => dialog!.Close()), new Button("Continue").Click(() => {
+        content.Add(new HStack(DeveloperButton("Cancel", () => dialog!.Close()), DeveloperButton("Continue", () => {
             string text = multiline?.Text ?? input?.Text ?? "";
             dialog!.Close();
             Confirm(operation, text);
@@ -436,11 +492,15 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         Dialog? dialog = null;
         string preview = operation.Description + (operation.InputLabel is null ? "" : "\n\n" + operation.InputLabel +
             ":\n" + text);
+        var cancel = DeveloperButton("Cancel", () => dialog!.Close());
+        cancel.AutoFocus = true;
         dialog = new Dialog {
             Title = new TextBlock("Confirm · " + operation.Label),
             IsModal = true,
             Width = Math.Max(24, Math.Min(88, Surface.Bounds.Width - 4)),
-            Content = new VStack(new TextBlock(Files.FileReader.Sanitize(preview, true)), new HStack(new Button("Cancel").Click(() => dialog!.Close()), new Button("Confirm").Click(() => {
+            Content = new VStack(new ScrollViewer(new TextBlock(Files.FileReader.Sanitize(preview, true)) { Wrap = true }) {
+                MaxHeight = Math.Max(1, Surface.Bounds.Height - 10), HorizontalScrollEnabled = false
+            }, new HStack(cancel, DeveloperButton("Confirm", () => {
                 dialog!.Close();
                 Execute(operation, text);
                 AppFocus();
@@ -453,6 +513,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
             }
         });
         dialog.Show();
+        Surface.App?.Focus(cancel);
     }
 
     private void AppFocus() =>
@@ -507,6 +568,13 @@ public sealed partial class DeveloperApp : IFullscreenApp {
             completion();
         }
 
+        if (_analyticsRequested && !Busy) {
+            _analyticsRequested = false;
+            if (!_error) {
+                ShowAnalytics();
+            }
+        }
+
         if (!Busy && !_mutation && !_expanded) {
             string? key = (Surface.Model.Current?.Original as DeveloperItem)?.Key;
             if (key != _selectedKey) {
@@ -514,9 +582,9 @@ public sealed partial class DeveloperApp : IFullscreenApp {
                 _error = false;
                 _selectionChanged = Stopwatch.GetTimestamp();
                 _detail = "";
-                Surface.SetPreview("DETAILS", "Loading selection…");
+                Surface.SetPreview("DETAILS", _previewEnabled ? "Loading selection…" : null);
             }
-            else if (!_error && !Surface.Minimal && Surface.Bounds.Width >= 100 && _detail.Length == 0
+            else if (_previewEnabled && !_error && !Surface.Minimal && Surface.Bounds.Width >= 100 && _detail.Length == 0
                 && Surface.Model.Current?.Original is DeveloperItem item
                 && Stopwatch.GetElapsedTime(_selectionChanged).TotalMilliseconds >= 100) {
                 Detail(item);

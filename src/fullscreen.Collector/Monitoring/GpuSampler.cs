@@ -6,21 +6,27 @@ public sealed class GpuSampler : IDisposable {
     private NvmlSampler? _nvml;
     private WindowsGpuSampler? _windows;
     private (bool Devices, bool Processes) _mode;
+    internal CollectorCapabilities ProcessCapabilities =>
+        (_windows?.Capabilities ?? CollectorCapabilityDetection.Current()) & CollectorCapabilities.ProcessGraphics;
+    internal CollectorCapabilities DeviceCapabilities { get; private set; }
     /// <summary>Updates graphics-device and optional per-process GPU counters in a frame.</summary>
     /// <param name="frame">The reusable metric snapshot to read or fill.</param>
     /// <param name="devices">Whether device-wide GPU counters are collected. Defaults to true.</param>
     /// <param name="processes">Whether per-process GPU counters are collected. Defaults to true.</param>
     public void Sample(CollectorFrame frame, bool devices = true, bool processes = true) {
         frame.GpuCount = 0;
+        DeviceCapabilities = CollectorCapabilities.None;
         if (devices) {
             (_nvml ??= new()).Sample(frame);
+            DeviceCapabilities |= _nvml.Capabilities;
         }
         else {
             _nvml?.Dispose();
             _nvml = null;
         }
 
-        if (Platform.IsWindows() && (processes || devices && frame.GpuCount == 0)) {
+        bool wddm = (CollectorCapabilityDetection.Current() & CollectorCapabilities.ProcessGraphics) != 0;
+        if (Platform.IsWindows() && wddm && (processes || devices && frame.GpuCount == 0)) {
             if (_mode != (devices, processes)) {
                 _windows?.Dispose();
                 _windows = null;
@@ -28,6 +34,9 @@ public sealed class GpuSampler : IDisposable {
             }
 
             (_windows ??= new(processes, devices)).Sample(processes);
+            if (devices) {
+                DeviceCapabilities |= _windows.Capabilities & CollectorCapabilities.DeviceGraphics;
+            }
         }
         else {
             _windows?.Dispose();
@@ -42,10 +51,17 @@ public sealed class GpuSampler : IDisposable {
                     }
 
                     string device = Path.Combine(card, "device");
-                    if (!File.Exists(Path.Combine(device, "gpu_busy_percent"))) {
+                    if (!ExposesCounter(Path.Combine(device, "gpu_busy_percent"))) {
                         continue;
                     }
 
+                    DeviceCapabilities |= CollectorCapabilities.GpuUtilization;
+                    if (ExposesCounter(Path.Combine(device, "mem_info_vram_used"))) {
+                        DeviceCapabilities |= CollectorCapabilities.GpuUsedMemory;
+                    }
+                    if (ExposesCounter(Path.Combine(device, "mem_info_vram_total"))) {
+                        DeviceCapabilities |= CollectorCapabilities.GpuTotalMemory;
+                    }
                     double? busy = ReadNumber(Path.Combine(device, "gpu_busy_percent"));
                     ulong? used = (ulong?)ReadNumber(Path.Combine(device, "mem_info_vram_used"));
                     ulong? total = (ulong?)ReadNumber(Path.Combine(device, "mem_info_vram_total"));
@@ -54,8 +70,10 @@ public sealed class GpuSampler : IDisposable {
                 }
             }
             catch (IOException) {
+                DeviceCapabilities |= CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory;
             }
             catch (UnauthorizedAccessException) {
+                DeviceCapabilities |= CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory;
             }
         }
 
@@ -71,6 +89,19 @@ public sealed class GpuSampler : IDisposable {
         }
 
         frame.GpuStatus = frame.GpuCount > 0 ? "GPU telemetry available" : "Unavailable · driver/provider not exposed";
+    }
+
+    private static bool ExposesCounter(string path) {
+        try {
+            _ = File.GetAttributes(path);
+            return true;
+        }
+        catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException) {
+            return false;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) {
+            return true; // An inaccessible provider is not evidence that the metric is unsupported.
+        }
     }
 
     private static double? ReadNumber(string path) {

@@ -114,7 +114,9 @@ internal sealed partial class UserSessionSampler {
                     "",
                     (int)row.SessionId
                 );
-                Add(frame, EnrichWindows(session, row.SessionId));
+                if (session.IsNamedWindowsSession) {
+                    Add(frame, EnrichWindows(session, row.SessionId));
+                }
             }
         }
         finally {

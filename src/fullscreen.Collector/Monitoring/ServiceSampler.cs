@@ -170,29 +170,9 @@ internal sealed class ServiceSampler {
                 int size = Marshal.SizeOf<NativeService>();
                 for (int i = 0; i < count; i++) {
                     var service = Marshal.PtrToStructure<NativeService>(IntPtr.Add(buffer, i * size));
-                    string state = service.State switch {
-                        1 => "stopped",
-                        2 => "starting",
-                        3 => "stopping",
-                        4 => "running",
-                        5 => "continuing",
-                        6 => "pausing",
-                        7 => "paused",
-                        _ => "unknown"
-                    };
                     string name = Marshal.PtrToStringUni(service.Name) ?? "";
-                    string detail = service.ExitCode == 0 ? "—" : "error " + service.ExitCode.ToString(CultureInfo.InvariantCulture) + (service.ServiceExitCode == 0 ? "" : " / service " + service.ServiceExitCode.ToString(CultureInfo.InvariantCulture));
-                    Add(
-                        frame,
-                        new(
-                            name,
-                            Marshal.PtrToStringUni(service.DisplayName) ?? "",
-                            state,
-                            detail,
-                            service.ProcessId == 0 ? null : (int)service.ProcessId,
-                            Account(manager, name)
-                        )
-                    );
+                    Add(frame, WindowsRow(name, Marshal.PtrToStringUni(service.DisplayName) ?? "",
+                        service.State, service.ProcessId, Account(manager, name)));
                 }
 
                 if (success != 0) {
@@ -210,6 +190,18 @@ internal sealed class ServiceSampler {
             Marshal.FreeHGlobal(buffer);
         }
     }
+
+    internal static ServiceRow WindowsRow(string name, string displayName, uint state, uint processId, string? account) =>
+        new(name, displayName, state switch {
+            1 => "stopped",
+            2 => "starting",
+            3 => "stopping",
+            4 => "running",
+            5 => "continuing",
+            6 => "pausing",
+            7 => "paused",
+            _ => "unknown"
+        }, "", processId == 0 ? null : (int)processId, account);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeConfig {

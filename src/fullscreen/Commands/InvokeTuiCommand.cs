@@ -30,7 +30,7 @@ public sealed class InvokeTuiCommand : CustomTuiCommand {
 
     /// <summary>Script block receiving param($tuiEvent, $state). Event contains Id, Kind and Value. Kinds
     /// include Start, Change, Click, Selection, Submit and Close; use Get-TuiControl to see each
-    /// control&apos;s supported events. Start has an empty Id, and Click has a null Value. Mutate state
+    /// control&apos;s supported events. Start has an empty Id; menu Click values identify the action. Mutate state
     /// directly or return one hashtable with State updates, Close and optional Value. Other success-stream
     /// output is rejected. Handlers execute only in Invoke-Tui, never in the designer preview.</summary>
     [Parameter]
@@ -141,7 +141,7 @@ public sealed class InvokeTuiCommand : CustomTuiCommand {
         var eventObject = new PSObject();
         eventObject.Properties.Add(new PSNoteProperty("Id", ev.Id));
         eventObject.Properties.Add(new PSNoteProperty("Kind", ev.Kind));
-        eventObject.Properties.Add(new PSNoteProperty("Value", ev.Kind == "Click" ? null : ev.Value));
+        eventObject.Properties.Add(new PSNoteProperty("Value", ev.Kind == "Click" && ev.Value is bool ? null : ev.Value));
         var output = script.Invoke(eventObject, state);
         if (output.Count == 0) {
             return null;

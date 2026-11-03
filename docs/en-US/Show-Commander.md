@@ -29,7 +29,7 @@ fmc
 
 ## DESCRIPTION
 
-Browse two independent directory panes with Tab, arrows or hjkl. F3 opens a text or Markdown viewer; F4 toggles minimal mode. F5/F6 copy or move to the opposite pane, F7 creates folders and F8 moves items to recoverable .fullscreen-trash folders. Delete permanently removes selected files or directory contents after confirmation, with Cancel focused by default. F9 also offers permanent delete; F10/Q closes the app. Transfers never overwrite destinations. Unix copy preserves permission bits. File operations are confirmed in the UI. File I/O runs on workers and no shell commands are executed. The default palette is classic blue; Theme can override it.
+Browse two independent directory panes with Tab, arrows or hjkl. F3 opens a text or Markdown viewer; F4 toggles minimal mode. F5/F6 copy or move to the opposite pane, F7 creates folders and F8 moves items to recoverable .fullscreen-trash folders. Delete permanently removes selected files or directory contents after confirmation, with Cancel focused by default. F9 also offers permanent delete; F10/Q closes the app. Right-click an item for a menu of these actions. Transfers never overwrite destinations. Unix copy preserves permission bits. File operations are confirmed in the UI. No shell commands are run. The default palette is classic blue; Theme can override it.
 
 Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
 output and keyboard focus). F12 works in minimal mode and while dialogs are open.

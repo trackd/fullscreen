@@ -141,16 +141,8 @@ internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
         _ = Revision;
         if (!ReferenceEquals(_menuPalette, Palette)) {
             _menuPalette = Palette;
-            var normal = Palette.AccentStyle.WithBackground(Color.Mix(Palette.Background, Palette.Accent, .18f)) | TextStyle.Bold;
             foreach (var button in _menuButtons) {
-                button.SetStyle(ButtonStyle.Default with {
-                    Padding = new(1, 0, 1, 0),
-                    ShowBorder = false,
-                    Normal = normal,
-                    Hovered = Palette.Body.WithBackground(Palette.Accent).WithForeground(Palette.Background) | TextStyle.Bold,
-                    Pressed = Palette.Selected | TextStyle.Bold,
-                    Focused = normal | TextStyle.Underline
-                });
+                button.SetStyle(Palette.CompactActionButton);
             }
         }
 

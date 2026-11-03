@@ -9,9 +9,9 @@ public enum ServiceColumn {
     State,
     /// <summary>Displays the process identifier.</summary>
     ProcessId,
-    /// <summary>Displays the description.</summary>
+    /// <summary>Displays the Windows display name or platform service description.</summary>
     Description,
-    /// <summary>Displays the detail.</summary>
+    /// <summary>Displays additional platform state details when available.</summary>
     Detail,
     /// <summary>Displays the account name.</summary>
     UserName

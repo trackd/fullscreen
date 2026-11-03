@@ -1,6 +1,7 @@
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Styling;
+using XenoAtom.Terminal.UI.Controls;
 
 namespace fullscreen.Themes;
 /// <summary>Precomputed styles, owned by each surface. Theme configuration never runs in the render loop.</summary>
@@ -61,6 +62,7 @@ public sealed class ThemePalette {
     public Style ChartGrid { get; }
     /// <summary>Gets the controls indexed by document identifier.</summary>
     public Theme Controls { get; }
+    internal ButtonStyle CompactActionButton { get; }
 
     internal ThemePalette(
         string name,
@@ -113,8 +115,8 @@ public sealed class ThemePalette {
             ControlFill = panel,
             ControlFillHover = selection,
             ControlFillPressed = selection,
-            InputFill = background,
-            InputFillFocused = panel,
+            InputFill = Color.Mix(panel, accent, .12f),
+            InputFillFocused = Color.Mix(panel, accent, .24f),
             Border = muted,
             FocusBorder = accent,
             Accent = accent,
@@ -125,6 +127,15 @@ public sealed class ThemePalette {
             Warning = warning,
             Error = error,
             Muted = muted
+        };
+        var button = AccentStyle.WithBackground(Color.Mix(background, accent, .18f)) | TextStyle.Bold;
+        CompactActionButton = ButtonStyle.Default with {
+            Padding = new(1, 0, 1, 0),
+            ShowBorder = false,
+            Normal = button,
+            Hovered = Body.WithBackground(accent).WithForeground(background) | TextStyle.Bold,
+            Pressed = Selected | TextStyle.Bold,
+            Focused = button | TextStyle.Underline
         };
     }
 
@@ -152,13 +163,16 @@ public sealed class ThemePalette {
             if (child is ThemedSurface surface) {
                 surface.Palette = this;
             }
+            if (child is TextBox or TextArea) {
+                child.SetStyle(Controls);
+            }
         }
 
         if (visual is ThemedSurface root) {
             root.Palette = this;
         }
 
-        visual.SetStyle(IsDefault ? Theme.Default : Controls);
+        visual.SetStyle(IsDefault && visual is not (TextBox or TextArea) ? Theme.Default : Controls);
     }
 }
 

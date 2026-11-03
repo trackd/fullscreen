@@ -15,6 +15,23 @@ public sealed partial class MonitorSurface {
     private int _columnPickerIndex;
     private readonly Column[] _columns = new Column[14];
     private int _columnCount, _columnLayoutWidth = -1, _columnLayoutVersion = -1;
+    private int _firstProcessColumn;
+    private readonly List<ProcessColumn> _availableProcessColumns = [];
+    private int _availableColumnsVersion = -1;
+    private CollectorCapabilities? _availableCapabilities;
+    private List<ProcessColumn> AvailableProcessColumns {
+        get {
+            if (_availableColumnsVersion != ColumnSettings.Version || _availableCapabilities != Frame.Capabilities) {
+                _availableColumnsVersion = ColumnSettings.Version;
+                _availableCapabilities = Frame.Capabilities;
+                _availableProcessColumns.Clear();
+                _availableProcessColumns.AddRange(ColumnSettings.Selected.Where(AvailableColumn));
+                _columnLayoutWidth = -1;
+            }
+            return _availableProcessColumns;
+        }
+    }
+    internal int FirstProcessColumn => _firstProcessColumn;
     private readonly record struct Column(int X, int Width, string Header, ProcessSort Sort, ProcessColumn Kind);
     private ReadOnlySpan<Column> Columns {
         get {
@@ -25,22 +42,23 @@ public sealed partial class MonitorSurface {
 
     private static (string Header, int Width, int Priority, ProcessSort Sort) DescribeColumn(ProcessColumn column) =>
         column switch {
-            ProcessColumn.Id => ("PID", 7, 9, ProcessSort.Id),
+            ProcessColumn.Id => ("PID", 8, 9, ProcessSort.Id),
             ProcessColumn.ParentId => ("PPID", 7, 5, ProcessSort.ParentId),
-            ProcessColumn.UserName => ("USER", 20, 6, ProcessSort.UserName),
-            ProcessColumn.Cpu => ("CPU%", 7, 8, ProcessSort.Cpu),
-            ProcessColumn.Memory => ("RSS", 11, 7, ProcessSort.Memory),
+            ProcessColumn.UserName => ("USER", 18, 6, ProcessSort.UserName),
+            ProcessColumn.Cpu => ("CPU%", 6, 8, ProcessSort.Cpu),
+            ProcessColumn.Memory => ("RSS", 10, 7, ProcessSort.Memory),
             ProcessColumn.MemoryPercent => ("MEM%", 7, 1, ProcessSort.Memory),
-            ProcessColumn.Gpu => ("GPU%", 7, 4, ProcessSort.Gpu),
+            ProcessColumn.Gpu => ("GPU%", 6, 4, ProcessSort.Gpu),
             ProcessColumn.GpuMemory => ("VRAM", 11, 2, ProcessSort.GpuMemory),
             ProcessColumn.CpuTime => ("TIME", 14, 3, ProcessSort.CpuTime),
             ProcessColumn.Status => ("STATUS", 12, 4, ProcessSort.Status),
-            ProcessColumn.Disk => ("DISK/s", 14, 5, ProcessSort.Disk),
-            ProcessColumn.Network => ("NET/s", 14, 5, ProcessSort.Network),
+            ProcessColumn.Disk => ("DISK/s", 12, 5, ProcessSort.Disk),
+            ProcessColumn.Network => ("NET/s", 12, 5, ProcessSort.Network),
             ProcessColumn.Threads => ("THR", 6, 3, ProcessSort.Threads),
             _ => ("PROCESS", 24, 10, ProcessSort.Name)
         };
     private void LayoutColumns() {
+        var selected = AvailableProcessColumns;
         if (_columnLayoutWidth == Bounds.Width && _columnLayoutVersion == ColumnSettings.Version) {
             return;
         }
@@ -48,58 +66,20 @@ public sealed partial class MonitorSurface {
         _columnLayoutWidth = Bounds.Width;
         _columnLayoutVersion = ColumnSettings.Version;
         _columnCount = 0;
-        var selected = ColumnSettings.Selected;
-        Span<bool> visible = stackalloc bool[14];
-        Span<int> widths = stackalloc int[14];
-        visible.Clear();
-        widths.Clear();
-        int total = 0, active = selected.Count;
-        for (int i = 0; i < selected.Count; i++) {
-            if (!_probeColumns && !AvailableColumn(selected[i])) {
-                active--;
-                continue;
-            }
-
-            visible[i] = true;
-            widths[i] = DescribeColumn(selected[i]).Width;
-            if (selected[i] == ProcessColumn.UserName && Bounds.Width < 115) {
-                widths[i] = 12;
-            }
-
-            total += widths[i] + 1;
-        }
-
-        int available = Math.Max(1, Bounds.Width - 2);
-        while (total - 1 > available && active > 1) {
-            int hide = -1, priority = int.MaxValue;
-            for (int i = 0; i < selected.Count; i++) {
-                int candidate = DescribeColumn(selected[i]).Priority;
-                if (visible[i] && candidate < priority) {
-                    hide = i;
-                    priority = candidate;
-                }
-            }
-
-            if (hide < 0) {
-                break;
-            }
-
-            visible[hide] = false;
-            total -= widths[hide] + 1;
-            active--;
-        }
-
-        int x = 1, extra = Math.Max(0, available - (total - 1));
-        for (int i = 0; i < selected.Count; i++) {
-            if (!visible[i]) {
-                continue;
-            }
-
+        _firstProcessColumn = Math.Clamp(_firstProcessColumn, 0, Math.Max(0, selected.Count - 1));
+        int x = 1;
+        for (int i = _firstProcessColumn; i < selected.Count && x < Bounds.Width - 1; i++) {
             var (Header, Width, Priority, Sort) = DescribeColumn(selected[i]);
-            int width = selected[i] == ProcessColumn.Name ? widths[i] + extra : widths[i];
-            _columns[_columnCount++] = new(x, Math.Min(width, Math.Max(1, Bounds.Width - 1 - x)), Header, Sort, selected[i]);
-            x += width + 1;
+            _columns[_columnCount++] = new(x, Math.Min(Width, Math.Max(1, Bounds.Width - 1 - x)), Header, Sort, selected[i]);
+            x += Width + 1;
         }
+    }
+
+    private void ScrollProcessColumns(int delta) {
+        _firstProcessColumn = Math.Clamp(_firstProcessColumn + delta, 0, Math.Max(0, AvailableProcessColumns.Count - 1));
+        _columnLayoutWidth = -1;
+        Dirty = true;
+        Refresh();
     }
 
     /// <summary>Toggles the process-tree view and adjusts required columns.</summary>
@@ -158,7 +138,7 @@ public sealed partial class MonitorSurface {
             buffer,
             box.X + 2,
             box.Y + box.Height - 2,
-            "D defaults · narrow screens hide overflow",
+            "D defaults · ←/→ scroll overflow in table",
             Muted,
             box.Width - 4
         );

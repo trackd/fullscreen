@@ -48,6 +48,9 @@ Describe 'Remote collector' -Tag 'Integration' {
             ($collectorProcess.CpuTimeTicks) | Should -BeGreaterThan (0) -Because 'Remote cumulative CPU time was not preserved.'
             ($collectorProcess.CpuPercent) | Should -BeGreaterOrEqual (0) -Because 'Remote CPU must use 0-100 percent.'
             ($collectorProcess.CpuPercent) | Should -BeLessOrEqual (100) -Because 'Remote CPU must use 0-100 percent.'
+            $frame.Capabilities | Should -Not -BeNullOrEmpty -Because 'Capabilities must be supplied by the collector host over PSRP.'
+            $commandLine = $source.ReadCommandLine($collectorProcess, [Threading.CancellationToken]::None)
+            $commandLine | Should -Match '(?i)(pwsh|powershell)' -Because 'The deployed collector must inspect command lines without the UI assembly.'
             [bool](($IsWindows -or $IsLinux) -and [string]::IsNullOrEmpty($collectorProcess.UserName)) | Should -BeFalse -Because 'Remote process username was lost during collection/serialization.'
             [bool](($IsWindows -or $IsLinux) -and $null -eq $collectorProcess.ParentId) | Should -BeFalse -Because 'Remote parent process ID was lost during collection/serialization.'
             $metricsType = ($sourceType.GetMethods() | Where-Object { $_.Name -eq 'Sample' -and $_.GetParameters().Count -eq 3 } | Select-Object -First 1).GetParameters()[1].ParameterType
@@ -70,6 +73,12 @@ Describe 'Remote collector' -Tag 'Integration' {
             $probe = [System.Management.Automation.PowerShell]::Create()
             try {
                 $probe.Runspace = $remoteRunspace
+                $null = $probe.AddScript('[fullscreen.Monitoring.ProcessOwnerReader].Assembly.GetName().Name')
+                ([string]$probe.Invoke()[0]) | Should -Be 'fullscreen.Collector'
+                $probe.Commands.Clear()
+                $null = $probe.AddScript('@([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq "fullscreen" -or $_.GetName().Name -like "XenoAtom*" }).Count')
+                ([int]$probe.Invoke()[0].BaseObject) | Should -Be 0 -Because 'Remote details must not load the UI assembly or dependencies.'
+                $probe.Commands.Clear()
                 $null = $probe.AddScript('param($Handle) [fullscreen.Monitoring.CollectorSessions]::IsOpen($Handle)').AddArgument($handle)
                 $result = $probe.Invoke()
                 ([bool]$result[0].BaseObject) | Should -BeFalse -Because 'Remote collector handle was not closed.'

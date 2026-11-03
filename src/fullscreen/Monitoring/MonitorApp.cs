@@ -21,9 +21,12 @@ public sealed class MonitorApp : IFullscreenApp {
     private int _version, _displayedVersion = -1, _age = -1;
     private string? _sourceError;
     private double _latency;
-    private readonly ConcurrentQueue<MonitorActionRequest> _actions = new();
+    private readonly ConcurrentQueue<MonitorActionRequest[]> _actions = new();
     private int _actionVersion, _shownActionVersion;
     private string _actionMessage = "";
+    private bool _batchResults;
+    private readonly ConcurrentQueue<(long Id, ProcessRow Process)> _detailRequests = new();
+    private readonly ConcurrentQueue<(long Id, string Text)> _detailResults = new();
     /// <summary>Gets the root visual whose descendants are inspected.</summary>
     public Visual Root => _surface;
     /// <summary>Gets or sets the chart representation to display.</summary>
@@ -52,6 +55,7 @@ public sealed class MonitorApp : IFullscreenApp {
     /// <param name="includeUserProcesses">Whether owned processes are shown in the user-session tree.
     /// Defaults to true.</param>
     /// <param name="usersOnly">Whether only the user-session view is available. Defaults to false.</param>
+    /// <param name="backgroundSampling">Whether dashboard summaries continue sampling in other views.</param>
     public MonitorApp(
         int refreshRate,
         int sampleInterval,
@@ -67,12 +71,14 @@ public sealed class MonitorApp : IFullscreenApp {
         GpuColumn[]? excludedGpu = null,
         bool minimal = false,
         bool includeUserProcesses = true,
-        bool usersOnly = false
+        bool usersOnly = false,
+        bool backgroundSampling = false
     ) {
         _source = source ?? new LocalMonitorSource();
         _frameInterval = TimeSpan.FromSeconds(1.0 / refreshRate);
         _surface = new MonitorSurface {
             UsersOnly = usersOnly,
+            BackgroundSampling = backgroundSampling,
             IncludeUserProcesses = includeUserProcesses,
             View = view,
             SourceLabel = _source.Label,
@@ -98,15 +104,23 @@ public sealed class MonitorApp : IFullscreenApp {
         _surface.Model.Filter = filter;
         _surface.Model.Sort = sort;
         _surface.ActionsEnabled = _source is IMonitorControlSource;
-        _surface.ActionRequested += request => {
+        void EnqueueActions(MonitorActionRequest[] requests) {
             if (_surface.ActionBusy || !_surface.ActionsEnabled) {
                 return;
             }
 
             _surface.ActionBusy = true;
-            _surface.ActionMessage = "Running " + request.Action + " · " + request.Name;
+            _surface.ActionMessage = "Running " + requests[0].Action + " · " + requests.Length + " target(s)";
             _surface.Refresh();
-            _actions.Enqueue(request);
+            _actions.Enqueue(requests);
+            if (_wake.CurrentCount == 0) {
+                _wake.Release();
+            }
+        }
+        _surface.ActionRequested += request => EnqueueActions([request]);
+        _surface.SessionLogoffRequested += requests => EnqueueActions([.. requests]);
+        _surface.ProcessDetailRequested += (id, process) => {
+            _detailRequests.Enqueue((id, process));
             if (_wake.CurrentCount == 0) {
                 _wake.Release();
             }
@@ -119,25 +133,51 @@ public sealed class MonitorApp : IFullscreenApp {
             try {
                 while (!_stop.IsCancellationRequested) {
                     var metrics = (CollectorMetrics)Volatile.Read(ref _requestedMetrics);
-                    if (_actions.TryDequeue(out var action)) {
-                        string message;
-                        try {
-                            ((IMonitorControlSource)_source).Execute(action, _stop.Token);
-                            message = action.Action + " requested · " + action.Name;
-                        }
-                        catch (OperationCanceledException) when (_stop.IsCancellationRequested) {
-                            break;
-                        }
-                        catch (Exception error) {
-                            message = "Action failed · " + error.Message;
+                    if (_actions.TryDequeue(out var actions)) {
+                        var results = new List<string>();
+                        foreach (var action in actions) {
+                            try {
+                                _stop.Token.ThrowIfCancellationRequested();
+                                ((IMonitorControlSource)_source).Execute(action, _stop.Token);
+                                results.Add(action.Action + " requested · " + action.Name +
+                                    (action.Action == MonitorAction.LogoffSession ? " #" + action.SessionId : ""));
+                            }
+                            catch (OperationCanceledException) when (_stop.IsCancellationRequested) {
+                                throw;
+                            }
+                            catch (Exception error) {
+                                results.Add("Action failed · " + error.Message + " · " + action.Name +
+                                    (action.Action == MonitorAction.LogoffSession ? " #" + action.SessionId : ""));
+                            }
                         }
 
                         lock (_gate) {
-                            _actionMessage = message;
+                            _actionMessage = string.Join(" | ", results);
+                            _batchResults = actions.Length > 1;
                             _actionVersion++;
                         }
 
                         previous = null;
+                    }
+
+                    if (_detailRequests.TryDequeue(out var detail)) {
+                        // Only the newest open process dialog needs a lookup.
+                        while (_detailRequests.TryDequeue(out var newer)) {
+                            detail = newer;
+                        }
+                        string text;
+                        try {
+                            text = _source is IMonitorProcessDetailSource details
+                                ? details.ReadCommandLine(detail.Process, _stop.Token)
+                                : "Unavailable: this source does not support command-line inspection.";
+                        }
+                        catch (OperationCanceledException) when (_stop.IsCancellationRequested) {
+                            throw;
+                        }
+                        catch (Exception error) {
+                            text = "Unavailable: " + error.Message;
+                        }
+                        _detailResults.Enqueue((detail.Id, text));
                     }
 
                     if (metrics == CollectorMetrics.None && previous == metrics) {
@@ -194,6 +234,9 @@ public sealed class MonitorApp : IFullscreenApp {
         }
 
         _frameTimestamp = now;
+        while (_detailResults.TryDequeue(out var detail)) {
+            _surface.CompleteProcessDetails(detail.Id, detail.Text);
+        }
         var metrics = _surface.RequiredMetrics;
         if (Interlocked.Exchange(ref _requestedMetrics, (int)metrics) != (int)metrics && _wake.CurrentCount == 0) {
             _wake.Release();
@@ -201,12 +244,16 @@ public sealed class MonitorApp : IFullscreenApp {
 
         bool changed = _surface.Dirty;
         bool projection = _surface.Dirty;
+        string? batchResults = null;
         if (Monitor.TryEnter(_gate)) {
             try {
                 if (_actionVersion != _shownActionVersion) {
                     _shownActionVersion = _actionVersion;
                     _surface.ActionMessage = _actionMessage;
                     _surface.ActionBusy = false;
+                    if (_batchResults) {
+                        batchResults = _actionMessage;
+                    }
                     changed = true;
                 }
 
@@ -241,6 +288,9 @@ public sealed class MonitorApp : IFullscreenApp {
             }
         }
 
+        if (batchResults is not null) {
+            _surface.ShowSessionResults(batchResults);
+        }
         if (changed) {
             if (projection && _surface.View == MonitorView.Processes) {
                 _surface.Model.Update(_snapshot.Processes.AsSpan(0, _snapshot.ProcessCount));

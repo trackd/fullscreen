@@ -31,7 +31,7 @@ fgit
 
 ## DESCRIPTION
 
-Lazy tabs show Changes, Staged, History, Branches, Remotes, Worktrees, Stashes and Tags.
+Tabs show Changes, Staged, History, Branches, Remotes, Worktrees, Stashes and Tags.
 Local/remote branches show tracking, ahead/behind and checkout paths; actions create/switch/rename/delete merged branches, set upstreams, compare, merge or rebase.
 Worktrees can be added on existing/new branches or detached, opened in this TUI, moved, locked/unlocked and removed when Git permits clean removal.
 Stashes support save/apply/pop/drop; tags support create/delete local/push selected.
@@ -215,7 +215,7 @@ HelpMessage: ''
 
 ### -View
 
-Initial lazy tab: Changes, Staged, History, Branches, Remotes, Worktrees, Stashes or Tags.
+Initial tab: Changes, Staged, History, Branches, Remotes, Worktrees, Stashes or Tags.
 Defaults to Changes.
 
 ```yaml

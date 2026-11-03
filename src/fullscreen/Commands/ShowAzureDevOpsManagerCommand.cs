@@ -15,7 +15,9 @@ public enum AzureDevOpsView {
     /// <summary>Shows the pull requests view.</summary>
     PullRequests,
     /// <summary>Shows the pipelines view.</summary>
-    Pipelines
+    Pipelines,
+    /// <summary>Shows the team's configured backlog levels in planning order.</summary>
+    Backlog
 }
 
 /// <summary>Browse Azure DevOps boards, work items and development activity in a fullscreen TUI.</summary>
@@ -34,8 +36,8 @@ public sealed class ShowAzureDevOpsManagerCommand : ShowDeveloperCommand {
     [ValidateNotNullOrEmpty]
     public string Project { get; set; } = "";
 
-    /// <summary>Optional team name or ID. Limits work item queries to configured team area paths. Boards
-    /// use the default team when omitted; opening a board applies that team scope.</summary>
+    /// <summary>Optional team name or ID. Limits work item queries to configured team area paths.
+    /// Boards and sprint selection use the default team when omitted.</summary>
     [Parameter]
     [ValidateNotNullOrEmpty]
     public string? Team { get; set; }
@@ -47,8 +49,8 @@ public sealed class ShowAzureDevOpsManagerCommand : ShowDeveloperCommand {
     [ValidateNotNullOrEmpty]
     public string? TenantId { get; set; }
 
-    /// <summary>Initial lazy tab: Boards (default), WorkItems, Stories, Tasks, PullRequests or
-    /// Pipelines.</summary>
+    /// <summary>Initial tab: Boards (default), WorkItems, Stories, Tasks, PullRequests or
+    /// Pipelines or Backlog.</summary>
     [Parameter]
     public AzureDevOpsView View { get; set; } = AzureDevOpsView.Boards;
 

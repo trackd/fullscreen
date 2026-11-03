@@ -4,6 +4,25 @@ BeforeAll {
 }
 
 Describe 'MonitorActions' -Tag 'Integration' {
+    It 'Reads the current process command line without executing it and rejects a changed identity' {
+        $assembly = (Get-Command fullscreen\Show-SystemMonitor).ImplementingType.Assembly
+        $sourceType = $assembly.GetType('fullscreen.Monitoring.LocalMonitorSource', $true)
+        $source = [Activator]::CreateInstance($sourceType)
+        try {
+            $parameters = $sourceType.GetMethods() | Where-Object { $_.Name -eq 'Sample' -and $_.GetParameters().Count -eq 3 } |
+                ForEach-Object GetParameters
+            $frame = [Activator]::CreateInstance($parameters[0].ParameterType)
+            $source.Sample($frame, [Enum]::Parse($parameters[1].ParameterType, 'Processes'), [Threading.CancellationToken]::None)
+            $row = $frame.Processes | Select-Object -First $frame.ProcessCount | Where-Object Id -eq $PID
+            $row.Id | Should -Be $PID
+            $text = $source.ReadCommandLine($row, [Threading.CancellationToken]::None)
+            $text | Should -Match ([regex]::Escape([Diagnostics.Process]::GetCurrentProcess().ProcessName))
+            $row.StartTimeTicks++
+            { $source.ReadCommandLine($row, [Threading.CancellationToken]::None) } | Should -Throw '*identity changed*'
+        }
+        finally { $source.Dispose() }
+    }
+
     It 'Protects process identity and stops only the owned child through the action worker' {
         $assembly = (Get-Command fullscreen\Show-SystemMonitor).ImplementingType.Assembly
         $type = $assembly.GetType('fullscreen.Monitoring.MonitorActions', $true)

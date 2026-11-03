@@ -29,6 +29,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
     }
 
     private readonly List<Binding> _bindings = [];
+    private readonly List<Visual> _chrome = [];
     private readonly List<(TuiNode Node, ReusableTable Table)> _tables = [];
     private readonly List<(TuiNode Node, ReusableObjectExplorer Explorer)> _explorers = [];
     private readonly List<(TuiNode Node, Visual Control)> _native = [];
@@ -60,8 +61,9 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
 
     /// <inheritdoc cref="fullscreen.Hosting.IFullscreenApp.SetMinimal"/>
     public void SetMinimal(bool minimal) {
-        var stack = (VStack)Root;
-        stack.Children[0].IsVisible = stack.Children[1].IsVisible = stack.Children[3].IsVisible = !minimal;
+        foreach (var visual in _chrome) {
+            visual.IsVisible = !minimal;
+        }
     }
 
     /// <summary>Initializes a new CustomTuiApp instance.</summary>
@@ -108,19 +110,22 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
 
         _toastHost = new ToastHost(content);
-        Root = new VStack(
-            new TextBlock(document.Title),
-            new Rule(),
-            new ScrollViewer(_toastHost) {
+        var viewport = new ScrollViewer(_toastHost) {
                 HorizontalScrollEnabled = false,
+                VerticalScrollEnabled = content.VerticalAlignment != Align.Stretch,
                 HorizontalAlignment = Align.Stretch,
                 VerticalAlignment = Align.Stretch
-            },
-            new TextBlock(preview ? "Preview sandbox · handlers are not executed" : "Tab / Shift-Tab focus · Esc back/cancel · F10 exit · F12 diagnostics")
-        ) {
+            };
+        if (document.Title.Length > 0) {
+            _chrome.Add(new TextBlock(document.Title));
+            _chrome.Add(new Rule());
+        }
+        var footer = new TextBlock(preview ? "Preview sandbox · handlers are not executed" : "Tab / Shift-Tab focus · Esc back/cancel · F10 exit · F12 diagnostics");
+        Root = new VStack([.. _chrome, viewport, footer]) {
             HorizontalAlignment = Align.Stretch,
             VerticalAlignment = Align.Stretch
         };
+        _chrome.Add(footer);
         foreach (var (_, control) in _native.Where(entry => entry.Control is CommandPalette)) {
             foreach (var command in control.Commands.ToArray()) {
                 control.Commands.Remove(command);

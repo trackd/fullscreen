@@ -28,12 +28,38 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
     public string Status { get; set; } = "";
     /// <summary>Gets or sets the application-specific keyboard help text.</summary>
     public string ExtraHelp { get; set; } = "";
+    /// <summary>Gets or sets the primary footer key reference, or null for the standard table keys.</summary>
+    public string? FooterHelp { get; set; }
     /// <summary>Gets or sets the object-navigation labels displayed by the table.</summary>
     public string Navigation { get; set; } = "";
+    /// <summary>Gets or sets clickable commands displayed above the table.</summary>
+    public (string Label, Action Execute)[] ToolbarCommands {
+        get => _toolbarCommands;
+        set {
+            _toolbarCommands = value;
+            _toolbar.Children.Clear();
+            foreach (var command in value) {
+                var captured = command;
+                var button = new Button(captured.Label) { MinHeight = 1, MaxHeight = 1 }.Click(() => {
+                    App?.Focus(this);
+                    captured.Execute();
+                });
+                button.SetStyle(Palette.CompactActionButton);
+                _toolbar.Add(button);
+            }
+            Refresh();
+        }
+    }
+    private (string Label, Action Execute)[] _toolbarCommands = [];
+    private readonly WrapHStack _toolbar = new() { Spacing = 1, RunSpacing = 1 };
+    private Themes.ThemePalette? _toolbarPalette;
+    private int _toolbarRows = 1;
     /// <summary>Gets or sets whether the user requested navigation to the previous object.</summary>
     public Func<bool>? BackRequested { get; set; }
     /// <summary>Gets or sets the preferred table column widths in terminal cells.</summary>
     public int[]? PreferredWidths { get; set; }
+    /// <summary>Gets or sets the column that uses space remaining after other visible columns.</summary>
+    public int StretchColumn { get; set; } = -1;
     /// <summary>Gets or sets the callback selecting an optional row accent.</summary>
     public Func<TableRow, Color?>? RowAccent { get; set; }
     /// <summary>Gets or sets the callback selecting an optional cell accent.</summary>
@@ -57,7 +83,12 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
     private string[]? _preview;
     private string _previewTitle = "";
     private int _previewOffset;
-    private int GridWidth => !Minimal && _preview is not null && Bounds.Width >= 100 ? Bounds.Width * 46 / 100 : Bounds.Width;
+    private int _splitPercent = 46;
+    private bool _resizingSplit;
+    internal int SplitPercent => _splitPercent;
+    private int GridWidth => !Minimal && _preview is not null && Bounds.Width >= 100
+        ? Math.Clamp(Bounds.Width * _splitPercent / 100, 1, Bounds.Width - 1)
+        : Bounds.Width;
 
     /// <summary>Sets or clears an optional table preview panel.</summary>
     /// <param name="title">The displayed heading.</param>
@@ -112,11 +143,13 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
     private bool _filtering;
     private int _firstColumn;
-    private int HeaderTop => Minimal ? (_filtering ? 1 : 0) : 3;
+    private int HeaderTop => Minimal ? (_filtering ? 1 : 0) : 2 + _toolbarRows;
     private int RowTop => HeaderTop + 1;
-    private int DocumentTop => Minimal ? 0 : 3;
+    private int DocumentTop => Minimal ? 0 : HeaderTop;
     private int DocumentRows => Math.Max(1, Bounds.Height - DocumentTop - (Minimal ? 0 : 2));
     private int Height => Math.Max(1, Bounds.Height - RowTop - (Minimal ? 0 : 2));
+    internal int VisibleRowCount => Height;
+    internal int FirstRowY => RowTop;
 
     /// <inheritdoc/>
     protected override void OnMinimalChanged() =>
@@ -128,16 +161,37 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         Model = model;
         Title = title;
         Focusable = true;
+        AutoFocus = true;
         HorizontalAlignment = Align.Stretch;
         VerticalAlignment = Align.Stretch;
+        AttachChild(_toolbar);
     }
 
     /// <summary>Requests a redraw of the table surface.</summary>
     public void Refresh() =>
         Revision++;
     /// <inheritdoc/>
-    protected override SizeHints MeasureCore(in LayoutConstraints constraints) =>
-        SizeHints.Flex(new Size(0, 0), new Size(110, 30), new Size(int.MaxValue, int.MaxValue), 1, 1, 1, 1);
+    protected override SizeHints MeasureCore(in LayoutConstraints constraints) {
+        _ = Revision;
+        _toolbar.IsVisible = !Minimal && ToolbarCommands.Length > 0;
+        if (!ReferenceEquals(_toolbarPalette, Palette)) {
+            foreach (var button in _toolbar.Children.OfType<Button>()) {
+                button.SetStyle(Palette.CompactActionButton);
+            }
+            _toolbarPalette = Palette;
+        }
+        var size = _toolbar.Measure(new LayoutConstraints(0, Math.Max(0, constraints.MaxWidth - 2), 0, Math.Max(0, constraints.MaxHeight - 6)));
+        _toolbarRows = _toolbar.IsVisible ? Math.Max(1, size.Natural.Height) : 1;
+        return SizeHints.Flex(new Size(0, 0), new Size(110, 30), new Size(int.MaxValue, int.MaxValue), 1, 1, 1, 1);
+    }
+
+    /// <inheritdoc/>
+    protected override int ChildrenCount => 1;
+    /// <inheritdoc/>
+    protected override Visual GetChild(int index) => _toolbar;
+    /// <inheritdoc/>
+    protected override void ArrangeCore(in Rectangle finalRect) =>
+        _toolbar.Arrange(new(finalRect.X + 1, finalRect.Y + 2, Math.Max(0, finalRect.Width - 2), _toolbar.IsVisible ? _toolbarRows : 0));
     /// <inheritdoc/>
     protected override void RenderOverride(CellBuffer buffer) {
         _ = Revision;
@@ -189,7 +243,9 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                 Model.FilterError is null ? Muted : Palette.Removed,
                 Bounds.Width - 2
             );
-            Write(buffer, 1, 2, Navigation, Accent, Bounds.Width - 2);
+            if (ToolbarCommands.Length == 0) {
+                Write(buffer, 1, 2, Navigation, Accent, Bounds.Width - 2);
+            }
         }
         else if (_filtering) {
             Write(buffer, 1, 0, "FILTER › " + Model.Filter + "▏", Muted, Bounds.Width - 2);
@@ -327,19 +383,19 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         }
 
         if (_preview is not null && GridWidth < Bounds.Width) {
-            for (int y = 3; y < Bounds.Height - 2; y++) {
+            for (int y = HeaderTop; y < Bounds.Height - 2; y++) {
                 for (int x = GridWidth; x < Bounds.Width; x++) {
                     buffer.SetCell(Bounds.X + x, Bounds.Y + y, new Rune(' '), Body);
                 }
 
-                Write(buffer, GridWidth, y, "│", Muted, 1);
+                Write(buffer, GridWidth, y, "│", _resizingSplit ? Accent : Muted, 1);
             }
 
-            Write(buffer, GridWidth + 2, 3, _previewTitle, Accent, Bounds.Width - GridWidth - 3);
+            Write(buffer, GridWidth + 2, HeaderTop, _previewTitle, Accent, Bounds.Width - GridWidth - 3);
             for (int i = _previewOffset; i < Math.Min(_preview.Length, _previewOffset + Height); i++) {
                 string line = _preview[i];
                 Style style = line.StartsWith('+') ? Palette.Added : line.StartsWith('-') ? Palette.Removed : line.StartsWith("@@", StringComparison.Ordinal) ? Accent : Body;
-                Write(buffer, GridWidth + 2, 4 + i - _previewOffset, line, style, Bounds.Width - GridWidth - 3);
+                Write(buffer, GridWidth + 2, HeaderTop + 1 + i - _previewOffset, line, style, Bounds.Width - GridWidth - 3);
             }
         }
 
@@ -348,7 +404,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                 buffer,
                 1,
                 Bounds.Height - 2,
-                $"{Model.Visible.Count:N0}/{Model.Rows.Count:N0} rows · {Model.Marked.Count:N0} marked  {ExtraHelp}",
+                $"{Model.Visible.Count:N0}/{Model.Rows.Count:N0} rows · {Model.Marked.Count:N0} marked  {ExtraHelp}" + (_preview is not null ? " · drag/Shift←→ resize panes" : ""),
                 Muted,
                 Bounds.Width - 2
             );
@@ -359,8 +415,8 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                 buffer,
                 1,
                 Bounds.Height - 1,
-                "↑↓/jk move  ←→ columns  / filter  C columns  S sort  R reverse  Space mark  I inspect  Enter " + (EnterAccepts ? "accept" : "inspect") +
-                "  Q close",
+                FooterHelp ?? ("↑↓/jk move  ←→ columns  / filter  C columns  S sort  R reverse  Space mark  I inspect  Enter " + (EnterAccepts ? "accept" : "inspect") +
+                "  Q close"),
                 Accent,
                 Bounds.Width - 2
             );
@@ -412,8 +468,18 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
     private int Width(
         int column,
         int x
-    ) =>
-        PreferredWidths is { } widths && column < widths.Length ? widths[column] == 0 ? Math.Max(16, GridWidth - x - 1) : widths[column] : ColumnWidth();
+    ) {
+        if (column == StretchColumn && PreferredWidths is { } preferred) {
+            int reserved = 0;
+            for (int next = column + 1; next < Model.Columns.Length; next++) {
+                if (Model.Enabled[next]) {
+                    reserved += next < preferred.Length && preferred[next] > 0 ? preferred[next] : ColumnWidth();
+                }
+            }
+            return Math.Max(12, GridWidth - x - reserved - 1);
+        }
+        return PreferredWidths is { } widths && column < widths.Length ? widths[column] == 0 ? Math.Max(16, GridWidth - x - 1) : widths[column] : ColumnWidth();
+    }
     private static int CellWidth(ReadOnlySpan<char> text) {
         int width = 0;
         foreach (var rune in text.EnumerateRunes()) {
@@ -590,6 +656,13 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         if (_preview is not null && (e.Modifiers & TerminalModifiers.Shift) != 0
             && e.Key is TerminalKey.Up or TerminalKey.Down) {
             ScrollPreview(e.Key == TerminalKey.Up ? -3 : 3);
+            e.Handled = true;
+            return;
+        }
+
+        if (_preview is not null && _document is null && !_filtering && !Minimal
+            && (e.Modifiers & TerminalModifiers.Shift) != 0 && e.Key is TerminalKey.Left or TerminalKey.Right) {
+            ResizeSplit(e.Key == TerminalKey.Left ? -2 : 2);
             e.Handled = true;
             return;
         }
@@ -903,6 +976,14 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
             return;
         }
 
+        if (_preview is not null && _document is null && !Minimal && e.Button == TerminalMouseButton.Left
+            && e.LocalY >= HeaderTop && e.LocalY < Bounds.Height - 2 && Math.Abs(e.LocalX - GridWidth) <= 1) {
+            _resizingSplit = true;
+            SetSplitFromPointer(e.LocalX);
+            e.Handled = true;
+            return;
+        }
+
         if (!Minimal && Navigation.Length > 0 && e.LocalY == 2 && e.LocalX < 11) {
             BackRequested?.Invoke();
             e.Handled = true;
@@ -979,6 +1060,41 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
         Refresh();
         e.Handled = true;
+    }
+
+    /// <inheritdoc/>
+    protected override void OnPointerMoved(PointerEventArgs e) {
+        if (e.RoutingPhase == RoutingPhase.Preview || !_resizingSplit) {
+            return;
+        }
+
+        SetSplitFromPointer(e.LocalX);
+        e.Handled = true;
+    }
+
+    /// <inheritdoc/>
+    protected override void OnPointerReleased(PointerEventArgs e) {
+        if (e.RoutingPhase == RoutingPhase.Preview || !_resizingSplit) {
+            return;
+        }
+
+        _resizingSplit = false;
+        e.Handled = true;
+        Refresh();
+    }
+
+    private void ResizeSplit(int delta) {
+        _splitPercent = Math.Clamp(_splitPercent + delta, 30, 70);
+        Refresh();
+    }
+
+    private void SetSplitFromPointer(int x) {
+        if (Bounds.Width <= 0) {
+            return;
+        }
+
+        _splitPercent = Math.Clamp((int)Math.Round((double)x * 100 / Bounds.Width), 30, 70);
+        Refresh();
     }
 
     private void ScrollDocument(int delta) {

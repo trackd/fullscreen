@@ -33,26 +33,23 @@ fobject
 
 ## DESCRIPTION
 
-Buffers pipeline input, then opens three lazy tabs: Formatted, Expanded and JSON (Properties is also accepted as a view name).
-Formatted resolves Get-FormatData TableControl headers and DisplayEntry expressions directly using PSPropertyExpression, following Out-ConsoleGridView and Out-GridView.
-It falls back to DefaultDisplayPropertySet, scalars or readable properties.
-Expanded retains the complete readable property table at the root. Within an object it lists members; within an array it shows item properties as sortable columns.
-JSON uses a bounded snapshot of the current inspected node, or the selected original object at the root. Circular references,
-depth limits and failing getters are marked in the JSON instead of warning or
-recursing indefinitely. Keys, strings, numbers, literals, brackets and braces use theme colors.
-Each table is built only when opened and cached; JSON caches up to 16 visited objects.
-Tab, Shift-Tab, 1/2/3 or mouse headers switch views.
-Values and getters are evaluated on the PowerShell thread.
-Enter or I inspects the selected item or member. M, F10 or right-click opens the menu, including property drill-down, view selection, search and sorting. The breadcrumb shows the current node. Backspace, Esc (after clearing any filter) or clicking Back returns to the parent, restoring its selection, filter and sorting. Changing view keeps the current node.
-Use / to filter tables (plain text, wildcard: or regex:). S cycles sort columns, R reverses, and clicking a column sorts it; clicking again reverses. G groups; C selects columns; Space marks. In JSON, / searches and Enter or N finds the next matching line. Tables also color values by their actual type: property names and nested objects use Accent, strings use Success, numbers use Purple, and booleans, enums and nulls use Warning. Null values display as null; the inspector Type column uses the muted color. Property/display errors use Error. ANSI colors and text decorations from display values override the type color through the styled text parser; terminal commands are discarded.
-Marks and selected original identity survive tab switches.
-With PassThru, Enter accepts marked objects or the current selection at the root or JSON tab.
-Q cancels.
-Display expressions, getters and JSON serialization may run custom property code.
+Collects pipeline input and opens it in an interactive table with three tabs.
+Formatted uses the object's normal PowerShell table formatting, Expanded shows
+every readable property and lets you drill into nested objects and arrays, and
+JSON shows a highlighted snapshot of the current object. Circular references,
+depth limits and failing properties are marked rather than causing errors. Switch
+tabs with Tab, Shift+Tab, 1-3 or the tab headers.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+Enter or I inspects the selected item, and Backspace, Escape or Back returns to
+the parent with its selection, filter and sort restored. Filter with / using
+plain text, wildcard: or regex: patterns; sort by clicking a column or with S,
+and reverse with R. G groups, C chooses columns, Space marks rows, and M, F10 or
+right-click opens the menu. In JSON, / searches and Enter or N finds the next
+match. Values are colored by type, and ANSI colors in displayed values are kept.
+
+With PassThru, Enter returns the marked objects or the current selection; Q
+cancels. Displaying and serializing objects runs their property getters, which can
+execute custom code.
 
 ## EXAMPLES
 
@@ -222,7 +219,7 @@ Maximum depth of the bounded JSON snapshot, 1 through 20; default 4.
 Only the selected object is snapshotted when first viewed. Circular references,
 depth limits and failing getters become markers. Collections and property maps
 are limited to 1000 entries each, with a shared budget of 10000 complex values.
-Display is capped at 1 MiB after serialization; up to 16 visited objects are cached.
+Display is capped at 1 MiB.
 
 ```yaml
 Type: System.Int32
@@ -406,7 +403,7 @@ HelpMessage: ''
 
 ### -View
 
-Initial lazy tab: Formatted (default), Expanded or Json. Properties is accepted as another name for Expanded.
+Initial tab: Formatted (default), Expanded or Json. Properties is accepted as another name for Expanded.
 Unopened tabs perform no metadata lookup, getter evaluation or serialization.
 
 ```yaml

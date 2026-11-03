@@ -517,7 +517,12 @@ public sealed partial class TuiDesignerApp : IFullscreenApp {
         }
 
         if (Path is not null) {
-            SaveTo(Path);
+            if (_exists(Path)) {
+                Confirm("Replace layout '" + Path + "'? Existing companion scripts are preserved.", () => SaveTo(Path));
+            }
+            else {
+                SaveTo(Path);
+            }
             return;
         }
 
@@ -542,7 +547,7 @@ public sealed partial class TuiDesignerApp : IFullscreenApp {
             Title = new TextBlock("Save layout"),
             IsModal = true,
             Width = 70,
-            Content = new VStack(new TextBlock("Literal path · .psd1 for PowerShell data, .json for JSON"), input, error, new HStack(new Button("Cancel").Click(() => dialog!.Close()), new Button("Save").Click(() => {
+            Content = new VStack(new Paragraph("Save .psd1 or .json layout data and create a companion .ps1 scaffold if missing. Existing scripts are preserved.") { Wrap = true }, input, error, new HStack(new Button("Cancel").Click(() => dialog!.Close()), new Button("Save").Click(() => {
                 if (_exists(input.Text ?? "")) {
                     Confirm("Replace layout '" + input.Text + "'?", Write);
                 }
@@ -576,7 +581,7 @@ public sealed partial class TuiDesignerApp : IFullscreenApp {
             _dirty = false;
             _savedToDisk = true;
             UpdateHeading();
-            _status.Text = "Saved · " + path;
+            _status.Text = "Saved · " + path + " · app code: " + IOPath.ChangeExtension(path, ".ps1") + " · existing scripts preserved";
             return true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException) {

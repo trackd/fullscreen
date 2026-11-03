@@ -31,32 +31,25 @@ ffile
 
 ## DESCRIPTION
 
-Browse parent/current/preview panes with hjkl or arrows.
-Supports filtering, hidden files, multi-selection, history, copy/move buffers, rename and creating folders.
-File operations are confirmed in the UI and never overwrite destinations.
-Preview text, Markdown, directory contents and binary hex. Image previews use the
-optional Sixel module in a Sixel-capable terminal; otherwise a notice is shown.
-File contents are read locally on a worker; no file is executed.
-Q closes the app and restores the terminal.
+Opens a fullscreen file browser with parent, current and preview panes. Navigate
+with the arrow keys or hjkl, preview text, Markdown, directories, images and
+binary files, and copy, move, rename or create folders. File operations are
+confirmed and never overwrite existing destinations. Previewed files are read,
+never executed, and paths are treated literally, including wildcard characters.
 
-Use Space to mark an item and lowercase a to toggle visible marks. Lowercase y and x
-set copy and move buffers; p opens the paste confirmation. F2 renames and lowercase n
-creates a directory. Use [ and ] for history, ~ for home and lowercase g for a path
-dialog. / filters names, . toggles hidden files, lowercase s selects the sort field
-and r reverses it. F5 refreshes. Letter shortcuts are case-sensitive.
-Lowercase t opens a tab, { and } switch tabs, and w closes the current tab.
-Lowercase b opens session bookmarks; uppercase B toggles the current directory bookmark.
-Tab or Enter focuses a rich preview; Escape returns to the file list. Press ? for
-the in-app key reference. Paths are treated literally, including wildcard characters.
+Common keys (letters are case-sensitive): Space marks an item and a toggles marks;
+y and x set the copy and move buffers and p pastes; F2 renames and n creates a
+folder; / filters, . shows hidden files, s chooses the sort and r reverses it;
+[ and ] move through history, ~ goes home and g opens a path; t opens a tab,
+{ and } switch tabs and w closes one; b opens bookmarks and B bookmarks the
+current folder; Tab or Enter focuses the preview and Escape returns; F5
+refreshes; Q quits. Right-click an item for its actions, and press ? inside the
+app for the full key reference.
 
-The optional TextMate module supplies syntax highlighting; L selects a language
-or extension for the current text preview. Content is read on a worker and never
-executed. Obsolete reads are discarded after navigation. Minimal mode hides the
-parent and preview panes.
-
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+With PassThru, the selected paths are returned when you accept them. Syntax
+highlighting uses the optional TextMate module (L chooses the language), and
+image previews use the optional Sixel module in a Sixel-capable terminal; a
+notice is shown otherwise. Minimal mode hides the parent and preview panes.
 
 ## EXAMPLES
 

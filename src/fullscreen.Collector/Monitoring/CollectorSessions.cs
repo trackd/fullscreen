@@ -1,6 +1,16 @@
 namespace fullscreen.Monitoring;
 /// <summary>Owns independent collectors for remote callers without PowerShell session variables.</summary>
 public static class CollectorSessions {
+    /// <summary>Reads a verified process command line on the collector host.</summary>
+    /// <param name="handle">The opaque identifier of an open collector.</param>
+    /// <param name="processId">The selected process identifier.</param>
+    /// <param name="birth">The selected process start identity.</param>
+    /// <returns>The bounded command line.</returns>
+    public static string ReadProcessCommandLine(string handle, int processId, long birth) {
+        _ = Get(handle);
+        return ProcessOwnerReader.ReadCommandLine(processId, birth);
+    }
+
     /// <summary>Revalidates a named session&apos;s identity before logging it off.</summary>
     /// <param name="sessionId">The Windows terminal-services session identifier.</param>
     /// <param name="userName">The account name associated with the session or process.</param>

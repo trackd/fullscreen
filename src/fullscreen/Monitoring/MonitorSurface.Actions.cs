@@ -37,9 +37,7 @@ public sealed partial class MonitorSurface {
         )
     {
         IsEnabled = ActionsEnabled && !ActionBusy && row.StartTimeTicks > 0
-    }
-
-        ];
+    }, new("Process details… (D)", () => ShowProcessDetails(row))];
     internal MenuItem[] ServiceActions(ServiceRow row) =>
         [new("Start service…", () => ConfirmAction(new(MonitorAction.StartService, row.Name)))
     {
@@ -116,6 +114,6 @@ public sealed partial class MonitorSurface {
                 }
             })))
         };
-        dialog.Show();
+        ShowMonitorDialog(dialog);
     }
 }

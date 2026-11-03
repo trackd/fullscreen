@@ -4,7 +4,7 @@ using System.Management.Automation.Runspaces;
 
 namespace fullscreen.Monitoring;
 /// <summary>Owns a typed collector handle. The caller retains ownership of the PSSession/runspace.</summary>
-public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource {
+public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource, IMonitorProcessDetailSource {
     private readonly Runspace _runspace;
     private readonly string _handle = Guid.NewGuid().ToString("N");
     private static readonly string RegistryName = typeof(CollectorSessions).AssemblyQualifiedName!;
@@ -29,6 +29,7 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource 
             Invalidate { $registry::InvalidateServices($Handle) }
             Close { $registry::Close($Handle) }
             Logoff { $registry::LogoffSession($Metrics, $TargetName, $LogonTime) }
+            CommandLine { $registry::ReadProcessCommandLine($Handle, $Metrics, $LogonTime) }
         }
         """;
     private readonly int _timeoutSeconds;
@@ -67,8 +68,7 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource 
         Sample(destination, CollectorMetrics.All, cancellationToken);
     }
 
-    /// <inheritdoc/>
-    public void Sample(CollectorFrame destination, CollectorMetrics metrics, CancellationToken cancellationToken) {
+    private void EnsureDeployed(CancellationToken cancellationToken) {
         if (!_deployed) {
             byte[] assembly = File.ReadAllBytes(typeof(PerformanceCollector).Assembly.Location);
             Invoke("""
@@ -87,7 +87,11 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource 
                 """, cancellationToken, assembly, _handle, ModuleId);
             _deployed = true;
         }
+    }
 
+    /// <inheritdoc/>
+    public void Sample(CollectorFrame destination, CollectorMetrics metrics, CancellationToken cancellationToken) {
+        EnsureDeployed(cancellationToken);
         var output = Invoke(SessionScript, cancellationToken, RegistryName, ModuleId, _handle, "Capture", (int)metrics);
         if (output.Count != 1 || output[0].BaseObject is not string payload) {
             throw new InvalidDataException("Remote collector returned an invalid snapshot envelope.");
@@ -129,6 +133,16 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource 
         if (_deployed) {
             Invoke(SessionScript, cancellationToken, RegistryName, ModuleId, _handle, "Invalidate", 0);
         }
+    }
+
+    /// <inheritdoc/>
+    public string ReadCommandLine(ProcessRow process, CancellationToken token) {
+        EnsureDeployed(token);
+        var result = Invoke(SessionScript, token, RegistryName, ModuleId, _handle, "CommandLine", process.Id, "", process.StartTimeTicks);
+        if (result.Count != 1 || result[0].BaseObject is not string text) {
+            throw new InvalidDataException("Remote collector returned an invalid command-line response.");
+        }
+        return text;
     }
 
     private PSDataCollection<PSObject> Invoke(string script, CancellationToken token, params object[] arguments) {

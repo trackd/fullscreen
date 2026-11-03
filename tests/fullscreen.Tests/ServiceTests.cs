@@ -6,6 +6,38 @@ namespace fullscreen.Tests;
 [TestClass]
 public sealed class ServiceTests {
     [TestMethod]
+    public void WindowsServiceTableIgnoresLegacyExitDetails() {
+        var frame = new CollectorFrame { Platform = "Windows", ServiceCount = 1 };
+        frame.Services[0] = new("ALG", "Application Layer Gateway Service", "stopped", "error 1077", null);
+        var surface = new MonitorSurface { View = MonitorView.Services, Frame = frame };
+        string output = string.Join('\n', VisualSnapshotRenderer.Render(surface, 150, 30).ToMarkupLines());
+        Assert.Contains("DISPLAY NAME", output);
+        Assert.Contains("Application Layer Gateway Service", output);
+        Assert.DoesNotContain("1077", output);
+        Assert.DoesNotContain("DETAIL", output);
+    }
+    [TestMethod]
+    [DataRow(1U, "stopped")]
+    [DataRow(4U, "running")]
+    [DataRow(7U, "paused")]
+    public void WindowsServiceRowsShowDisplayNamesInsteadOfExitErrors(uint state, string expectedState) {
+        var row = ServiceSampler.WindowsRow("ALG", "Application Layer Gateway Service", state, state == 4 ? 42U : 0U, null);
+        Assert.AreEqual(expectedState, row.State);
+        Assert.AreEqual("Application Layer Gateway Service", ServiceView.Text(row, ServiceColumn.Description));
+        Assert.AreEqual("", row.Detail);
+        var frame = new CollectorFrame { Platform = "Windows", ServiceCount = 1 };
+        frame.Services[0] = row;
+        var surface = new MonitorSurface { View = MonitorView.Services, Frame = frame };
+        string output = string.Join('\n', VisualSnapshotRenderer.Render(surface, 150, 30).ToMarkupLines());
+        Assert.Contains("DISPLAY NAME", output);
+        Assert.Contains("Application Layer Gateway Service", output);
+        Assert.DoesNotContain("DETAIL", output);
+        Assert.DoesNotContain("1077", output);
+        surface.Services.Filter = "Layer Gateway";
+        surface.Services.Update(frame.Services.AsSpan(0, 1));
+        Assert.AreEqual(1, surface.Services.Count);
+    }
+    [TestMethod]
     public void AccountsSurviveTransportAndSupportFilteringAndSorting() {
         var frame = new CollectorFrame { ServiceCount = 2 };
         frame.Services[0] = new("one", "", "stopped", "", null, @"DOMAIN\zoe");

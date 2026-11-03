@@ -52,8 +52,8 @@ public sealed class InputTests {
             Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Left, X = 18, Y = 10 }, () => surface.Model.Sort == ProcessSort.Memory);
             Assert.AreEqual(ProcessSort.Memory, surface.Model.Sort);
             Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Left, X = 18, Y = 10 });
-            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Left, X = 6, Y = 10 }, () => backend.GetOutText().Contains("Clear this filter", StringComparison.Ordinal));
-            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Left, X = 6, Y = 10 });
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Left, X = 8, Y = 10 }, () => backend.GetOutText().Contains("Clear this filter", StringComparison.Ordinal));
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Left, X = 8, Y = 10 });
             Send(new TerminalKeyEvent { Key = TerminalKey.Escape }, () => surface.HasFocus);
             Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Right, X = 10, Y = 12 }, () => backend.GetOutText().Contains("Filter this name", StringComparison.Ordinal));
             Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Right, X = 10, Y = 12 });

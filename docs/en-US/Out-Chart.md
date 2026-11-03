@@ -423,7 +423,7 @@ ParameterSets:
 
 ### -ChartRenderer
 
-Select Auto, Sixel, Native or Regis. DRCS chart rendering is disabled.
+Select Auto, Sixel, Native or Regis.
 Regis is an experimental,
 explicitly selected Contour vector backend; Area, Histogram and BoxPlot use cell
 fallback. Auto continues to select Sixel with cell fallback.

@@ -1,7 +1,8 @@
 namespace fullscreen.Monitoring;
 
 public sealed partial class MonitorSurface {
-    private bool _probeColumns;
+    /// <summary>Gets or sets whether dashboard summaries continue sampling while another view is active.</summary>
+    public bool BackgroundSampling { get; set; }
     /// <summary>Gets the metric groups needed by the active view.</summary>
     public CollectorMetrics RequiredMetrics {
         get {
@@ -14,20 +15,21 @@ public sealed partial class MonitorSurface {
             }
 
             const CollectorMetrics summaries = CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu;
+            CollectorMetrics background = BackgroundSampling ? summaries : CollectorMetrics.None;
             if (View == MonitorView.Dashboard) {
                 return summaries;
             }
 
             if (View == MonitorView.Services) {
-                return CollectorMetrics.Services;
+                return CollectorMetrics.Services | background;
             }
 
             if (View == MonitorView.Users) {
-                return CollectorMetrics.Users | (IncludeUserProcesses ? CollectorMetrics.Processes | CollectorMetrics.Owners : CollectorMetrics.None);
+                return background | CollectorMetrics.Users | (IncludeUserProcesses ? CollectorMetrics.Processes | CollectorMetrics.Owners : CollectorMetrics.None);
             }
 
             bool compact = Bounds.Width > 0 && (Bounds.Width < 76 || Bounds.Height < 20);
-            CollectorMetrics required = !Minimal && (ProcessTable || compact) ? summaries : CollectorMetrics.None;
+            CollectorMetrics required = background | (!Minimal && (ProcessTable || compact) ? summaries : CollectorMetrics.None);
             if (View == MonitorView.Network) {
                 return required | CollectorMetrics.Network;
             }
@@ -37,24 +39,8 @@ public sealed partial class MonitorSurface {
             }
 
             required |= CollectorMetrics.Processes;
-            _columnLayoutWidth = -1;
-            foreach (ref readonly var column in Columns) {
-                required |= ColumnMetrics(column.Kind);
-            }
-
-            try {
-                // Probe the same width priorities before unsupported I/O columns have their first sample.
-                _probeColumns = true;
-                _columnLayoutWidth = -1;
-                foreach (ref readonly var column in Columns) {
-                    if (column.Kind is ProcessColumn.Disk or ProcessColumn.Network) {
-                        required |= ColumnMetrics(column.Kind);
-                    }
-                }
-            }
-            finally {
-                _probeColumns = false;
-                _columnLayoutWidth = -1;
+            foreach (var column in AvailableProcessColumns) {
+                required |= ColumnMetrics(column);
             }
 
             foreach (var filter in Model.ColumnFilters.Keys) {
@@ -71,6 +57,10 @@ public sealed partial class MonitorSurface {
                 ProcessSort.Network => CollectorMetrics.ProcessNetwork,
                 _ => CollectorMetrics.None
             };
+            if (!Supports(CollectorCapabilities.ProcessOwner)) { required &= ~CollectorMetrics.Owners; }
+            if (!Supports(CollectorCapabilities.ProcessDisk)) { required &= ~CollectorMetrics.ProcessDisk; }
+            if (!Supports(CollectorCapabilities.ProcessNetwork)) { required &= ~CollectorMetrics.ProcessNetwork; }
+            if (!Supports(CollectorCapabilities.ProcessGpu) && !Supports(CollectorCapabilities.ProcessGpuMemory)) { required &= ~CollectorMetrics.ProcessGpu; }
             return required;
         }
     }

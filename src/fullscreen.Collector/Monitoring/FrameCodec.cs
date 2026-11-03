@@ -3,7 +3,7 @@ using System.Text;
 namespace fullscreen.Monitoring;
 /// <summary>Versioned wire format. Only populated rows cross PSRP; no TUI dependencies or deserialized CLR types.</summary>
 public static class FrameCodec {
-    private const int Magic = 0x46534D37;
+    private const int Magic = 0x46534D38;
     /// <summary>Serializes the active portions of a collector frame.</summary>
     /// <param name="frame">The reusable collector frame to encode or populate.</param>
     /// <returns>The encoded frame bytes.</returns>
@@ -13,6 +13,7 @@ public static class FrameCodec {
         writer.Write(Magic);
         writer.Write(frame.MachineName);
         writer.Write(frame.Platform);
+        writer.Write(frame.Capabilities.HasValue ? (int)frame.Capabilities.Value : -1);
         writer.Write(frame.CapturedAt.UtcDateTime.Ticks);
         Write(writer, frame.CpuPercent);
         Write(writer, frame.TotalMemory);
@@ -116,6 +117,8 @@ public static class FrameCodec {
 
         frame.MachineName = reader.ReadString();
         frame.Platform = reader.ReadString();
+        int capabilities = reader.ReadInt32();
+        frame.Capabilities = capabilities == -1 ? null : (CollectorCapabilities)capabilities;
         frame.CapturedAt = new(reader.ReadInt64(), TimeSpan.Zero);
         frame.CpuPercent = ReadDouble(reader);
         frame.TotalMemory = ReadUnsigned(reader);

@@ -30,11 +30,12 @@ public sealed record UserViewRow(
 
 /// <summary>Account groups own process rows; login sessions describe the account, not inferred process logins.</summary>
 public sealed class UserView {
+    private readonly ProcessView _groupSort = new();
     private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ProcessView> _processViews = new(StringComparer.Ordinal);
-    /// <summary>Gets or sets the field used to sort processes within each account.</summary>
+    /// <summary>Gets or sets the field used to sort account totals and their processes.</summary>
     public ProcessSort Sort { get; set; }
-    /// <summary>Gets or sets whether process sorting is ascending.</summary>
+    /// <summary>Gets or sets whether account and process sorting is ascending.</summary>
     public bool Ascending { get; set; }
     /// <summary>Gets or sets whether processes form parent-child trees within each account.</summary>
     public bool Tree { get; set; }
@@ -116,18 +117,31 @@ public sealed class UserView {
         Offset = Math.Clamp(Offset, Math.Max(0, index - page + 1), index);
     }
 
+    private static ProcessRow Aggregate(UserViewRow row, ProcessRow[] owned) =>
+        new(row.ProcessCount, row.UserName, row.CpuPercent, row.WorkingSet, owned.Sum(process => process.Threads),
+            GpuPercent: owned.Any(process => process.GpuPercent.HasValue) ? owned.Sum(process => process.GpuPercent ?? 0) : null,
+            GpuMemory: owned.Any(process => process.GpuMemory.HasValue) ? owned.Aggregate(0UL, (sum, process) => sum + (process.GpuMemory ?? 0)) : null,
+            ParentId: owned.Min(process => process.ParentId),
+            UserName: row.UserName,
+            CpuTimeTicks: owned.Sum(process => process.CpuTimeTicks),
+            Status: row.Status,
+            DiskBytesPerSecond: owned.Any(process => process.DiskBytesPerSecond.HasValue) ? owned.Sum(process => process.DiskBytesPerSecond ?? 0) : null,
+            NetworkBytesPerSecond: owned.Any(process => process.NetworkBytesPerSecond.HasValue) ? owned.Sum(process => process.NetworkBytesPerSecond ?? 0) : null);
+
     /// <summary>Groups named sessions and owned processes from the supplied frame.</summary>
     /// <param name="frame">The reusable metric snapshot to read or fill.</param>
     public void Update(CollectorFrame frame) {
-        var comparer = frame.Platform.Contains("Windows", StringComparison.OrdinalIgnoreCase) ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        var sessions = frame.Users.Take(frame.UserCount).Where(row => !string.IsNullOrWhiteSpace(row.UserName)).GroupBy(row => row.UserName, comparer).ToDictionary(group => group.Key, group => group.ToArray(), comparer);
-        var processes = frame.Processes.Take(IncludeProcesses ? frame.ProcessCount : 0).Where(row => !string.IsNullOrWhiteSpace(row.UserName)).GroupBy(row => row.UserName!, comparer).ToDictionary(
+        bool windows = frame.Platform.Contains("Windows", StringComparison.OrdinalIgnoreCase);
+        var comparer = windows ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var sessions = frame.Users.Take(frame.UserCount).Where(row => !string.IsNullOrWhiteSpace(row.UserName) && (!windows || row.IsNamedWindowsSession)).GroupBy(row => row.UserName, comparer).ToDictionary(group => group.Key, group => group.ToArray(), comparer);
+        var processes = frame.Processes.Take(IncludeProcesses ? frame.ProcessCount : 0).Where(row => !string.IsNullOrWhiteSpace(row.UserName) && (!windows || sessions.ContainsKey(row.UserName))).GroupBy(row => row.UserName!, comparer).ToDictionary(
             group => group.Key,
-            group => group.OrderByDescending(row => row.CpuPercent).ThenBy(row => row.Id).ToArray(),
+            group => group.ToArray(),
             comparer
         );
-        var rows = new List<UserViewRow>();
-        foreach (string account in sessions.Keys.Concat(processes.Keys).Distinct(comparer).OrderBy(name => name, comparer)) {
+        var groups = new List<(UserViewRow Row, ProcessRow[] Owned, bool Matches, ProcessRow Total)>();
+        IEnumerable<string> accounts = windows ? sessions.Keys : sessions.Keys.Concat(processes.Keys).Distinct(comparer);
+        foreach (string account in accounts) {
             var logins = sessions.GetValueOrDefault(account) ?? [];
             var owned = processes.GetValueOrDefault(account) ?? [];
             bool matches = account.Contains(Filter, StringComparison.OrdinalIgnoreCase)
@@ -142,7 +156,7 @@ public sealed class UserView {
             }
 
             string key = "user:" + account;
-            rows.Add(new(
+            var header = new UserViewRow(
                 key,
                 account,
                 string.Join(
@@ -154,7 +168,24 @@ public sealed class UserView {
                 visible.Length,
                 visible.Sum(row => row.CpuPercent),
                 visible.Sum(row => row.WorkingSet)
-            ) { Logins = logins });
+            ) { Logins = logins };
+            groups.Add((header, owned, matches, Aggregate(header, visible)));
+        }
+
+        _groupSort.Sort = Sort;
+        _groupSort.Ascending = Ascending;
+        groups.Sort((left, right) => {
+            int comparison = _groupSort.Compare(left.Total, right.Total);
+            return comparison == 0 ? comparer.Compare(left.Row.UserName, right.Row.UserName) : comparison;
+        });
+        var rows = new List<UserViewRow>();
+        foreach (var group in groups) {
+            var header = group.Row;
+            string key = header.Key, account = header.UserName;
+            var logins = header.Logins;
+            var owned = group.Owned;
+            bool matches = group.Matches;
+            rows.Add(header);
             if (_expanded.Contains(key) || !matches) {
                 if (!_processViews.TryGetValue(account, out var view)) {
                     view = new ProcessView();
@@ -193,7 +224,7 @@ public sealed class UserView {
             SelectedKey = rows.FirstOrDefault()?.Key;
         }
 
-        _expanded.RemoveWhere(key => !sessions.Keys.Concat(processes.Keys).Any(account => key == "user:" + account));
+        _expanded.RemoveWhere(key => !accounts.Any(account => key == "user:" + account));
         foreach (string account in _processViews.Keys.Where(account => !processes.ContainsKey(account)).ToArray()) {
             _processViews.Remove(account);
         }

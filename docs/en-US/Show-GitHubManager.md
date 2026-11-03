@@ -32,18 +32,23 @@ fgh
 
 ## DESCRIPTION
 
-Lazy Issues, Pull requests, Runs and Workflows tabs use the installed authenticated gh CLI.
-Shows issue bodies/comments, PR diffs/checks/reviews, jobs/steps and pending deployments.
-A or right-click opens actions: issue comments, PR approval/change requests/comment reviews, failed-step logs, rerun failed jobs, cancel runs, approve eligible workflow runs/environments and dispatch workflows on an explicit branch/tag.
-Remote mutations require an in-app confirmation.
-PR reviews bind to the inspected head SHA and recheck it before posting; changed workflow attempts or pending environments invalidate approval.
-Server permissions, protection rules and self-approval restrictions remain enforced.
-Authentication is not performed inside the TUI.
-No pipeline objects are emitted.
+Opens GitHub Issues, Pull requests, Runs and Workflows for a repository in a
+fullscreen terminal app. Tabs load when first opened. Issues show their body and
+comments; pull requests show diffs, checks and reviews. Runs, jobs and steps show
+a green check, red cross or progress marker for their status. Workflows show their
+recent runs, and run details list jobs, steps, durations, pending deployments and
+artifacts with links that open in the browser.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+Press A or right-click for actions: comment on issues, approve, request changes
+or comment on pull requests, view failed-step logs, rerun failed jobs, cancel
+runs, approve pending deployments and dispatch a workflow on a chosen branch or
+tag. Changes are confirmed before they are sent. A review is rejected if the pull
+request changed after you opened it, and GitHub permissions and protection rules
+still apply.
+
+Requires the GitHub CLI (gh), already signed in with gh auth login; the app does
+not sign in for you. The cmdlet writes no pipeline output. Press F12 to toggle
+the diagnostic overlay.
 
 ## EXAMPLES
 
@@ -260,7 +265,7 @@ HelpMessage: ''
 
 ### -View
 
-Initial lazy tab: Issues, PullRequests, Runs or Workflows.
+Initial tab: Issues, PullRequests, Runs or Workflows.
 Defaults to PullRequests.
 
 ```yaml

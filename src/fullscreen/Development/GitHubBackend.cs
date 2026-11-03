@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -11,9 +12,10 @@ public sealed record PullRequestState(int Number, string Head);
 /// <summary>Selects which workflow run states to load.</summary>
 /// <param name="Id">The stable resource or process identifier.</param>
 /// <param name="Head">The current Git head revision.</param>
-/// <param name="Status">The raw Git porcelain status text.</param>
+/// <param name="Status">The workflow run status.</param>
 /// <param name="Attempt">The workflow run attempt number.</param>
-public sealed record WorkflowRunState(long Id, string Head, string Status, int Attempt);
+/// <param name="Url">The workflow run URL. Defaults to an empty string.</param>
+public sealed record WorkflowRunState(long Id, string Head, string Status, int Attempt, string Url = "");
 /// <summary>Loads GitHub resources and exposes repository operations through GitHub CLI.</summary>
 public sealed partial class GitHubBackend : IDeveloperBackend {
     private static readonly JsonSerializerOptions JsonOptions = new() {
@@ -26,6 +28,9 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
     private string? _repository;
     private readonly ConcurrentDictionary<int, string> _reviewedHeads = new();
     private readonly ConcurrentDictionary<long, (WorkflowRunState Run, long[] Environments, string Names)> _deployments = new();
+    private readonly ConcurrentDictionary<long, WorkflowLinks> _workflowLinks = new();
+    private readonly ConcurrentDictionary<string, (string Name, string Url)[]> _recentWorkflowRuns = new();
+    private sealed record WorkflowLinks((string Name, string Url)[] Jobs, (string Name, string Url)[] Artifacts);
     /// <summary>Gets the displayed heading.</summary>
     public string Title => "◈ GITHUB · " + _host + "/" + (_repository ?? "detecting repository");
     /// <summary>Gets the available tab headings.</summary>
@@ -206,7 +211,7 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
                     Text(run, "id"),
                     Text(run, "display_title"),
                     Text(run, "head_branch"),
-                    Text(run, "status"),
+                    StatusLabel(Text(run, "status"), Text(run, "conclusion")),
                     Text(run, "conclusion"),
                     Text(run, "run_attempt")
                 ],
@@ -214,7 +219,8 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
                     Number(run, "id"),
                     Text(run, "head_sha"),
                     Text(run, "status"),
-                    (int)Number(run, "run_attempt")
+                    (int)Number(run, "run_attempt"),
+                    Text(run, "html_url")
                 )
             )).ToArray();
             return new(
@@ -222,7 +228,7 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
                     "Run",
                     "Pipeline",
                     "Branch",
-                    "Status",
+                    "Result",
                     "Conclusion",
                     "Attempt"
                 ],
@@ -252,7 +258,7 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
                 [
                     Text(workflow, "id"),
                     Text(workflow, "name"),
-                    Text(workflow, "state"),
+                    StatusLabel(Text(workflow, "state"), ""),
                     Text(workflow, "path")
                 ],
                 Number(workflow, "id")
@@ -337,6 +343,7 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
         if (item.State is WorkflowRunState run) {
             var current = await Api($"actions/runs/{run.Id}", token).ConfigureAwait(false);
             var jobs = await Api($"actions/runs/{run.Id}/jobs?per_page=100", token).ConfigureAwait(false);
+            var artifacts = await Api($"actions/runs/{run.Id}/artifacts?per_page=100", token).ConfigureAwait(false);
             var pending = await Api($"actions/runs/{run.Id}/pending_deployments", token).ConfigureAwait(false);
             var eligible = pending.EnumerateArray().Where(environment => environment.TryGetProperty("current_user_can_approve", out var canApprove)
                 && canApprove.ValueKind == JsonValueKind.True).ToArray();
@@ -349,31 +356,57 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
                 ", ",
                 eligible.Select(environment => Text(environment.GetProperty("environment"), "name"))
             ));
-            string jobLines = string.Join(
+            var jobEntries = jobs.GetProperty("jobs").EnumerateArray().ToArray();
+            string jobLines = jobEntries.Length == 0 ? "No jobs reported." : string.Join(
                 "\n\n",
-                jobs.GetProperty("jobs").EnumerateArray().Select(job => Text(job, "name") +
-                " · " + Text(job, "status") +
-                " · " + Text(job, "conclusion") +
-                "\n" + (job.TryGetProperty("steps", out var steps) ? string.Join(
-                    '\n',
-                    steps.EnumerateArray().Select(step => "  " + Text(step, "number") +
-                ". " + Text(step, "name") +
-                " · " + Text(step, "status") +
-                " · " + Text(step, "conclusion"))
-                ) : ""))
+                jobEntries.Select(job => StatusLabel(Text(job, "status"), Text(job, "conclusion")) + "  " + Text(job, "name") +
+                    "\n  " + Text(job, "status") + " · " + Text(job, "conclusion") + " · " + Duration(job, "started_at", "completed_at") +
+                    "\n" + (job.TryGetProperty("steps", out var steps) && steps.GetArrayLength() > 0 ? string.Join(
+                        '\n',
+                        steps.EnumerateArray().Select(step => "  " + StatusLabel(Text(step, "status"), Text(step, "conclusion")) + "  " + Text(step, "number") +
+                            ". " + Text(step, "name") + " · " + Text(step, "status") + " · " + Duration(step, "started_at", "completed_at"))
+                    ) : "  No steps reported."))
             );
-            return Text(current, "html_url") +
-                "\n\n" + Text(current, "display_title") +
-                "\n" + Text(current, "status") +
-                " · " + Text(current, "conclusion") +
-                "\nBranch: " + Text(current, "head_branch") +
-                "\nHead: " + Text(current, "head_sha") +
-                "\nAttempt: " + Text(current, "run_attempt") +
-                "\n\nJOBS AND STEPS (first 100 jobs)\n" + jobLines +
-                "\n\nPENDING DEPLOYMENTS\n" + Pretty(pending);
+            var artifactEntries = artifacts.GetProperty("artifacts").EnumerateArray().ToArray();
+            string artifactLines = artifactEntries.Length == 0 ? "No artifacts attached to this run." : string.Join(
+                '\n',
+                artifactEntries.Select(artifact => Text(artifact, "name") + " · " + FormatBytes(Number(artifact, "size_in_bytes")) +
+                    (Text(artifact, "expired") == "True" ? " · expired" : "") + "\n  " + Text(artifact, "archive_download_url"))
+            );
+            string runUrl = Text(current, "html_url");
+            var jobLinks = jobEntries.Select(job => (Text(job, "name"), Text(job, "html_url"))).Where(link => link.Item2.Length > 0).ToArray();
+            var artifactLinks = artifactEntries.Select(artifact => (Text(artifact, "name"), Text(artifact, "archive_download_url")))
+                .Where(link => link.Item2.Length > 0).ToArray();
+            _workflowLinks[run.Id] = new(jobLinks, artifactLinks);
+            return "WORKFLOW RUN  ·  " + Text(current, "name") +
+                "\n" + StatusLabel(Text(current, "status"), Text(current, "conclusion")) + "  " + Text(current, "display_title") +
+                "\n" + Text(current, "status") + " · " + Text(current, "conclusion") + " · " + Duration(current, "created_at", "updated_at") +
+                " · " + RelativeTime(Text(current, "created_at")) +
+                "\nBranch: " + Text(current, "head_branch") + " · Event: " + Text(current, "event") + " · Actor: " + Text(current.GetProperty("actor"), "login") +
+                "\nCommit: " + Text(current, "head_sha") + " · Attempt: " + Text(current, "run_attempt") +
+                "\nRun: " + runUrl +
+                "\n\nJOBS AND STEPS  ·  " + jobEntries.Length + " jobs\n" + jobLines +
+                "\n\nARTIFACTS  ·  " + artifactEntries.Length + " assets\n" + artifactLines +
+                "\n\nPENDING DEPLOYMENTS\n" + (eligible.Length == 0 ? "None" : string.Join(", ", eligible.Select(environment => Text(environment.GetProperty("environment"), "name"))));
         }
 
-        return Pretty(await Api($"actions/workflows/{item.Key}", token).ConfigureAwait(false));
+        var workflow = await Api($"actions/workflows/{item.Key}", token).ConfigureAwait(false);
+        var recent = await Api($"actions/workflows/{item.Key}/runs?per_page=10", token).ConfigureAwait(false);
+        var recentRuns = recent.GetProperty("workflow_runs").EnumerateArray().ToArray();
+        _recentWorkflowRuns[item.Key] = [.. recentRuns.Select(recentRun => (Text(recentRun, "display_title"), Text(recentRun, "html_url"))).Where(link => link.Item2.Length > 0)];
+        string recentLines = recentRuns.Length == 0 ? "No runs found for this workflow." : string.Join(
+            "\n\n",
+            recentRuns.Select(recentRun => StatusLabel(Text(recentRun, "status"), Text(recentRun, "conclusion")) + "  " + Text(recentRun, "display_title") +
+                "\n  " + Text(recentRun, "head_branch") + " · " + Text(recentRun, "event") + " · " + Text(recentRun.GetProperty("actor"), "login") +
+                " · " + Duration(recentRun, "created_at", "updated_at") + " · " + RelativeTime(Text(recentRun, "created_at")) +
+                "\n  " + Text(recentRun, "html_url"))
+        );
+        return "WORKFLOW  ·  " + Text(workflow, "name") +
+            "\n" + StatusLabel(Text(workflow, "state"), "") + "  " + Text(workflow, "state") +
+            "\nFile: " + Text(workflow, "path") +
+            "\nCreated: " + Text(workflow, "created_at") + " · Updated: " + Text(workflow, "updated_at") +
+            "\nURL: " + Text(workflow, "html_url") +
+            "\n\nRECENT RUNS  ·  " + recentRuns.Length + " of 10\n" + recentLines;
     }
 
     /// <inheritdoc cref="fullscreen.Development.IDeveloperBackend.Operations"/>
@@ -381,6 +414,7 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
         if (item is null) {
             return [];
         }
+
 
         var operations = new List<DeveloperOperation>();
         if (view == 0) {
@@ -418,6 +452,18 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
         }
 
         if (item.State is WorkflowRunState run) {
+            operations.Add(new("Open run in browser", "Open the selected workflow run in your browser.", (_, _) => Task.FromResult(OpenUrl(run.Url)), ReadOnly: true));
+            if (_workflowLinks.TryGetValue(run.Id, out var links)) {
+                foreach (var job in links.Jobs) {
+                    string jobUrl = job.Url;
+                    operations.Add(new("Open job · " + job.Name, "Open this workflow job in your browser.", (_, _) => Task.FromResult(OpenUrl(jobUrl)), ReadOnly: true));
+                }
+
+                foreach (var artifact in links.Artifacts) {
+                    string artifactUrl = artifact.Url;
+                    operations.Add(new("Open artifact · " + artifact.Name, "Open or download this workflow artifact.", (_, _) => Task.FromResult(OpenUrl(artifactUrl)), ReadOnly: true));
+                }
+            }
             operations.Add(new(
                 "View failed-step logs",
                 "Load failed-step logs for this workflow attempt.",
@@ -492,6 +538,17 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
         }
 
         if (view == 3) {
+            if (_recentWorkflowRuns.TryGetValue(item.Key, out var recentRuns)) {
+                foreach (var recentRun in recentRuns) {
+                    string runUrl = recentRun.Url;
+                    operations.Add(new("Open recent run · " + recentRun.Name, "Open this recent workflow run in your browser.", (_, _) => Task.FromResult(OpenUrl(runUrl)), ReadOnly: true));
+                }
+            }
+
+            operations.Add(new("Open workflow in browser", "Open this workflow in your browser.", async (_, token) => {
+                var workflow = await Api($"actions/workflows/{item.Key}", token).ConfigureAwait(false);
+                return OpenUrl(Text(workflow, "html_url"));
+            }, ReadOnly: true));
             operations.Add(new("Run workflow…", $"Dispatch {_repository} workflow {item.Key} on the branch/tag entered below. GitHub requires workflow_dispatch support; workflows with required inputs are not handled here.", async (
                 reference,
                 token
@@ -554,6 +611,61 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
         }
     }
 
+    private string OpenUrl(string value) {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps
+            || !(uri.Host.Equals(_host, StringComparison.OrdinalIgnoreCase)
+                || uri.Host.Equals("api." + _host, StringComparison.OrdinalIgnoreCase))) {
+            throw new InvalidOperationException("GitHub returned an invalid or unexpected URL.");
+        }
+
+        Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+        return "Opened " + uri.AbsoluteUri;
+    }
+
+    internal static string StatusLabel(string status, string conclusion) {
+        string state = conclusion.Length > 0 ? conclusion : status;
+        string glyph = state.ToLowerInvariant() switch {
+            "success" or "succeeded" or "completed" or "active" => "✓",
+            "failure" or "failed" or "timed_out" or "startup_failure" or "action_required" => "✗",
+            "queued" or "pending" or "in_progress" or "waiting" or "requested" or "inprogress" or "partiallysucceeded" or "notstarted" => "●",
+            "cancelled" or "canceled" or "skipped" or "disabled_manually" or "disabled_inactivity" => "○",
+            _ => "·"
+        };
+        return glyph + " " + (state.Length > 0 ? state : status);
+    }
+
+    internal static string Duration(JsonElement node, string startName, string endName) {
+        string start = Text(node, startName), end = Text(node, endName);
+        if (!DateTimeOffset.TryParse(start, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var began)) {
+            return "duration unknown";
+        }
+
+        if (!DateTimeOffset.TryParse(end, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var finished)) {
+            finished = DateTimeOffset.UtcNow;
+        }
+
+        TimeSpan elapsed = finished - began;
+        return elapsed < TimeSpan.Zero ? "duration unknown" : elapsed.TotalHours >= 1
+            ? $"{(int)elapsed.TotalHours}h {elapsed.Minutes}m"
+            : elapsed.TotalMinutes >= 1 ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s" : $"{Math.Max(0, elapsed.Seconds)}s";
+    }
+
+    private static string RelativeTime(string value) {
+        if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var timestamp)) {
+            return "time unknown";
+        }
+
+        TimeSpan age = DateTimeOffset.UtcNow - timestamp;
+        if (age < TimeSpan.Zero) {
+            return "just now";
+        }
+
+        return age.TotalDays >= 1 ? $"{(int)age.TotalDays}d ago" : age.TotalHours >= 1 ? $"{(int)age.TotalHours}h ago"
+            : age.TotalMinutes >= 1 ? $"{(int)age.TotalMinutes}m ago" : "just now";
+    }
+
+    private static string FormatBytes(long bytes) => bytes < 1024 ? $"{bytes} B"
+        : bytes < 1024 * 1024 ? $"{bytes / 1024d:0.#} KB" : $"{bytes / (1024d * 1024):0.#} MB";
     private static void RequireBody(string body) {
         if (string.IsNullOrWhiteSpace(body)) {
             throw new ArgumentException("A nonempty value is required.");

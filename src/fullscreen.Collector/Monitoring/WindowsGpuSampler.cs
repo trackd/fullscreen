@@ -14,6 +14,10 @@ internal sealed partial class WindowsGpuSampler : IDisposable {
     private readonly Dictionary<ulong, double> _engines = [];
     public double? Utilization { get; private set; }
     public ulong? DedicatedMemory { get; private set; }
+    internal CollectorCapabilities Capabilities { get; private set; } =
+        CollectorCapabilities.ProcessGraphics | CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory;
+    internal static bool MissingCounter(int status) =>
+        status is unchecked((int)0xC0000BB8) or unchecked((int)0xC0000BB9);
 
     public WindowsGpuSampler(bool processes = true, bool devices = true) {
         _collectProcesses = processes;
@@ -24,18 +28,32 @@ internal sealed partial class WindowsGpuSampler : IDisposable {
         }
 
         _query = query;
-        if (PdhAddEnglishCounterW(query, "\\GPU Engine(*)\\Utilization Percentage", 0, out _engine) != 0) {
+        int engineStatus = PdhAddEnglishCounterW(query, "\\GPU Engine(*)\\Utilization Percentage", 0, out _engine);
+        if (engineStatus != 0) {
             _engine = 0;
+            if (MissingCounter(engineStatus)) {
+                Capabilities &= ~(CollectorCapabilities.ProcessGpu | CollectorCapabilities.GpuUtilization);
+            }
         }
 
-        if (processes
-            && PdhAddEnglishCounterW(query, "\\GPU Process Memory(*)\\Dedicated Usage", 0, out _memory) != 0) {
-            _memory = 0;
+        if (processes) {
+            int memoryStatus = PdhAddEnglishCounterW(query, "\\GPU Process Memory(*)\\Dedicated Usage", 0, out _memory);
+            if (memoryStatus != 0) {
+                _memory = 0;
+                if (MissingCounter(memoryStatus)) {
+                    Capabilities &= ~CollectorCapabilities.ProcessGpuMemory;
+                }
+            }
         }
 
-        if (devices
-            && PdhAddEnglishCounterW(query, "\\GPU Adapter Memory(*)\\Dedicated Usage", 0, out _adapterMemory) != 0) {
-            _adapterMemory = 0;
+        if (devices) {
+            int adapterStatus = PdhAddEnglishCounterW(query, "\\GPU Adapter Memory(*)\\Dedicated Usage", 0, out _adapterMemory);
+            if (adapterStatus != 0) {
+                _adapterMemory = 0;
+                if (MissingCounter(adapterStatus)) {
+                    Capabilities &= ~CollectorCapabilities.GpuUsedMemory;
+                }
+            }
         }
 
         _ = PdhCollectQueryData(query);

@@ -31,21 +31,18 @@ public enum ProcessColumn {
     Network
 }
 
-/// <summary>Ordered per-monitor selection; narrow layouts may temporarily hide lower-priority columns.</summary>
+/// <summary>Ordered per-monitor selection with horizontally accessible overflow columns.</summary>
 public sealed class ProcessColumns {
     /// <summary>Gets the default visible process columns.</summary>
     public static ReadOnlySpan<ProcessColumn> Defaults => [
         ProcessColumn.Name,
-        ProcessColumn.Id,
         ProcessColumn.UserName,
-        ProcessColumn.Status,
         ProcessColumn.Cpu,
         ProcessColumn.Memory,
-        ProcessColumn.Disk,
         ProcessColumn.Network,
         ProcessColumn.Gpu,
-        ProcessColumn.GpuMemory,
-        ProcessColumn.Threads
+        ProcessColumn.Threads,
+        ProcessColumn.Id
     ];
 
     private readonly List<ProcessColumn> _selected = [];

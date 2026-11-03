@@ -40,6 +40,7 @@ internal static partial class NativeTuiControls {
         or "Popup"
         or "Dialog"
         or "Spinner"
+        or "ScrollViewer"
         or "StatusBar"
         or "Switch"
         or "TabControl"
