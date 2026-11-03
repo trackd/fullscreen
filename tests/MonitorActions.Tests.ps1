@@ -16,7 +16,12 @@ Describe 'MonitorActions' -Tag 'Integration' {
             $row = $frame.Processes | Select-Object -First $frame.ProcessCount | Where-Object Id -eq $PID
             $row.Id | Should -Be $PID
             $text = $source.ReadCommandLine($row, [Threading.CancellationToken]::None)
-            $text | Should -Match ([regex]::Escape([Diagnostics.Process]::GetCurrentProcess().ProcessName))
+            if ($IsMacOS -and $text.StartsWith('Unavailable:')) {
+                $text | Should -Be 'Unavailable: ambiguous macOS argument boundaries.'
+            }
+            else {
+                $text | Should -Match ([regex]::Escape([Diagnostics.Process]::GetCurrentProcess().ProcessName))
+            }
             $row.StartTimeTicks++
             { $source.ReadCommandLine($row, [Threading.CancellationToken]::None) } | Should -Throw '*identity changed*'
         }

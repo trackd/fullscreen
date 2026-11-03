@@ -391,6 +391,10 @@ public sealed class AzureDevOpsTests {
         Assert.Contains("src/code.cs", detail);
         Assert.Contains("Please check the error path", detail);
         Assert.Contains("Approved", detail);
+        var diff = client.Requests.Single(request => request.Path.Contains("diffs/commits", StringComparison.Ordinal));
+        Assert.Contains("baseVersion=target-sha", diff.Path);
+        Assert.Contains("targetVersion=source-sha", diff.Path);
+        Assert.Contains("diffCommonCommit=true", diff.Path);
         await backend.Operations(4, pull).Single(operation => operation.Label == "Approve").Execute("", default);
         var vote = client.Requests.Last();
         Assert.AreEqual(HttpMethod.Put, vote.Method);
@@ -401,6 +405,21 @@ public sealed class AzureDevOpsTests {
         Assert.AreEqual(HttpMethod.Post, comment.Method);
         Assert.Contains("/threads?", comment.Path);
         Assert.AreEqual("Review\ncomment", comment.Body.GetProperty("comments")[0].GetProperty("content").GetString());
+    }
+
+    [TestMethod]
+    public async Task PullRequestDiscussionExcludesDeletedThreadsAndComments() {
+        var client = new FixtureClient {
+            PullThreads = """{"value":[{"isDeleted":true,"comments":[{"content":"deleted thread"}]},{"isDeleted":false,"comments":[{"isDeleted":true,"content":"deleted comment"},{"isDeleted":false,"content":"visible comment"},{"content":"legacy comment"}]},{"comments":[{"content":"legacy thread"}]}]}"""
+        };
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        var pull = (await backend.LoadAsync(4, 0, default)).Items.Single();
+        string detail = await backend.DetailAsync(4, pull, default);
+        Assert.DoesNotContain("deleted thread", detail);
+        Assert.DoesNotContain("deleted comment", detail);
+        Assert.Contains("visible comment", detail);
+        Assert.Contains("legacy comment", detail);
+        Assert.Contains("legacy thread", detail);
     }
 
     [TestMethod]
@@ -616,6 +635,7 @@ public sealed class AzureDevOpsTests {
         public volatile bool DetailStarted;
         public bool NoCurrentSprint;
         public bool ChangedPull;
+        public string? PullThreads;
         public bool LongDescription;
         public JsonElement[]? ItemFixtures;
         public int[]? MineIds;
@@ -640,7 +660,7 @@ public sealed class AzureDevOpsTests {
             string json = path.StartsWith("_apis/projects/", StringComparison.Ordinal) ? """{"defaultTeam":{"id":"22222222-2222-2222-2222-222222222222","name":"Default team"}}"""
                 : path.Contains("connectionData", StringComparison.Ordinal) ? """{"authenticatedUser":{"id":"11111111-1111-1111-1111-111111111111"}}"""
                 : path.Contains("/reviewers/", StringComparison.Ordinal) ? "{}"
-                : path.Contains("/threads", StringComparison.Ordinal) ? """{"value":[{"comments":[{"content":"Please check the error path","author":{"displayName":"Sam"}}]}]}"""
+                : path.Contains("/threads", StringComparison.Ordinal) ? PullThreads ?? """{"value":[{"comments":[{"content":"Please check the error path","author":{"displayName":"Sam"}}]}]}"""
                 : path.Contains("diffs/commits", StringComparison.Ordinal) ? """{"changes":[{"changeType":"edit","item":{"path":"/src/code.cs"}}]}"""
                 : path.Contains("pullrequests", StringComparison.Ordinal) ? path.Contains("searchCriteria", StringComparison.Ordinal) ? "{\"value\":[" + Pull + "]}" : ChangedPull ? Pull.Replace("source-sha", "new-source", StringComparison.Ordinal) : Pull
                 : path.Contains("/timeline", StringComparison.Ordinal) ? """{"records":[{"name":"Compile","type":"Job","state":"completed","result":"failed","order":1,"startTime":"2026-10-24T10:00:00Z","finishTime":"2026-10-24T10:02:00Z"}]}"""

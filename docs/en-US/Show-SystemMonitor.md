@@ -72,6 +72,8 @@ Shift+Left/Right, or click the header edge arrows. Memory and transfer rates use
 scaled units such as MiB and GiB. Press D or right-click for process details,
 including wrapped command-line arguments. Missing or inaccessible command lines
 show an unavailable message; long command lines are explicitly truncated.
+On macOS, ambiguous padding or an empty first argument also reports unavailable
+so environment variables cannot be mistaken for command-line arguments.
 
 Users lists accounts with a login session, including disconnected sessions, and
 groups each account's processes with CPU and memory totals. Sorting moves whole

@@ -171,8 +171,10 @@ public sealed partial class ProcessOwnerReader {
         if (position < 0) {
             throw new InvalidDataException("Process executable path is incomplete.");
         }
-        while (position < data.Length && data[position] == 0) {
-            position++;
+        position++;
+        // Padding and an empty argv[0] have identical bytes. Never skip into envp.
+        if (arguments > 0 && position < data.Length && data[position] == 0) {
+            return "Unavailable: ambiguous macOS argument boundaries.";
         }
         var result = new StringBuilder();
         for (int i = 0; i < arguments; i++) {

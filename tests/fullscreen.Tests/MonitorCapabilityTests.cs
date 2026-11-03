@@ -115,6 +115,64 @@ public sealed class MonitorCapabilityTests {
     }
 
     [TestMethod]
+    public void MissingDrmProviderAddsNoCapabilitiesOrDevicesToExistingNvmlSample() {
+        var frame = new CollectorFrame { GpuCount = 1 };
+        frame.Gpus[0] = new("NVML fixture", "NVML", 50, 1024, 2048, 40);
+        var original = frame.Gpus[0];
+        string missing = Path.Combine(Path.GetTempPath(), "Fullscreen-DRM-" + Guid.NewGuid().ToString("N"));
+        Assert.AreEqual(CollectorCapabilities.None, GpuSampler.SampleDrm(frame, missing));
+        Assert.AreEqual(1, frame.GpuCount);
+        Assert.AreEqual(original, frame.Gpus[0]);
+    }
+
+    [TestMethod]
+    public void DrmCapabilitiesFollowOnlyExposedCounters() {
+        string root = Path.Combine(Path.GetTempPath(), "Fullscreen-DRM-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try {
+            var frame = new CollectorFrame();
+            Assert.AreEqual(CollectorCapabilities.None, GpuSampler.SampleDrm(frame, root));
+            string device = Path.Combine(root, "card0", "device");
+            Directory.CreateDirectory(device);
+            File.WriteAllText(Path.Combine(device, "gpu_busy_percent"), "42");
+            Assert.AreEqual(CollectorCapabilities.GpuUtilization, GpuSampler.SampleDrm(frame, root));
+            Assert.AreEqual(42d, frame.Gpus[0].Utilization);
+            File.WriteAllText(Path.Combine(device, "mem_info_vram_used"), "1024");
+            File.WriteAllText(Path.Combine(device, "mem_info_vram_total"), "2048");
+            frame.GpuCount = 0;
+            Assert.AreEqual(CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory,
+                GpuSampler.SampleDrm(frame, root));
+            Assert.AreEqual(1, frame.GpuCount);
+        }
+        finally {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(ProcessSort.Gpu, CollectorCapabilities.ProcessGpu, CollectorMetrics.ProcessGpu)]
+    [DataRow(ProcessSort.GpuMemory, CollectorCapabilities.ProcessGpuMemory, CollectorMetrics.ProcessGpu)]
+    [DataRow(ProcessSort.Disk, CollectorCapabilities.ProcessDisk, CollectorMetrics.ProcessDisk)]
+    [DataRow(ProcessSort.Network, CollectorCapabilities.ProcessNetwork, CollectorMetrics.ProcessNetwork)]
+    public void UserSortRequestsOnlySupportedCountersWhileProcessesAreEnabled(
+        ProcessSort sort, CollectorCapabilities capability, CollectorMetrics metric) {
+        var frame = new CollectorFrame { Capabilities = CollectorCapabilities.ProcessOwner | capability };
+        var surface = new MonitorSurface { View = MonitorView.Users, Frame = frame, IncludeUserProcesses = true };
+        surface.Model.Sort = sort;
+        const CollectorMetrics baseline = CollectorMetrics.Users | CollectorMetrics.Processes | CollectorMetrics.Owners;
+        Assert.AreEqual(baseline | metric, surface.RequiredMetrics);
+        frame.Capabilities &= ~capability;
+        Assert.AreEqual(baseline, surface.RequiredMetrics);
+        frame.Capabilities = CollectorCapabilities.ProcessOwner | capability;
+        surface.IncludeUserProcesses = false;
+        Assert.AreEqual(CollectorMetrics.Users, surface.RequiredMetrics);
+        surface.IncludeUserProcesses = true;
+        surface.BackgroundSampling = true;
+        Assert.AreEqual(baseline | metric | CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu,
+            surface.RequiredMetrics);
+    }
+
+    [TestMethod]
     public void CapabilitiesCrossTheWireAndCommandLineReaderBelongsToTheStandaloneCollector() {
         Assert.AreSame(typeof(PerformanceCollector).Assembly, typeof(ProcessOwnerReader).Assembly);
         Assert.AreEqual("fullscreen.Collector", typeof(ProcessOwnerReader).Assembly.GetName().Name);

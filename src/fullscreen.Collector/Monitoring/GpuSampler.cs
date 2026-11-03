@@ -44,37 +44,7 @@ public sealed class GpuSampler : IDisposable {
         }
 
         if (devices && Platform.IsLinux()) {
-            try {
-                foreach (string card in Directory.EnumerateDirectories("/sys/class/drm", "card*")) {
-                    if (!int.TryParse(Path.GetFileName(card)[4..], out _)) {
-                        continue;
-                    }
-
-                    string device = Path.Combine(card, "device");
-                    if (!ExposesCounter(Path.Combine(device, "gpu_busy_percent"))) {
-                        continue;
-                    }
-
-                    DeviceCapabilities |= CollectorCapabilities.GpuUtilization;
-                    if (ExposesCounter(Path.Combine(device, "mem_info_vram_used"))) {
-                        DeviceCapabilities |= CollectorCapabilities.GpuUsedMemory;
-                    }
-                    if (ExposesCounter(Path.Combine(device, "mem_info_vram_total"))) {
-                        DeviceCapabilities |= CollectorCapabilities.GpuTotalMemory;
-                    }
-                    double? busy = ReadNumber(Path.Combine(device, "gpu_busy_percent"));
-                    ulong? used = (ulong?)ReadNumber(Path.Combine(device, "mem_info_vram_used"));
-                    ulong? total = (ulong?)ReadNumber(Path.Combine(device, "mem_info_vram_total"));
-                    frame.Gpus = CollectorFrame.EnsureCapacity(frame.Gpus, frame.GpuCount + 1);
-                    frame.Gpus[frame.GpuCount++] = new(Path.GetFileName(card), "DRM/sysfs", busy, used, total, null);
-                }
-            }
-            catch (IOException) {
-                DeviceCapabilities |= CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory;
-            }
-            catch (UnauthorizedAccessException) {
-                DeviceCapabilities |= CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory;
-            }
+            DeviceCapabilities |= SampleDrm(frame, "/sys/class/drm");
         }
 
         if (devices && frame.GpuCount == 0 && _windows?.Utilization is double busyPercent) {
@@ -89,6 +59,45 @@ public sealed class GpuSampler : IDisposable {
         }
 
         frame.GpuStatus = frame.GpuCount > 0 ? "GPU telemetry available" : "Unavailable · driver/provider not exposed";
+    }
+
+    internal static CollectorCapabilities SampleDrm(CollectorFrame frame, string root) {
+        var capabilities = CollectorCapabilities.None;
+        try {
+            foreach (string card in Directory.EnumerateDirectories(root, "card*")) {
+                if (!int.TryParse(Path.GetFileName(card)[4..], out _)) {
+                    continue;
+                }
+
+                string device = Path.Combine(card, "device");
+                if (!ExposesCounter(Path.Combine(device, "gpu_busy_percent"))) {
+                    continue;
+                }
+
+                capabilities |= CollectorCapabilities.GpuUtilization;
+                if (ExposesCounter(Path.Combine(device, "mem_info_vram_used"))) {
+                    capabilities |= CollectorCapabilities.GpuUsedMemory;
+                }
+                if (ExposesCounter(Path.Combine(device, "mem_info_vram_total"))) {
+                    capabilities |= CollectorCapabilities.GpuTotalMemory;
+                }
+                double? busy = ReadNumber(Path.Combine(device, "gpu_busy_percent"));
+                ulong? used = (ulong?)ReadNumber(Path.Combine(device, "mem_info_vram_used"));
+                ulong? total = (ulong?)ReadNumber(Path.Combine(device, "mem_info_vram_total"));
+                frame.Gpus = CollectorFrame.EnsureCapacity(frame.Gpus, frame.GpuCount + 1);
+                frame.Gpus[frame.GpuCount++] = new(Path.GetFileName(card), "DRM/sysfs", busy, used, total, null);
+            }
+        }
+        catch (DirectoryNotFoundException) {
+            // A missing DRM provider must not override capabilities from NVML.
+        }
+        catch (IOException) {
+            capabilities |= CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory;
+        }
+        catch (UnauthorizedAccessException) {
+            capabilities |= CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory;
+        }
+        return capabilities;
     }
 
     private static bool ExposesCounter(string path) {

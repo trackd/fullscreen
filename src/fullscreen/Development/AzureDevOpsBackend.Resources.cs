@@ -34,14 +34,14 @@ public sealed partial class AzureDevOpsBackend {
             "\n\nREVIEWERS\n" + string.Join('\n', Values(pull, "reviewers").Select(reviewer =>
                 Identity(reviewer) + " · " + VoteLabel(Number(reviewer, "vote")))));
         text.AppendLine("\n\nDISCUSSION");
-        foreach (var thread in Values(threads).Where(thread => S(thread, "isDeleted") != "true")) {
-            foreach (var comment in Values(thread, "comments").Where(comment => S(comment, "isDeleted") != "true")) {
+        foreach (var thread in Values(threads).Where(thread => P(thread, "isDeleted").ValueKind != JsonValueKind.True)) {
+            foreach (var comment in Values(thread, "comments").Where(comment => P(comment, "isDeleted").ValueKind != JsonValueKind.True)) {
                 text.AppendLine(Identity(P(comment, "author")) + " · " + Plain(S(comment, "content")));
             }
         }
         if (source.Length > 0 && target.Length > 0) {
             string repository = S(P(state, "repository"), "id");
-            var changes = await Get(Api($"git/repositories/{E(repository)}/diffs/commits?baseVersion={E(target)}&baseVersionType=commit&targetVersion={E(source)}&targetVersionType=commit&$top=100"), token).ConfigureAwait(false);
+            var changes = await Get(Api($"git/repositories/{E(repository)}/diffs/commits?baseVersion={E(target)}&baseVersionType=commit&targetVersion={E(source)}&targetVersionType=commit&diffCommonCommit=true&$top=100"), token).ConfigureAwait(false);
             text.AppendLine("\nCHANGED FILES · first 100");
             foreach (var change in Values(changes, "changes")) {
                 text.AppendLine(S(change, "changeType") + " · " + S(P(change, "item"), "path"));

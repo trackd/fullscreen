@@ -266,7 +266,13 @@ public sealed class MonitorFollowupTests {
         var row = frame.Processes.Take(frame.ProcessCount).Single(process => process.Id == Environment.ProcessId);
         var details = (IMonitorProcessDetailSource)source;
         using var current = System.Diagnostics.Process.GetCurrentProcess();
-        Assert.Contains(current.ProcessName, details.ReadCommandLine(row, CancellationToken.None));
+        string commandLine = details.ReadCommandLine(row, CancellationToken.None);
+        if (OperatingSystem.IsMacOS() && commandLine.StartsWith("Unavailable:", StringComparison.Ordinal)) {
+            Assert.AreEqual("Unavailable: ambiguous macOS argument boundaries.", commandLine);
+        }
+        else {
+            Assert.Contains(current.ProcessName, commandLine);
+        }
         var changed = Assert.Throws<Exception>(() => details.ReadCommandLine(row with { StartTimeTicks = row.StartTimeTicks + 1 }, CancellationToken.None));
         Assert.Contains("identity changed", changed.Message);
         var missing = Assert.Throws<Exception>(() => details.ReadCommandLine(row with { StartTimeTicks = 0 }, CancellationToken.None));
@@ -276,11 +282,31 @@ public sealed class MonitorFollowupTests {
     [TestMethod]
     public void MacArgumentsExcludeEnvironmentAndPreserveEmptyArguments() {
         var data = BitConverter.GetBytes(4).Concat(System.Text.Encoding.UTF8.GetBytes(
-            "/usr/bin/fixture\0\0fixture\0--name\0\0two words\0TOKEN=not-an-argument\0")).ToArray();
+            "/usr/bin/fixture\0fixture\0--name\0\0two words\0TOKEN=not-an-argument\0")).ToArray();
         string commandLine = ProcessOwnerReader.ParseMacCommandLine(data);
         Assert.AreEqual("fixture --name  two words", commandLine);
         Assert.DoesNotContain("TOKEN", commandLine);
         Assert.Throws<InvalidDataException>(() => ProcessOwnerReader.ParseMacCommandLine(data[..12]));
+    }
+
+    [TestMethod]
+    [DataRow(2, "/usr/bin/fixture\0\0--flag\0TOKEN=private-value\0")]
+    [DataRow(1, "/usr/bin/fixture\0\0TOKEN=private-value\0")]
+    [DataRow(2, "/usr/bin/fixture\0\0fixture\0TOKEN=private-value\0")]
+    [DataRow(1, "/usr/bin/fixture\0\0\0fixture\0TOKEN=private-value\0")]
+    public void MacArgumentsFailClosedWhenPaddingAndEmptyFirstArgumentAreIndistinguishable(int argc, string content) {
+        var data = BitConverter.GetBytes(argc).Concat(System.Text.Encoding.UTF8.GetBytes(content)).ToArray();
+        string result = ProcessOwnerReader.ParseMacCommandLine(data);
+        Assert.AreEqual("Unavailable: ambiguous macOS argument boundaries.", result);
+        Assert.DoesNotContain("TOKEN", result);
+        Assert.DoesNotContain("private-value", result);
+    }
+
+    [TestMethod]
+    public void MacArgumentsWithZeroCountDoNotReadEnvironment() {
+        var data = BitConverter.GetBytes(0).Concat(System.Text.Encoding.UTF8.GetBytes(
+            "/usr/bin/fixture\0\0TOKEN=private-value\0")).ToArray();
+        Assert.AreEqual("", ProcessOwnerReader.ParseMacCommandLine(data));
     }
 
     private sealed class FixtureSource : IMonitorSource, IMonitorControlSource, IMonitorProcessDetailSource {

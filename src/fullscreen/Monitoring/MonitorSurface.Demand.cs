@@ -25,7 +25,10 @@ public sealed partial class MonitorSurface {
             }
 
             if (View == MonitorView.Users) {
-                return background | CollectorMetrics.Users | (IncludeUserProcesses ? CollectorMetrics.Processes | CollectorMetrics.Owners : CollectorMetrics.None);
+                return background | CollectorMetrics.Users | (IncludeUserProcesses
+                    ? CollectorMetrics.Processes | (Supports(CollectorCapabilities.ProcessOwner) ? CollectorMetrics.Owners : CollectorMetrics.None)
+                        | SortMetrics(Model.Sort)
+                    : CollectorMetrics.None);
             }
 
             bool compact = Bounds.Width > 0 && (Bounds.Width < 76 || Bounds.Height < 20);
@@ -51,12 +54,7 @@ public sealed partial class MonitorSurface {
                 required |= CollectorMetrics.Owners;
             }
 
-            required |= Model.Sort switch {
-                ProcessSort.Gpu or ProcessSort.GpuMemory => CollectorMetrics.ProcessGpu,
-                ProcessSort.Disk => CollectorMetrics.ProcessDisk,
-                ProcessSort.Network => CollectorMetrics.ProcessNetwork,
-                _ => CollectorMetrics.None
-            };
+            required |= SortMetrics(Model.Sort);
             if (!Supports(CollectorCapabilities.ProcessOwner)) { required &= ~CollectorMetrics.Owners; }
             if (!Supports(CollectorCapabilities.ProcessDisk)) { required &= ~CollectorMetrics.ProcessDisk; }
             if (!Supports(CollectorCapabilities.ProcessNetwork)) { required &= ~CollectorMetrics.ProcessNetwork; }
@@ -64,6 +62,14 @@ public sealed partial class MonitorSurface {
             return required;
         }
     }
+
+    private CollectorMetrics SortMetrics(ProcessSort sort) => sort switch {
+        ProcessSort.Gpu when Supports(CollectorCapabilities.ProcessGpu) => CollectorMetrics.ProcessGpu,
+        ProcessSort.GpuMemory when Supports(CollectorCapabilities.ProcessGpuMemory) => CollectorMetrics.ProcessGpu,
+        ProcessSort.Disk when Supports(CollectorCapabilities.ProcessDisk) => CollectorMetrics.ProcessDisk,
+        ProcessSort.Network when Supports(CollectorCapabilities.ProcessNetwork) => CollectorMetrics.ProcessNetwork,
+        _ => CollectorMetrics.None
+    };
 
     private static CollectorMetrics ColumnMetrics(ProcessColumn column) =>
         column switch {
