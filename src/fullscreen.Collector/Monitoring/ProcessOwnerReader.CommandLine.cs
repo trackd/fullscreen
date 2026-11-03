@@ -127,7 +127,7 @@ public sealed partial class ProcessOwnerReader {
     private static void ValidateMacIdentity(int id, long birth) {
         ReadMacIdentity(id, birth, out int? parent, out _);
         if (!parent.HasValue) {
-            throw new InvalidOperationException("Process identity is unavailable or changed; refresh before inspecting its command line.");
+            throw new InvalidOperationException("Process identity changed or is unavailable; refresh before inspecting its command line.");
         }
     }
 
