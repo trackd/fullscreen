@@ -218,7 +218,7 @@ public sealed class EtwCollectorTests {
                 Assert.IsTrue(SpinWait.SpinUntil(() => {
                     // Keep producing events after startup or an incomplete ETW sample.
                     sender.Send(payload, endpoint);
-                    receiver.Receive(ref endpoint);
+                    receiver.Client.Receive(payload);
                     output.Position = 0;
                     output.Write(diskPayload);
                     output.Flush(true);
