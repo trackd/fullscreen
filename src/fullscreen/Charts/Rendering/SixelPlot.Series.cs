@@ -206,6 +206,12 @@ internal sealed partial class SixelPlot {
                 if (seriesKind is GraphKind.Area or GraphKind.Stem or GraphKind.Bars) {
                     var bounds = seriesKind == GraphKind.Bars ? columns.Bounds(index, point.X, range, width) : new XenoAtom.Terminal.UI.Geometry.Rectangle(x, 0, 1, 1);
                     for (int column = bounds.X; column < bounds.Right; column++) {
+                        if (kind != GraphKind.ColumnLine) {
+                            FillColumn(column, Math.Min(baseline, (int)Math.Ceiling(y)), Math.Max(baseline, (int)Math.Ceiling(y)),
+                                multiple ? color : seriesKind == GraphKind.Area ? (byte)2 : seriesKind == GraphKind.Bars ? (byte)5 : color);
+                            continue;
+                        }
+
                         for (int row = Math.Min(baseline, (int)Math.Ceiling(y)); row <= Math.Max(baseline, (int)Math.Ceiling(y)); row++) {
                             SeriesPaint(
                                 column,
@@ -222,9 +228,8 @@ internal sealed partial class SixelPlot {
                         double oldY = Y(before.Y!.Value);
                         for (int column = Math.Min(oldX, x); column <= Math.Max(oldX, x); column++) {
                             double edge = oldX == x ? y : oldY + (y - oldY) * (column - oldX) / (x - oldX);
-                            for (int row = Math.Min(baseline, (int)Math.Ceiling(edge)); row <= Math.Max(baseline, (int)Math.Ceiling(edge)); row++) {
-                                Paint(column, row, multiple ? color : (byte)2);
-                            }
+                            FillColumn(column, Math.Min(baseline, (int)Math.Ceiling(edge)), Math.Max(baseline, (int)Math.Ceiling(edge)),
+                                multiple ? color : (byte)2);
                         }
                     }
 

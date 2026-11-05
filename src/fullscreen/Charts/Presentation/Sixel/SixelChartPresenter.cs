@@ -335,7 +335,11 @@ internal sealed class SixelChartPresenter(
     private static void SetBackground(AnsiWriter writer, Color? color) {
         if (color is { } value) {
             var rgb = value.ToRgb();
-            writer.Write($"\x1b[48;2;{rgb.R};{rgb.G};{rgb.B}m");
+            Span<char> command = stackalloc char[48];
+            if (!command.TryWrite($"\x1b[48;2;{rgb.R};{rgb.G};{rgb.B}m", out int written)) {
+                throw new InvalidOperationException("Failed to format a chart background command.");
+            }
+            writer.Write(command[..written]);
         }
     }
 

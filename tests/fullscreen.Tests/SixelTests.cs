@@ -17,13 +17,17 @@ namespace fullscreen.Tests;
 [TestClass]
 public sealed partial class SixelTests {
     [TestMethod]
+    [DataRow(GraphKind.Bars)]
+    [DataRow(GraphKind.Area)]
+    [DataRow(GraphKind.Heatmap)]
+    [DataRow(GraphKind.StackedArea)]
     [DoNotParallelize]
-    public async Task PresenterKeepsIndependentOwnedPayloadsWhenOneOfTwoChartsChanges() {
+    public async Task PresenterKeepsIndependentOwnedPayloadsWhenOneOfTwoChartsChanges(GraphKind kind) {
         var metrics = new TerminalPixelMetrics(80, 120, 4, 12, 20, 10);
         using var backend = new InMemoryTerminalBackend(new TerminalSize(20, 10));
         using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
         await using var app = new TerminalApp(new XenoAtom.Terminal.UI.Controls.TextBlock(""), session.Instance);
-        var firstChart = new Chart([10, 50, 25]) { GraphKind = GraphKind.Bars };
+        var firstChart = new Chart([10, 50, 25]) { GraphKind = kind };
         var secondChart = new Chart([70, 20, 30]) { GraphKind = GraphKind.Pie };
         var firstBounds = new Rectangle(0, 0, 6, 2);
         var secondBounds = new Rectangle(0, 3, 6, 2);
@@ -518,6 +522,40 @@ public sealed partial class SixelTests {
         }
     }
     [TestMethod]
+    public void BulkRectangleFillsMatchPerPixelOverpaintingAcrossBandsAndResizes() {
+        var actual = new SixelPlot();
+        var reference = new SixelPlot();
+        var chart = new Chart { GraphKind = GraphKind.Heatmap };
+        var encoder = new SixelEncoder();
+        var fill = typeof(SixelPlot).GetMethod("FillRectangle", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, int, int, byte>>(actual);
+        var pixel = typeof(SixelPlot).GetMethod("SetPixel", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, byte>>(reference);
+        var random = new Random(7284);
+        foreach (var (width, height) in new[] { (63, 31), (1, 1), (11, 13), (2, 7), (63, 31) }) {
+            chart.DrawPixels(actual, width, height);
+            chart.DrawPixels(reference, width, height);
+            for (int index = 0; index < 120; index++) {
+                int left = random.Next(width), right = random.Next(left, width);
+                int top = random.Next(height), bottom = random.Next(top, height);
+                byte color = (byte)random.Next(1, SixelPlot.InkColors + 1);
+                fill(left, top, right, bottom, color);
+                for (int y = top; y <= bottom; y++) {
+                    for (int x = left; x <= right; x++) {
+                        pixel(x, y, color);
+                    }
+                }
+
+                CollectionAssert.AreEqual(reference.Pixels.ToArray(), actual.Pixels.ToArray());
+                Assert.AreEqual(encoder.EncodePlot(reference), encoder.EncodePlot(actual),
+                    "Boundary metadata and retained planes must encode exactly like per-pixel replacement.");
+            }
+
+            CollectionAssert.AreEqual(actual.Pixels.ToArray(), Decode(encoder.EncodePlot(actual)).Pixels);
+        }
+    }
+
+    [TestMethod]
     public void DirectPlanesPreserveOverpaintedShadesInspectionAndThemeChanges() {
         var history = new TimeSeries();
         var plot = new SixelPlot();
@@ -559,6 +597,38 @@ public sealed partial class SixelTests {
         }
         Assert.AreEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "Warm rasterization must not reallocate buffers as panel sizes alternate.");
     }
+
+    [TestMethod]
+    public void BulkColumnsMatchStrongerShadePaintingWithClippingAndExistingStrokes() {
+        var actual = new SixelPlot();
+        var reference = new SixelPlot();
+        var chart = new Chart([10, 80, 30, 90, 0]) { GraphKind = GraphKind.Line };
+        var encoder = new SixelEncoder();
+        var fill = typeof(SixelPlot).GetMethod("FillColumn", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, int, byte>>(actual);
+        var paint = typeof(SixelPlot).GetMethod("Paint", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, byte>>(reference);
+        var random = new Random(312);
+        foreach (var (width, height) in new[] { (63, 31), (1, 1), (11, 13), (2, 7), (63, 31) }) {
+            chart.DrawPixels(actual, width, height);
+            chart.DrawPixels(reference, width, height);
+            for (int index = 0; index < 160; index++) {
+                int x = random.Next(-2, width + 2);
+                int top = random.Next(-6, height + 6), bottom = random.Next(-6, height + 6);
+                byte color = (byte)random.Next(1, SixelPlot.InkColors + 1);
+                fill(x, top, bottom, color);
+                for (int y = top; y <= bottom; y++) {
+                    paint(x, y, color);
+                }
+
+                CollectionAssert.AreEqual(reference.Pixels.ToArray(), actual.Pixels.ToArray());
+                Assert.AreEqual(encoder.EncodePlot(reference), encoder.EncodePlot(actual));
+            }
+
+            CollectionAssert.AreEqual(actual.Pixels.ToArray(), Decode(encoder.EncodePlot(actual)).Pixels);
+        }
+    }
+
     [TestMethod]
     public void WarmEncoderOnlyAllocatesItsReturnedPayload() {
         var history = new TimeSeries();
@@ -596,6 +666,29 @@ public sealed partial class SixelTests {
         encodedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
         GC.KeepAlive(payload);
         Assert.AreEqual(stringBytes, encodedBytes, "Direct plane encoding should allocate only its output string.");
+    }
+
+    [TestMethod]
+    public void MaskedFrameErasingDoesNotBoxWindowEnumeratorsPerCell() {
+        using var output = new StringWriter(new System.Text.StringBuilder(65536));
+        var writer = new AnsiWriter(output);
+        var bounds = new Rectangle(0, 0, 160, 40);
+        var windows = new List<Rectangle> { new(60, 10, 40, 15), new(155, 0, 5, 40) };
+        for (int index = 0; index < 5; index++) {
+            output.GetStringBuilder().Clear();
+            ChartClipping.Erase(writer, bounds, windows, bounds);
+        }
+
+        output.GetStringBuilder().Clear();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ChartClipping.Erase(writer, bounds, windows, bounds);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.AreEqual(0L, allocated, "Window checks and erase commands must reuse the span writer without allocations.");
+        var erased = Enumerable.Range(0, 40).SelectMany(y => Enumerable.Range(0, y is >= 10 and < 25 ? 2 : 1)
+            .Select(run => y is >= 10 and < 25
+                ? $"\x1b[{y + 1};{(run == 0 ? 1 : 101)}H\x1b[{(run == 0 ? 60 : 55)}X"
+                : $"\x1b[{y + 1};1H\x1b[155X"));
+        Assert.AreEqual(string.Concat(erased), output.ToString(), "Popup and label cells must never be erased.");
     }
 
     [TestMethod]

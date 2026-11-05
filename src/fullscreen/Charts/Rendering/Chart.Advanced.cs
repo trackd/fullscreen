@@ -224,6 +224,11 @@ internal sealed partial class SixelPlot {
                 int source = (ChartTopology.Supports(kind) || ChartStackedArea.Supports(kind)) && shape.Point >= 0 ? data[shape.Series].Points[shape.Point].Index
                     : kind is GraphKind.Flamegraph or GraphKind.Gantt && shape.Point >= 0 ? data[0].Points[shape.Point].Index : shape.Point;
                 bool highlight = source >= 0 && source == selected;
+                if (kind != GraphKind.Flamegraph && (!highlight || ChartTopology.Supports(kind))) {
+                    FillRectangle(shape.X0, shape.Y0, shape.X1, shape.Y1, color);
+                    continue;
+                }
+
                 for (int y = shape.Y0; y <= shape.Y1; y++) {
                     for (int x = shape.X0; x <= shape.X1; x++) {
                         if (radius > 0 && (x < shape.X0 + radius || x > shape.X1 - radius)

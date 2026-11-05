@@ -110,6 +110,77 @@ internal sealed partial class SixelPlot {
         }
     }
 
+    private void FillRectangle(int left, int top, int right, int bottom, byte color) {
+        if (right < left || bottom < top) {
+            return;
+        }
+
+        for (int y = top; y <= bottom; y++) {
+            _pixels.AsSpan(y * Width + left, right - left + 1).Fill(color);
+        }
+
+        // Replace all earlier shades only in the intersected rows of each band.
+        for (int band = top / 6; band <= bottom / 6; band++) {
+            int firstRow = Math.Max(top - band * 6, 0), lastRow = Math.Min(bottom - band * 6, 5);
+            byte mask = (byte)(((1 << (lastRow - firstRow + 1)) - 1) << firstRow);
+            for (int shade = 1; shade <= InkColors; shade++) {
+                int plane = band * InkColors + shade - 1;
+                var columns = _planes.AsSpan(plane * Width + left, right - left + 1);
+                if (shade == color) {
+                    for (int x = 0; x < columns.Length; x++) {
+                        columns[x] |= mask;
+                    }
+
+                    _firstColumns[plane] = Math.Min(_firstColumns[plane], left);
+                    _lastColumns[plane] = Math.Max(_lastColumns[plane], right + 1);
+                }
+                else {
+                    for (int x = 0; x < columns.Length; x++) {
+                        columns[x] &= (byte)~mask;
+                    }
+                }
+            }
+        }
+    }
+
+    private void FillColumn(int x, int top, int bottom, byte color) {
+        if ((uint)x >= (uint)Width) {
+            return;
+        }
+
+        top = Math.Max(top, 0);
+        bottom = Math.Min(bottom, Height - 1);
+        if (top > bottom) {
+            return;
+        }
+
+        for (int band = top / 6; band <= bottom / 6; band++) {
+            int firstRow = Math.Max(top - band * 6, 0), lastRow = Math.Min(bottom - band * 6, 5);
+            byte mask = (byte)(((1 << (lastRow - firstRow + 1)) - 1) << firstRow);
+            // Paint keeps the stronger shade, including existing antialiased strokes.
+            for (int shade = color; shade <= InkColors && mask != 0; shade++) {
+                mask &= (byte)~_planes[(band * InkColors + shade - 1) * Width + x];
+            }
+
+            if (mask == 0) {
+                continue;
+            }
+
+            for (int shade = 1; shade < color; shade++) {
+                _planes[(band * InkColors + shade - 1) * Width + x] &= (byte)~mask;
+            }
+
+            int plane = band * InkColors + color - 1;
+            _planes[plane * Width + x] |= mask;
+            _firstColumns[plane] = Math.Min(_firstColumns[plane], x);
+            _lastColumns[plane] = Math.Max(_lastColumns[plane], x + 1);
+            for (uint rows = mask; rows != 0; rows &= rows - 1) {
+                int y = band * 6 + System.Numerics.BitOperations.TrailingZeroCount(rows);
+                _pixels[y * Width + x] = color;
+            }
+        }
+    }
+
     private void SetPixel(int x, int y, byte color) {
         int pixel = y * Width + x;
         byte previous = _pixels[pixel];

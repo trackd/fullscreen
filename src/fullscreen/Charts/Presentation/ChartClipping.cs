@@ -17,6 +17,7 @@ internal static class ChartClipping {
         Rectangle viewport
     ) {
         var visible = Intersect(area, new(0, 0, viewport.Width, viewport.Height));
+        Span<char> command = stackalloc char[32];
         for (int y = visible.Y; y < visible.Bottom; y++) {
             for (int x = visible.X; x < visible.Right;) {
                 if (Inside(windows, x, y)) {
@@ -31,13 +32,17 @@ internal static class ChartClipping {
 
                 writer.CursorPosition(y + viewport.Y + 1, start + viewport.X + 1);
                 // ECH erases cells without advancing/wrapping the cursor.
-                writer.Write($"\x1b[{x - start}X");
+                if (!command.TryWrite($"\x1b[{x - start}X", out int written)) {
+                    throw new InvalidOperationException("Failed to format a chart erase command.");
+                }
+                writer.Write(command[..written]);
             }
         }
     }
 
     private static bool Inside(IReadOnlyList<Rectangle> windows, int x, int y) {
-        foreach (var window in windows) {
+        for (int index = 0; index < windows.Count; index++) {
+            var window = windows[index];
             if (x >= window.X && x < window.Right && y >= window.Y && y < window.Bottom) {
                 return true;
             }
