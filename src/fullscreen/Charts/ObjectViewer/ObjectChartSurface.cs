@@ -350,8 +350,8 @@ internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
             buffer,
             0,
             Bounds.Height - (Minimal ? 1 : 2),
-            selected.Length > 0 ? selected[3..] +
-            " · " + details : details,
+            (Minimal ? GraphType + " · " : "") + (selected.Length > 0 ? selected[3..] +
+            " · " + details : details),
             Palette.Body
         );
         if (!Minimal) {
@@ -359,9 +359,9 @@ internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
                 buffer,
                 0,
                 Bounds.Height - 1,
-                GraphType == GraphKind.Flamegraph ? "Click zoom · Hover details · U parent · 0 roots · R reverse · / search · D details · T data · Q quit"
+                GraphType + " · " + (GraphType == GraphKind.Flamegraph ? "Click zoom · Hover details · U parent · 0 roots · R reverse · / search · D details · T data · Q quit"
                     : GraphType == GraphKind.Gantt ? "Up/Down/Page lanes · Wheel/+/- time zoom · [/] pan · 0 reset · Click/D task · Shift-drag intervals · Q quit"
-                    : PassThru ? "Q/F10 return rows · Esc cancel · Double-click/D details · T data · Wheel zoom · Shift-drag range" : "Double-click/D details · T data · Wheel zoom · Shift-drag range · Q quit",
+                    : PassThru ? "Q/F10 return rows · Esc cancel · Double-click/D details · T data · Wheel zoom · Shift-drag range" : "Double-click/D details · T data · Wheel zoom · Shift-drag range · Q quit"),
                 Palette.Muted
             );
         }

@@ -76,6 +76,14 @@ Describe 'Cmdlet help' {
                 $tokens = $null; $parseErrors = $null
                 $ast = [Management.Automation.Language.Parser]::ParseInput($match.Groups[1].Value, [ref]$tokens, [ref]$parseErrors)
                 $parseErrors | Should -BeNullOrEmpty -Because "$path examples must parse"
+                foreach ($literal in $ast.FindAll({
+                    param($node)
+                    $node -is [Management.Automation.Language.StringConstantExpressionAst]
+                }, $true)) {
+                    if ($literal.Value -match '\.(ps1|psd1|json|jsonc)$') {
+                        $literal.Value | Should -Not -Match '[\[\]]' -Because "$path example filenames must be plain, readable names"
+                    }
+                }
                 foreach ($call in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true)) {
                     $name = $call.GetCommandName()
                     if (-not $name) { continue }

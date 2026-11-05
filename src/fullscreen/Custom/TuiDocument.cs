@@ -278,6 +278,14 @@ public sealed partial class TuiDocument {
                     || node.SeriesRole.Any(role => !Enum.TryParse<Charts.ChartSeriesRole>(role, true, out var parsed) || !Enum.IsDefined(parsed))) {
                     throw new ArgumentException("Chart SeriesRole must contain one Auto/Column/Line role per YProperty.");
                 }
+                if (node.LowerProperty is null || node.UpperProperty is null
+                    || node.LowerProperty.Length > 128 || node.UpperProperty.Length > 128
+                    || node.LowerProperty.Length > 0 && string.IsNullOrWhiteSpace(node.LowerProperty)
+                    || node.UpperProperty.Length > 0 && string.IsNullOrWhiteSpace(node.UpperProperty)
+                    || (node.LowerProperty.Length > 0 || node.UpperProperty.Length > 0)
+                    && (graphKind != Charts.GraphKind.ErrorBars || node.YProperty.Length == 0)) {
+                    throw new ArgumentException("LowerProperty and UpperProperty require object-bound ErrorBars and field names of 1-128 characters.");
+                }
                 if (node.YProperty.Length > 0 && (string.IsNullOrWhiteSpace(node.Bind)
                     || Charts.ChartTopology.Supports(graphKind) || graphKind is Charts.GraphKind.Flamegraph or Charts.GraphKind.Gantt)) {
                     throw new ArgumentException("Chart YProperty requires Bind for numeric object rows, not frames, tasks or topology.");
@@ -586,6 +594,10 @@ public sealed class TuiNode {
     public string XProperty { get; set; } = "";
     /// <summary>Gets or sets up to 64 named numeric fields projected from Bind's original object rows.</summary>
     public string[] YProperty { get; set; } = [];
+    /// <summary>Gets or sets the optional lower-bound field for object-bound ErrorBars.</summary>
+    public string LowerProperty { get; set; } = "";
+    /// <summary>Gets or sets the optional upper-bound field for object-bound ErrorBars.</summary>
+    public string UpperProperty { get; set; } = "";
     /// <summary>Gets or sets optional Auto/Column/Line roles in YProperty order.</summary>
     public string[] SeriesRole { get; set; } = [];
     /// <summary>Gets or sets the visual representation used to draw the data.</summary>

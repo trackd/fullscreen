@@ -132,7 +132,8 @@ $layout | Export-TuiDefinition -Path ./settings.tui.psd1
 | [Workspace.ps1](examples/Workspace.ps1) | Files, telemetry and logs in tabs |
 | [HandlerMap.ps1](examples/HandlerMap.ps1) | Direct event handlers and shared state |
 | [DesignerStarter.ps1](examples/DesignerStarter.ps1) | A styled form and chart for the designer |
-| [GraphGallery.ps1](examples/GraphGallery.ps1) | All twelve graph styles |
+| [GraphGallery.ps1](examples/GraphGallery.ps1) | The original twelve graph styles in tabs |
+| [ChartShowcase.ps1](examples/ChartShowcase.ps1) | All 26 chart kinds, cycling in one window every three seconds for recording |
 | [ChartCombinations.ps1](examples/ChartCombinations.ps1) | Named multi-line/area series, grouped bars, column/line roles and clickable legends |
 | [StackedAreas.ps1](examples/StackedAreas.ps1) | Additive and 100-percent request-outcome areas, missing-component gaps and portable definitions |
 | [RadialCharts.ps1](examples/RadialCharts.ps1) | Pie slices, semicircular load gauges, radial lanes and radar comparisons |
@@ -161,6 +162,12 @@ plus their chart-specific options.
 records (separate Nodes/Edges for relationship charts). DataOnly takes precedence
 when both output switches are present. Presentation parameters do not change
 portable data; pass them to `Invoke-Tui` when running a returned definition.
+
+Run `./examples/ChartShowcase.ps1 -Theme Monokai -Minimal` for an automatic
+showcase. `-SecondsPerChart 5` changes the dwell time; `-Once` closes after one
+complete cycle. Previous, Pause / Resume and Next control playback without
+opening another window. `-DefinitionOnly` returns the static layout; timed
+callbacks remain in the script, as with generated scaffolds.
 
 ## Build from source
 

@@ -50,6 +50,10 @@ publish the selected item to the key named by SelectionBind. Replace a collectio
 in State to refresh it. Native widget settings go in Options; Get-TuiControl lists
 each control's accepted properties, types and choices.
 
+For object-bound ErrorBars, set YProperty to the point-estimate field and
+LowerProperty/UpperProperty to the optional bound fields. Bounds remain in the
+source units and are preserved in saved definitions.
+
 Set the root control's VerticalAlignment to Stretch for a full-height layout
 with independently scrolling panes. Other root alignments allow the whole layout
 to scroll vertically when it exceeds the terminal height.

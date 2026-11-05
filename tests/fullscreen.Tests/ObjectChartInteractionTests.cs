@@ -54,7 +54,12 @@ public sealed class ObjectChartInteractionTests {
         Assert.AreEqual(3, chart.Surface.Plot.PlotBounds.X, "A short numeric axis needs only three columns.");
         Assert.AreEqual(width, chart.Surface.Plot.PlotBounds.Right);
         Assert.Contains("Object #1", lines[height - (minimal ? 1 : 2)]);
+        Assert.Contains("Line", lines[^1], "The current graph kind belongs in the bottom footer in both chrome modes.");
         if (!minimal) { Assert.Contains("Double-click/D", lines[^1]); }
+        chart.Configure("X", ["Y"], GraphKind.Bars);
+        var changed = VisualSnapshotRenderer.Render(chart.Root, width, height).ToMarkupLines();
+        Assert.Contains("Bars", changed[^1], "Changing graph kinds must update the bottom footer.");
+        Assert.DoesNotContain("Line", changed[^1]);
     }
     [TestMethod]
     public async Task MouseChartMenuAnchorsBelowChartAndChangesTheGraph() {

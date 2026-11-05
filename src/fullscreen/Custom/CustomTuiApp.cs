@@ -542,6 +542,8 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         var data = projection is null
             ? [.. node.YProperty.Select(name => new Charts.ChartDataSeries(name, []))]
             : projection.Project(node.XProperty.Length == 0 ? null : node.XProperty, node.YProperty);
+        projection?.ApplyErrorBounds(data, node.LowerProperty.Length == 0 ? null : node.LowerProperty,
+            node.UpperProperty.Length == 0 ? null : node.UpperProperty);
         if (projection is not null && !_objectSeriesSnapshots.ContainsKey(chart)) {
             chart.XAxis = chart.XAxis with { Scale = projection.ScaleFor(node.XProperty.Length == 0 ? null : node.XProperty) };
         }

@@ -85,6 +85,46 @@ public sealed class CustomChartSeriesTests {
     }
 
     [TestMethod]
+    public void ErrorBoundsSurvivePortableDefinitionsAndChangedSourceProjection() {
+        var first = new Hashtable { ["Sample"] = 1, ["Mean"] = 10, ["Low"] = 7, ["High"] = 15 };
+        var document = new TuiDocument {
+            Root = new() {
+                Id = "chart",
+                Type = "Chart",
+                GraphKind = "ErrorBars",
+                Bind = "estimates",
+                XProperty = "Sample",
+                YProperty = ["Mean"],
+                LowerProperty = "Low",
+                UpperProperty = "High"
+            }
+        };
+        var copy = TuiDataFile.Parse(TuiDataFile.Generate(TuiDocument.FromJson(document.ToJson())));
+        Assert.AreEqual("Low", copy.Root.LowerProperty);
+        Assert.AreEqual("High", copy.Root.UpperProperty);
+        using var app = new CustomTuiApp(copy, new Hashtable { ["estimates"] = new object[] { first } });
+        var chart = (Chart)app.Controls["chart"];
+        var point = chart.GetData(100)[0].Points[0];
+        Assert.AreEqual(7d, point.Lower);
+        Assert.AreEqual(15d, point.Upper);
+        Assert.AreSame(first, point.Source);
+        first["Low"] = 6;
+        first["High"] = null;
+        app.State["estimates"] = new object[] { first };
+        app.Tick();
+        point = chart.GetData(100)[0].Points[0];
+        Assert.AreEqual(6d, point.Lower);
+        Assert.IsNull(point.Upper);
+        Assert.AreSame(first, point.Source);
+        copy.Root.GraphKind = "Line";
+        Assert.ThrowsExactly<ArgumentException>(copy.Validate);
+        copy.Root.GraphKind = "ErrorBars";
+        copy.Root.LowerProperty = "Unknown";
+        Assert.ThrowsExactly<ArgumentException>(() => new CustomTuiApp(copy,
+            new Hashtable { ["estimates"] = new object[] { first } }));
+    }
+
+    [TestMethod]
     public void ObjectSeriesRejectAmbiguousOrInvalidSelectorsAndAllowEmptyCollections() {
         var document = new TuiDocument { Root = new() { Type = "Chart", Id = "chart", Bind = "rows", YProperty = ["A", "a"] } };
         Assert.ThrowsExactly<ArgumentException>(document.Validate);

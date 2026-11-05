@@ -187,6 +187,9 @@ are not implemented. ReGIS falls back to cells; PNG is plot-only.
 
 T opens the filtered data table. Wheel zooms, brackets pan, Shift-drag selects
 a range; Space pauses refresh. Chart settings include axes, series and export.
+The bottom footer shows the current GraphType and follows graph-menu changes,
+including in Minimal mode.
+
 With -PassThru, Q/F10 returns the current filtered objects in view order;
 Escape cancels. Without -PassThru, the viewer produces no pipeline output.
 

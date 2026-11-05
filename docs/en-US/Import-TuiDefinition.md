@@ -76,8 +76,8 @@ Get-ChildItem -LiteralPath $directory -Filter '*.tui.json' |
 Imported layouts use native PowerShell data.
 
 ```powershell
-New-TuiDefinition -Title 'Editable layout' | Export-TuiDefinition -Path './tool[1].tui.json' -Script:$false -Force
-$layout = Import-TuiDefinition -LiteralPath './tool[1].tui.json'
+New-TuiDefinition -Title 'Editable layout' | Export-TuiDefinition -Path ./editable-tool.tui.json -Script:$false -Force
+$layout = Import-TuiDefinition -Path ./editable-tool.tui.json
 $layout.Title = 'My customized tool'
 $layout | Invoke-Tui -Theme 'Dark Modern'
 ```

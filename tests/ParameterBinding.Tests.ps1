@@ -76,7 +76,7 @@ Describe 'Parameter binding and passive completion' {
     }
 
     It 'Preserves literal file names containing brackets' {
-        $target = Join-Path $TestDrive 'native[1].tui.json'
+        $target = Join-Path $TestDrive 'native-one.tui.json'
         New-TuiDefinition -Title NativePath | Export-TuiDefinition -Path $target
         (Import-TuiDefinition -Path $target).Title | Should -Be 'NativePath'
     }

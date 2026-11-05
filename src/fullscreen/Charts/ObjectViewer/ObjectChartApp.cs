@@ -176,19 +176,7 @@ internal sealed partial class ObjectChartApp : IFullscreenApp {
         var series = graphType == GraphKind.Gantt ? Data.ProjectTasks(TaskProperties.Start, TaskProperties.End, TaskProperties.Name, TaskProperties.Progress, indices)
             : graphType == GraphKind.Flamegraph ? Data.ProjectFrames(FrameIdProperty, ParentIdProperty, FrameNameProperty, y[0], indices)
             : Aggregate == ChartAggregate.None ? Data.Project(graphType is GraphKind.Histogram or GraphKind.BoxPlot ? null : x, y, indices, _token) : Data.AggregateRows(indices, GroupProperty, y, Aggregate, _token);
-        if (LowerProperty is not null || UpperProperty is not null) {
-            foreach (var item in series) {
-                for (int position = 0; position < item.Points.Length; position++) {
-                    var point = item.Points[position];
-                    if (point.SourceIndices is null) {
-                        item.Points[position] = point with {
-                            Lower = LowerProperty is null ? null : ObjectChartData.Number(Data.Value(point.Index, LowerProperty)),
-                            Upper = UpperProperty is null ? null : ObjectChartData.Number(Data.Value(point.Index, UpperProperty))
-                        };
-                    }
-                }
-            }
-        }
+        Data.ApplyErrorBounds(series, LowerProperty, UpperProperty);
 
         foreach (var item in series) {
             if (_styles.TryGetValue(item.Property, out var style)) {

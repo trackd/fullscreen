@@ -334,6 +334,25 @@ internal sealed partial class ObjectChartData {
         return [.. ordered.ThenBy(entry => entry.Index).Take(count).Select(entry => entry.Index)];
     }
 
+    internal void ApplyErrorBounds(ChartDataSeries[] series, string? lower, string? upper) {
+        if (lower is null && upper is null) {
+            return;
+        }
+        string? low = lower is null ? null : Resolve(lower);
+        string? high = upper is null ? null : Resolve(upper);
+        foreach (var item in series) {
+            for (int position = 0; position < item.Points.Length; position++) {
+                var point = item.Points[position];
+                if (point.SourceIndices is null) {
+                    item.Points[position] = point with {
+                        Lower = low is null ? null : Number(Value(point.Index, low)),
+                        Upper = high is null ? null : Number(Value(point.Index, high))
+                    };
+                }
+            }
+        }
+    }
+
     internal ChartDataSeries[] Project(
         string? xProperty,
         IReadOnlyList<string> yProperties,
