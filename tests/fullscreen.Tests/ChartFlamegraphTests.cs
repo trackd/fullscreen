@@ -13,6 +13,23 @@ namespace fullscreen.Tests;
 [TestClass]
 [DoNotParallelize]
 public sealed class ChartFlamegraphTests {
+    [TestMethod]
+    public void WideFrameNamesUseWholeCellBoundsForDrawingAndSixelMasks() {
+        var chart = new Chart { GraphKind = GraphKind.Flamegraph };
+        chart.Frames.Add(new("root", null, "\u4e2d\u6587", 1));
+        foreach (int width in new[] { 5, 6, 20 }) {
+            var lines = VisualSnapshotRenderer.Render(chart, width, 10).ToMarkupLines();
+            Assert.Contains(width == 5 ? "\u4e2d" : "\u4e2d\u6587", string.Join('\n', lines));
+            var mask = chart.AnnotationBounds.Single();
+            Assert.AreEqual(width == 5 ? 2 : 4, mask.Width);
+            var geometry = new ChartGeometry();
+            geometry.Build(chart.GetRenderData(width), chart.RenderRange(chart.GetRenderData(width)),
+                GraphKind.Flamegraph, chart.PlotBounds.Width, chart.PlotBounds.Height, flameFrameHeight: chart.FlameFrameRows);
+            var label = geometry.Primitives.Single(shape => shape.Kind == ChartPrimitiveKind.Text);
+            Assert.AreEqual(mask.Width, label.X1 - label.X0 + 1);
+        }
+    }
+
     public TestContext TestContext { get; set; }
 
     private static ChartFrame[] ExampleFrames() => [

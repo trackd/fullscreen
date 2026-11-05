@@ -4,7 +4,7 @@ using System.Management.Automation;
 namespace fullscreen.Charts;
 
 internal sealed partial class ObjectChartData {
-    internal ChartDataSeries[] ProjectTasks(string startProperty, string endProperty, string nameProperty, string? progressProperty, int[] indices) {
+    internal ChartDataSeries[] ProjectTasks(string startProperty, string endProperty, string nameProperty, string? progressProperty, int[] indices, IReadOnlyList<object>? sources = null) {
         string start = Resolve(startProperty), end = Resolve(endProperty), name = Resolve(nameProperty);
         string? progress = progressProperty is null ? null : Resolve(progressProperty);
         var tasks = new ChartTask[indices.Length];
@@ -15,7 +15,7 @@ internal sealed partial class ObjectChartData {
             if (progress is not null && Value(index, progress) is { } value) {
                 completed = Number(value) ?? throw new ArgumentException($"Gantt task '{label}' has invalid progress.");
             }
-            tasks[position] = new(label, TaskTime(Value(index, start), label, startProperty), TaskTime(Value(index, end), label, endProperty), completed, Objects[index]);
+            tasks[position] = new(label, TaskTime(Value(index, start), label, startProperty), TaskTime(Value(index, end), label, endProperty), completed, sources is null ? Objects[index] : sources[index]);
         }
         var schedule = new ChartSchedule(tasks);
         for (int position = 0; position < indices.Length; position++) {

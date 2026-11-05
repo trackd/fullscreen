@@ -14,6 +14,33 @@ namespace fullscreen.Tests;
 [DoNotParallelize]
 public sealed class ChartFeatureTests {
     [TestMethod]
+    public void LegendsMeasureWrapAndTruncateUnicodeLabelsInCells() {
+        const string wide = "\u4e2d\u6587";
+        var chart = new Chart { ShowLegend = true };
+        chart.Series.Add(new(wide, [1, 2]));
+        chart.Series.Add(new("Next", [2, 1]));
+        var lines = VisualSnapshotRenderer.Render(chart, 13, 12).ToMarkupLines();
+        Assert.Contains(wide, lines[0]);
+        Assert.Contains("Next", lines[1], "Six cells plus spacing cannot share a thirteen-cell row with the second six-cell label.");
+        Assert.AreEqual(2, chart.PlotBounds.Y);
+        lines = VisualSnapshotRenderer.Render(chart, 5, 12).ToMarkupLines();
+        Assert.Contains("\u4e2d\u2026", lines[0]);
+        Assert.DoesNotContain(wide, lines[0]);
+        Assert.AreEqual(4, ChartText.Width(wide));
+        Assert.AreEqual(2, ChartText.Width("\U0001f600"));
+        Assert.AreEqual(1, ChartText.Width("e\u0301"));
+        Assert.AreEqual("e\u0301", ChartText.Fit("e\u0301x", 1));
+        Assert.AreEqual("", ChartText.Fit("\U0001f600", 1));
+        Assert.AreEqual("\U0001f600", ChartText.Fit("\U0001f600x", 2));
+        const string family = "\U0001f469\u200d\U0001f469\u200d\U0001f467\u200d\U0001f466";
+        Assert.AreEqual(2, ChartText.Width(family));
+        Assert.AreEqual(family, ChartText.Fit(family + "x", 2));
+        Assert.AreEqual("", ChartText.Fit(family, 1));
+        Assert.AreEqual(2, ChartText.Width("\u2764\ufe0f"));
+        Assert.AreEqual("\u2764\ufe0f", ChartText.Fit("\u2764\ufe0fx", 2));
+    }
+
+    [TestMethod]
     [DataRow((ChartRenderer)2)]
     [DataRow((ChartRenderer)3)]
     public void DisabledDrcsRendererValuesAreRejected(ChartRenderer renderer) {

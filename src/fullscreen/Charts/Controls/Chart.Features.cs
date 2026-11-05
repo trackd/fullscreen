@@ -1011,10 +1011,12 @@ public partial class Chart {
             );
             foreach (var primitive in _featureGeometry.Primitives) {
                 if (primitive.Text is { Length: > 0 } text) {
+                    int available = ChartTopology.Supports(GraphKind) || GraphKind is GraphKind.Flamegraph or GraphKind.Gantt
+                        ? primitive.X1 - primitive.X0 + 1 : Math.Max(0, PlotBounds.Width - primitive.X0);
                     yield return new(
                         PlotBounds.X + primitive.X0,
                         PlotBounds.Y + primitive.Y0,
-                        Math.Min(text.Length, ChartTopology.Supports(GraphKind) || GraphKind is GraphKind.Flamegraph or GraphKind.Gantt ? primitive.X1 - primitive.X0 + 1 : Math.Max(0, PlotBounds.Width - primitive.X0)),
+                        ChartText.Width(text.AsSpan(0, ChartText.PrefixLength(text, available))),
                         1
                     );
                 }

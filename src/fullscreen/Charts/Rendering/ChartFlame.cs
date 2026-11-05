@@ -65,7 +65,10 @@ internal sealed class ChartFlame {
             byte shade = tree.Matches[index] ? (byte)6 : node.Shade;
             shapes.Add(new(ChartPrimitiveKind.Rectangle, left, top, right - 1, bottom, Shade: shade, Point: index));
             if (right - left >= 3) {
-                int length = Math.Min(node.Name.Length, right - left - 2);
+                int length = ChartText.Width(node.Name.AsSpan(0, ChartText.PrefixLength(node.Name, right - left - 2)));
+                if (length == 0) {
+                    continue;
+                }
                 // Substrings are avoided on redraw; drawing supplies the span width.
                 shapes.Add(new(ChartPrimitiveKind.Text, left + 1, (top + bottom) / 2, left + length, (top + bottom) / 2,
                     Shade: shade, Text: node.Name, Point: index));

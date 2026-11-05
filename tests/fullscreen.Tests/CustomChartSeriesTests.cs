@@ -11,6 +11,42 @@ namespace fullscreen.Tests;
 [DoNotParallelize]
 public sealed class CustomChartSeriesTests {
     [TestMethod]
+    [DataRow(GraphKind.Gantt)]
+    [DataRow(GraphKind.Flamegraph)]
+    public async Task TaskAndFrameBindingsKeepRawAndWrappedSourceIdentityAcrossUpdates(GraphKind kind) {
+        var start = DateTimeOffset.UnixEpoch;
+        object[] sources = [
+            new Hashtable { ["Name"] = "raw", ["Start"] = start, ["End"] = start.AddHours(1), ["FrameId"] = "root", ["ParentId"] = null, ["Weight"] = 1 },
+            new { Name = "clr", Start = start, End = start.AddHours(1), FrameId = "root", ParentId = (string?)null, Weight = 1 },
+            PSObject.AsPSObject(new { Name = "wrapped", Start = start, End = start.AddHours(1), FrameId = "root", ParentId = (string?)null, Weight = 1 })
+        ];
+        var document = new TuiDocument {
+            Root = new() {
+                Id = "chart", Type = "Chart", Bind = "rows", GraphKind = kind.ToString(),
+                FrameNameProperty = "Name", TaskNameProperty = "Name", SelectionBind = "selected"
+            }
+        };
+        foreach (var source in sources) {
+            using var app = new CustomTuiApp(document, new Hashtable { ["rows"] = new[] { source } });
+            var chart = (Chart)app.Controls["chart"];
+            Assert.AreSame(source, chart.GetData(80)[0].Points[0].Source);
+            await using var ui = new DesignerUxTests.UiSession(app.Root, () => _ = app.Tick(), 80, 24);
+            ChartSelection? invoked = null;
+            chart.PointInvoked += selection => invoked = selection;
+            int y = kind == GraphKind.Gantt ? chart.PlotBounds.Y + 1 : chart.PlotBounds.Bottom - 1;
+            ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, chart.PlotBounds.X + 1, y,
+                () => app.State.ContainsKey("selected"));
+            Assert.AreSame(source, app.State["selected"]);
+            ui.Mouse(TerminalMouseKind.Up, TerminalMouseButton.Left, chart.PlotBounds.X + 1, y, () => true);
+            ui.Key(TerminalKey.Enter, () => invoked is not null);
+            Assert.AreSame(source, invoked!.Source);
+            app.State["rows"] = new[] { source };
+            app.Tick();
+            Assert.AreSame(source, chart.GetData(80)[0].Points[0].Source);
+        }
+    }
+
+    [TestMethod]
     [DataRow(GraphKind.ColumnLine)]
     [DataRow(GraphKind.Radar)]
     [DataRow(GraphKind.Heatmap)]

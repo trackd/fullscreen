@@ -14,6 +14,20 @@ namespace fullscreen.Tests;
 [TestClass]
 [DoNotParallelize]
 public sealed class ChartGridTests {
+    [TestMethod]
+    public void SkippedWaterfallColumnsBreakConnectorsWithoutResettingTotals() {
+        var chart = new Chart([1, 2, 3, 4]) { GraphKind = GraphKind.Waterfall };
+        var data = chart.GetRenderData(2);
+        var geometry = new ChartGeometry();
+        geometry.Build(data, chart.RenderRange(data), GraphKind.Waterfall, 2, 11);
+        Assert.IsFalse(geometry.Primitives.Any(shape => shape.Kind == ChartPrimitiveKind.Line));
+        var bars = geometry.Primitives.Where(shape => shape.Kind == ChartPrimitiveKind.Rectangle).ToArray();
+        CollectionAssert.AreEqual(new[] { 1, 3 }, bars.Select(shape => shape.Point).ToArray());
+        Assert.AreEqual(4, bars[1].Y1, "The final bar still starts at cumulative total six, not three.");
+        geometry.Build(data, chart.RenderRange(data), GraphKind.Waterfall, 4, 11);
+        Assert.AreEqual(3, geometry.Primitives.Count(shape => shape.Kind == ChartPrimitiveKind.Line));
+    }
+
     public TestContext TestContext { get; set; }
 
     private static Chart Example(GraphKind kind) {

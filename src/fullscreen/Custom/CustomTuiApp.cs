@@ -476,8 +476,10 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
             throw new ArgumentException("Gantt requires a collection of absolute task intervals.");
         }
         var rows = new List<System.Management.Automation.PSObject>();
+        var sources = new List<object>();
         foreach (var item in values) {
             rows.Add(item is null ? throw new ArgumentException("Gantt task rows cannot be null.") : System.Management.Automation.PSObject.AsPSObject(item));
+            sources.Add(item);
         }
         if (rows.Count == 0) {
             chart.SetData(new Charts.ChartSchedule([]).Data);
@@ -485,18 +487,20 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
         var data = new Charts.ObjectChartData(rows);
         chart.SetData(data.ProjectTasks(node.StartProperty, node.EndProperty, node.TaskNameProperty,
-            node.ProgressProperty.Length == 0 ? null : node.ProgressProperty, [.. Enumerable.Range(0, rows.Count)]));
+            node.ProgressProperty.Length == 0 ? null : node.ProgressProperty, [.. Enumerable.Range(0, rows.Count)], sources));
     }
     private static void ReplaceChartFrames(Charts.Chart chart, TuiNode node, object? value) {
         if (UnwrapChartValue(value) is not IEnumerable values || value is string) {
             throw new ArgumentException("Flamegraph requires a collection of FrameId/ParentId/self-weight records.");
         }
         var rows = new List<System.Management.Automation.PSObject>();
+        var sources = new List<object>();
         foreach (var item in values) {
             if (item is null) {
                 throw new ArgumentException("Flamegraph frame rows cannot be null.");
             }
             rows.Add(System.Management.Automation.PSObject.AsPSObject(item));
+            sources.Add(item);
         }
         if (rows.Count == 0) {
             chart.SetData(new Charts.ChartFlameTree([]).Data);
@@ -504,7 +508,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
         var data = new Charts.ObjectChartData(rows);
         chart.SetData(data.ProjectFrames(node.FrameIdProperty, node.ParentIdProperty, node.FrameNameProperty.Length == 0 ? null : node.FrameNameProperty,
-            data.Resolve(node.WeightProperty), [.. Enumerable.Range(0, rows.Count)]));
+            data.Resolve(node.WeightProperty), [.. Enumerable.Range(0, rows.Count)], sources));
     }
     private static void ReplaceChartValues(Charts.Chart chart, object? value) {
         chart.Values.Clear();

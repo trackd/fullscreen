@@ -14,15 +14,16 @@ public partial class Chart {
         }
         if (ChartTopology.Supports(GraphKind)) {
             string label = $"{GraphKind}: {data[0].Count} nodes, {data[1].Count} edges | click / arrows select, Enter inspect";
-            int length = Math.Min(label.Length, Math.Max(0, Bounds.Width));
-            _legend = new(length == 0 ? 0 : 1, length == 0 ? [] : [new(-1, new(0, 0, length, 1), label[..length])]);
+            label = ChartText.Fit(label, Math.Max(0, Bounds.Width));
+            int length = ChartText.Width(label);
+            _legend = new(length == 0 ? 0 : 1, length == 0 ? [] : [new(-1, new(0, 0, length, 1), label)]);
             _legendKey = key;
             return _legend;
         }
         if (GraphKind == GraphKind.Gantt) {
-            const string label = "UTC tasks | bar: interval, green: completed, * milestone | Up/Down lanes";
-            int length = Math.Min(label.Length, Math.Max(0, Bounds.Width));
-            _legend = new(length == 0 ? 0 : 1, length == 0 ? [] : [new(-1, new(0, 0, length, 1), label[..length])]);
+            string label = ChartText.Fit("UTC tasks | bar: interval, green: completed, * milestone | Up/Down lanes", Math.Max(0, Bounds.Width));
+            int length = ChartText.Width(label);
+            _legend = new(length == 0 ? 0 : 1, length == 0 ? [] : [new(-1, new(0, 0, length, 1), label)]);
             _legendKey = key;
             return _legend;
         }
@@ -31,8 +32,9 @@ public partial class Chart {
             if (FlameSearch.Length > 0) {
                 label = $"Search '{FlameSearch}': {FlameMatchPercent.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}% of profile (nested matches counted once)";
             }
-            int length = Math.Min(label.Length, Math.Max(0, Bounds.Width));
-            _legend = new(length == 0 ? 0 : 1, length == 0 ? [] : [new(-1, new(0, 0, length, 1), label[..length])]);
+            label = ChartText.Fit(label, Math.Max(0, Bounds.Width));
+            int length = ChartText.Width(label);
+            _legend = new(length == 0 ? 0 : 1, length == 0 ? [] : [new(-1, new(0, 0, length, 1), label)]);
             _legendKey = key;
             return _legend;
         }
@@ -65,11 +67,10 @@ public partial class Chart {
                 bool overflow = GraphKind != GraphKind.Pie && (point.Y < (Minimum ?? 0) || point.Y > (Maximum ?? 100));
                 label = $"{(series.Visible ? "●" : "○")} {point.Label}: {value}{proportion}{(overflow ? " !" : "")}";
             }
-            if (label.Length > width) {
-                label = width == 1 ? "…" : label[..(width - 1)] + "…";
-            }
+            label = ChartText.Fit(label, width, ellipsis: true);
+            int labelWidth = ChartText.Width(label);
 
-            if (x > 0 && x + label.Length > width) {
+            if (x > 0 && x + labelWidth > width) {
                 x = 0;
                 row++;
             }
@@ -82,17 +83,15 @@ public partial class Chart {
 
                 int firstHidden = rows ? entries[firstEntry].Point : entries[firstEntry].Index;
                 string overflow = $"+{count - firstHidden} {(rows ? "rows" : "series")}";
-                if (overflow.Length > width) {
-                    overflow = overflow[..width];
-                }
+                overflow = ChartText.Fit(overflow, width);
 
                 entries.RemoveRange(firstEntry, entries.Count - firstEntry);
                 entries.Add(new(-1, new(0, maxRows - 1, width, 1), overflow));
                 break;
             }
 
-            entries.Add(new(rows ? 0 : index, new(x, row, label.Length, 1), label, rows ? index : -1));
-            x += label.Length + 2;
+            entries.Add(new(rows ? 0 : index, new(x, row, labelWidth, 1), label, rows ? index : -1));
+            x += labelWidth + 2;
         }
 
         _legend = new(entries.Count == 0 ? 0 : entries[^1].Bounds.Y + 1, [.. entries]);

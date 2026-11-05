@@ -136,6 +136,7 @@ internal static class ChartGrid
                 int end = (int)((long)(index - first + 1) * width / columns);
                 if (end <= left)
                 {
+                    previousRight = -1;
                     continue;
                 }
                 if (kind == GraphKind.Heatmap)
