@@ -100,8 +100,8 @@ public sealed partial class DeveloperApp {
             MaxHeight = 25,
             Minimum = 0
         };
-        foreach (var count in counts) {
-            chart.Labels.Add(count.Label);
+        foreach (var (Label, Count) in counts) {
+            chart.Labels.Add(Label);
         }
         Surface.Palette.Apply(chart);
         Dialog? dialog = null;
@@ -377,7 +377,7 @@ public sealed partial class DeveloperApp {
         };
         var items = Surface.Model.Visible.Select(row => (DeveloperItem)row.Original)
             .Where(item => item.Cells.Length > 4).ToArray();
-        string Lane(DeveloperItem item) => string.IsNullOrWhiteSpace(item.Cells[4]) ? item.Cells[3] : item.Cells[4];
+        static string Lane(DeveloperItem item) => string.IsNullOrWhiteSpace(item.Cells[4]) ? item.Cells[3] : item.Cells[4];
         var groups = items.GroupBy(Lane).ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
         string[] laneNames = _backend is AzureDevOpsBackend { BoardOpen: true } ado && ado.BoardColumns.Length > 0
             ? ado.BoardColumns

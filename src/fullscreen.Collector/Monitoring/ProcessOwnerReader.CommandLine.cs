@@ -45,7 +45,7 @@ public sealed partial class ProcessOwnerReader {
         }
 
         if (text.Length > CommandLineLimit) {
-            text = text.Substring(0, CommandLineLimit);
+            text = text[..CommandLineLimit];
             truncated = true;
         }
         return truncated ? text + "\n[Truncated at 32768 characters or 65536 source bytes.]" : text;

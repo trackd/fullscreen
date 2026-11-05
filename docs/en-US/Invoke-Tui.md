@@ -85,6 +85,7 @@ and live displays are not supported, and output is limited to 1 MiB.
 The layout file is data; no embedded script executes.
 
 ```powershell
+New-TuiDefinition -Title 'Saved tool' | Export-TuiDefinition -Path ./tool.tui.json -Script:$false -Force
 Invoke-Tui -Path ./tool.tui.json -Theme 'Dark Modern'
 ```
 

@@ -3,12 +3,15 @@ using fullscreen.Charts;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Geometry;
 
 namespace fullscreen.Tests;
 
 [TestClass]
 [DoNotParallelize]
 public sealed class ChartPerformanceTests {
+    public TestContext TestContext { get; set; }
+
     private static long Allocations(Action action) {
         for (int index = 0; index < 10; index++) {
             action();
@@ -18,6 +21,54 @@ public sealed class ChartPerformanceTests {
             action();
         }
         return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
+    [TestMethod]
+    public void SvgPixelMaskingDoesNotAllocatePredicatesPerPixel() {
+        var chart = new Chart { GraphKind = GraphKind.PercentStackedArea, ShowAxes = true, ShowLegend = true };
+        chart.SetData([.. Enumerable.Range(0, 3).Select(series => new ChartDataSeries($"Series {series}",
+            [.. Enumerable.Range(0, 1000).Select(index => new ChartPoint(index, index, 10 + series + index % 7,
+                index.ToString(System.Globalization.CultureInfo.InvariantCulture)))]))]);
+        chart.Annotations.Add(new(333, 80, "source note"));
+        for (int index = 0; index < 3; index++) {
+            _ = chart.ExportSvg(100, 32);
+        }
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        string svg = chart.ExportSvg(100, 32);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.IsLessThan(32L * 1024 * 1024, allocated,
+            "Export may allocate its SVG document, but not a captured predicate for every scanned pixel.");
+        Assert.Contains("source note", svg);
+    }
+
+    [TestMethod]
+    public void RasterRedrawsAndBoxStatisticsKeepBoundedScratchAllocations() {
+        var chart = new Chart(Enumerable.Range(0, 100).Select(index => (double)(index % 17))) {
+            GraphKind = GraphKind.BoxPlot
+        };
+        var raster = new SixelPlot();
+        long redraws = Allocations(() => chart.DrawPixels(raster, 320, 160));
+        double[] observations = [100, 1, 8, 3, 7, 2, 6, 4, 5];
+        long summaries = Allocations(() => _ = ChartStatistics.Summarize(observations));
+        TestContext.WriteLine($"100 raster redraws: {redraws} bytes; 100 box summaries: {summaries} bytes.");
+        Assert.AreEqual(0L, redraws);
+        Assert.AreEqual(0L, summaries);
+    }
+
+    [TestMethod]
+    public void SharedCalculationsAndGeometryDoNotAllocateAfterWarmup() {
+        double[] sorted = [1, 2, 3, 4, 5, 6, 7, 8, 100];
+        var geometry = new ChartGeometry();
+        ChartDataSeries[] data = [new("First", [new(0, 0, -2, ""), new(1, 1, 5, "")])];
+        Rectangle plot = new(0, 0, 320, 160), viewport = new(10, 10, 100, 100);
+        Assert.AreEqual(0L, Allocations(() => {
+            _ = ChartMath.Fraction(0, -double.MaxValue, double.MaxValue);
+            _ = ChartMath.BarCenter(1, 0, 2, 320, 3);
+            _ = ChartStatistics.SummarizeSorted(sorted);
+            _ = ChartClipping.Intersect(plot, viewport);
+            geometry.Build(data, new(0, 1, -2, 5), GraphKind.StackedBars, 320, 160);
+        }));
+        Assert.HasCount(2, geometry.Primitives);
     }
     [TestMethod]
     public void CategoryLabelsAndGapNavigationReadExistingPointsWithoutAllocatingCopies() {

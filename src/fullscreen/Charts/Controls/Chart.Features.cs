@@ -5,10 +5,15 @@ using XenoAtom.Terminal.UI.Collections;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Rendering;
+using static fullscreen.Charts.ChartMath;
 
 namespace fullscreen.Charts;
 
 public partial class Chart {
+    /// <summary>Gets or sets the positive fixed price change required for a Kagi reversal; default 1 price unit.</summary>
+    [Bindable]
+    public partial double ReversalAmount { get; set; }
+
     /// <summary>Gets or sets whether axis labels and tick marks are displayed.</summary>
     [Bindable]
     public partial bool ShowAxes { get; set; }
@@ -83,15 +88,22 @@ public partial class Chart {
         ShowLegend,
         Thresholds.Version,
         Annotations.Version,
-        SelectedRange
+        SelectedRange,
+        ReversalAmount,
+        FlameReverse,
+        FlameFocusId,
+        FlameSearch,
+        TaskOffset,
+        FlameFrameRows
     );
-    private int LegendRows => ShowLegend && GetData(Math.Max(1, Bounds.Width)).Length > 0 ? 1 : 0;
+    private int LegendRows => ShowLegend ? GetLegend().Rows : 0;
     private int TitleRows => Title.Length == 0 ? 0 : 1;
+    private bool CartesianAxes => ShowAxes && !ChartTopology.Supports(GraphKind) && !ChartRadial.IsRadial(GraphKind) && GraphKind is not (GraphKind.Flamegraph or GraphKind.Gantt);
     private Rectangle ContentPlotBounds => new(
-        Bounds.X + (ShowAxes ? _axisWidth : 0),
+        Bounds.X + (CartesianAxes ? _axisWidth : 0),
         Bounds.Y + TitleRows + LegendRows,
-        Math.Max(0, Bounds.Width - (ShowAxes ? _axisWidth : 0)),
-        Math.Max(0, Bounds.Height - TitleRows - LegendRows - (ShowAxes ? 1 : 0))
+        Math.Max(0, Bounds.Width - (CartesianAxes ? _axisWidth : 0)),
+        Math.Max(0, Bounds.Height - TitleRows - LegendRows - (ShowAxes ? 1 : 0) - ((ChartGrid.Supports(GraphKind) || GraphKind == GraphKind.Kagi) && ShowLegend ? 1 : 0))
     );
 
     private void MeasureFeatures() {
@@ -108,13 +120,18 @@ public partial class Chart {
             throw new ArgumentException("Axis TickCount must be between 2 and 20.");
         }
 
-        if (ShowAxes) {
+        if (CartesianAxes) {
             var data = GetRenderData(Math.Max(1, Bounds.Width));
             var range = RenderRange(data);
             int labelWidth = Math.Max(
                 FormatTick(YAxis, YAxis.Inverse(range.MinY), data, false).Length,
                 FormatTick(YAxis, YAxis.Inverse(range.MaxY), data, false).Length
             );
+            if (GraphKind is GraphKind.Marimekko or GraphKind.PercentStackedArea) {
+                for (int tick = 0; tick < YAxis.TickCount; tick++) {
+                    labelWidth = Math.Max(labelWidth, FormatTick(YAxis, 100d * tick / (YAxis.TickCount - 1), data, false).Length);
+                }
+            }
             if (GraphKind == GraphKind.Heatmap) {
                 labelWidth = Math.Max(labelWidth, data.Select(series => series.Property.Length).DefaultIfEmpty(0).Max());
             }
@@ -141,6 +158,32 @@ public partial class Chart {
         }
 
         var data = GetData(width);
+        ChartStackedArea.ValidateOptions(GraphKind, Minimum, Maximum, XAxis.Scale, YAxis.Scale);
+        if (ChartStackedArea.Supports(GraphKind)) {
+            ChartStackedArea.Validate(data);
+        }
+        if (ChartTopology.Supports(GraphKind)) {
+            ChartTopology.ValidateOptions(Minimum, Maximum, MinimumX, MaximumX, XAxis.Scale, YAxis.Scale,
+                Thresholds.Count, Annotations.Count, SelectedRange);
+            _ = Range(data);
+            return data;
+        }
+        if (GraphKind == GraphKind.Gantt) {
+            ChartSchedule.ValidateOptions(Minimum, Maximum, XAxis.Scale, YAxis.Scale, Thresholds.Count, Annotations.Count, TaskOffset);
+            _ = Range(data);
+            return data;
+        }
+        if (GraphKind == GraphKind.Flamegraph) {
+            ValidateFlameOptions();
+            return data;
+        }
+        ChartMarket.ValidateOptions(GraphKind, ReversalAmount, Minimum, Maximum, MinimumX, MaximumX,
+            XAxis.Scale, YAxis.Scale, Thresholds.Count, Annotations.Count);
+        if (ChartMarket.Supports(GraphKind)) {
+            ChartMarket.Validate(data, GraphKind);
+        }
+        ChartGrid.ValidateOptions(GraphKind, XAxis.Scale, YAxis.Scale);
+        ChartRadial.ValidateOptions(GraphKind, Minimum, Maximum, XAxis.Scale, YAxis.Scale, Thresholds.Count, Annotations.Count);
         if (GraphKind is not (GraphKind.Histogram or GraphKind.BoxPlot)) {
             _distributionKey = null;
             _distributions = [];
@@ -150,6 +193,12 @@ public partial class Chart {
         if (!transform && data.All(series => series.Visible) && MinimumX is null && MaximumX is null) {
             _projectionKey = null;
             _projection = [];
+            if (ChartRadial.IsRadial(GraphKind)) {
+                ChartRadial.Validate(data, GraphKind);
+            }
+            if (ChartGrid.Supports(GraphKind)) {
+                ChartGrid.Validate(data, GraphKind);
+            }
             return data;
         }
 
@@ -182,7 +231,8 @@ public partial class Chart {
                 bool horizontal = GraphKind == GraphKind.HorizontalBars;
                 double x = horizontal ? point.X : XAxis.Transform(point.X), y = point.Y.HasValue ? (horizontal ? XAxis : YAxis).Transform(point.Y.Value) : double.NaN;
                 double viewX = horizontal ? point.Y ?? double.NaN : point.X;
-                bool visible = (!MinimumX.HasValue || viewX >= MinimumX.Value) && (!MaximumX.HasValue || viewX <= MaximumX.Value);
+                bool visible = GraphKind == GraphKind.Waterfall || ChartStackedArea.Supports(GraphKind)
+                    || (!MinimumX.HasValue || viewX >= MinimumX.Value) && (!MaximumX.HasValue || viewX <= MaximumX.Value);
                 points[position] = point with {
                     X = x,
                     Y = visible && double.IsFinite(x) && double.IsFinite(y) ? y : null,
@@ -194,11 +244,19 @@ public partial class Chart {
             projected.Add(new(series.Property, points) {
                 Color = series.Color ?? DefaultSeriesColor(index),
                 LineStyle = series.LineStyle,
-                Marker = series.Marker
+                Marker = series.Marker,
+                Role = series.Role,
+                SourceIndex = series.SourceIndex
             });
         }
 
         _projection = [.. projected];
+        if (ChartRadial.IsRadial(GraphKind)) {
+            ChartRadial.Validate(_projection, GraphKind);
+        }
+        if (ChartGrid.Supports(GraphKind)) {
+            ChartGrid.Validate(_projection, GraphKind);
+        }
         _projectionKey = cacheKey;
         return _projection;
     }
@@ -228,6 +286,9 @@ public partial class Chart {
             || minX > maxX) {
             throw new ArgumentException("X limits must be finite and ordered.");
         }
+        if (GraphKind == GraphKind.Gantt && (minX < 0 || maxX > ChartSchedule.Seconds(DateTimeOffset.MaxValue) || minX >= maxX)) {
+            throw new ArgumentException("Gantt time bounds must fit UTC calendar instants with a positive span.");
+        }
 
         if (XAxis.Scale == ChartScale.Logarithmic && minX <= 0 && !MinimumX.HasValue) {
             minX = original.Where(series => series.Visible).SelectMany(series => series.Points.Take(series.Count)).Where(point => point.Y.HasValue).Select(point => GraphKind == GraphKind.HorizontalBars ? point.Y!.Value : point.X).Where(value => value > 0).DefaultIfEmpty(1).Min();
@@ -244,7 +305,7 @@ public partial class Chart {
             throw new ArgumentException("Logarithmic axis limits must be positive.");
         }
 
-        _range = new(XAxis.Transform(minX), XAxis.Transform(maxX), YAxis.Transform(minY), YAxis.Transform(maxY));
+        _range = new(XAxis.Transform(minX), XAxis.Transform(maxX), YAxis.Transform(minY), YAxis.Transform(maxY), range.MinColor, range.MaxColor);
         _rangeKey = cacheKey;
         return _range;
     }
@@ -253,10 +314,17 @@ public partial class Chart {
     /// <param name="minimumX">The lower X-coordinate limit, or null for automatic bounds.</param>
     /// <param name="maximumX">The upper X-coordinate limit, or null for automatic bounds.</param>
     public void SetView(double? minimumX, double? maximumX) {
+        if (ChartTopology.Supports(GraphKind) && (minimumX is not null || maximumX is not null)) {
+            throw new ArgumentException("Relationship diagrams use intrinsic layout, not numeric viewport bounds.");
+        }
         if (minimumX.HasValue && !double.IsFinite(minimumX.Value)
             || maximumX.HasValue && !double.IsFinite(maximumX.Value)
             || minimumX > maximumX) {
             throw new ArgumentException("X limits must be finite and ordered.");
+        }
+        if (GraphKind == GraphKind.Gantt && (minimumX < 0 || maximumX > ChartSchedule.Seconds(DateTimeOffset.MaxValue)
+            || minimumX is not null && maximumX is not null && maximumX <= minimumX)) {
+            throw new ArgumentException("Gantt time bounds must fit UTC calendar instants with a positive span.");
         }
 
         MinimumX = minimumX;
@@ -269,13 +337,22 @@ public partial class Chart {
     /// <param name="vertical">Whether to change the Y viewport instead of the X viewport. Defaults to
     /// false.</param>
     public void Zoom(double factor, bool vertical = false) {
+        if (ChartTopology.Supports(GraphKind)) {
+            throw new ArgumentException("Relationship diagrams fit their topology to the viewport; numeric zoom is unsupported.");
+        }
+        if (GraphKind == GraphKind.Gantt && vertical) {
+            throw new ArgumentException("Gantt task lanes scroll vertically; only schedule time can zoom.");
+        }
+        if (GraphKind == GraphKind.PercentStackedArea && vertical) {
+            throw new ArgumentException("PercentStackedArea retains its fixed 0 to 100 percent Y range; only X can zoom.");
+        }
         if (!double.IsFinite(factor) || factor <= 0) {
             throw new ArgumentOutOfRangeException(nameof(factor));
         }
 
         var range = RenderRange(GetRenderData(Math.Max(1, Bounds.Width)));
         double min = vertical ? range.MinY : range.MinX, max = vertical ? range.MaxY : range.MaxX;
-        double center = min / 2 + max / 2, half = Math.Max(1e-12, (max / 2 - min / 2) / factor);
+        double center = min / 2 + max / 2, half = Math.Max(GraphKind == GraphKind.Gantt ? .5 : 1e-12, (max / 2 - min / 2) / factor);
         var axis = vertical ? YAxis : XAxis;
         double low = axis.Inverse(center - half), high = axis.Inverse(center + half);
         if (!double.IsFinite(low) || !double.IsFinite(high)) {
@@ -288,6 +365,10 @@ public partial class Chart {
             ViewChanged?.Invoke();
         }
         else {
+            if (GraphKind == GraphKind.Gantt) {
+                low = Math.Max(0, low);
+                high = Math.Min(ChartSchedule.Seconds(DateTimeOffset.MaxValue), high);
+            }
             SetView(low, high);
         }
     }
@@ -297,6 +378,15 @@ public partial class Chart {
     /// <param name="vertical">Whether to change the Y viewport instead of the X viewport. Defaults to
     /// false.</param>
     public void Pan(double fraction, bool vertical = false) {
+        if (ChartTopology.Supports(GraphKind)) {
+            throw new ArgumentException("Relationship diagrams fit their topology to the viewport; numeric pan is unsupported.");
+        }
+        if (GraphKind == GraphKind.Gantt && vertical) {
+            throw new ArgumentException("Gantt task lanes scroll vertically; only schedule time can pan.");
+        }
+        if (GraphKind == GraphKind.PercentStackedArea && vertical) {
+            throw new ArgumentException("PercentStackedArea retains its fixed 0 to 100 percent Y range; only X can pan.");
+        }
         if (!double.IsFinite(fraction)) {
             throw new ArgumentOutOfRangeException(nameof(fraction));
         }
@@ -304,6 +394,9 @@ public partial class Chart {
         var range = RenderRange(GetRenderData(Math.Max(1, Bounds.Width)));
         double min = vertical ? range.MinY : range.MinX, max = vertical ? range.MaxY : range.MaxX;
         double delta = (max - min) * fraction;
+        if (GraphKind == GraphKind.Gantt) {
+            delta = Math.Clamp(delta, -min, ChartSchedule.Seconds(DateTimeOffset.MaxValue) - max);
+        }
         var axis = vertical ? YAxis : XAxis;
         double low = axis.Inverse(min + delta), high = axis.Inverse(max + delta);
         if (!double.IsFinite(low) || !double.IsFinite(high)) {
@@ -323,12 +416,18 @@ public partial class Chart {
     /// <summary>Restores automatic viewport bounds.</summary>
     public void ResetView() {
         SetView(null, null);
+        if (GraphKind == GraphKind.Gantt) {
+            TaskOffset = 0;
+        }
         SelectRange(null);
     }
 
     /// <summary>Sets or clears the selected horizontal data range.</summary>
     /// <param name="range">The selected horizontal interval, or null to clear the selection.</param>
     public void SelectRange(ChartSelectedRange? range) {
+        if (ChartTopology.Supports(GraphKind) && range is not null) {
+            throw new ArgumentException("Relationship diagrams do not use numeric range selection.");
+        }
         if (range is not null
             && (!double.IsFinite(range.MinimumX) || !double.IsFinite(range.MaximumX)
             || range.MinimumX > range.MaximumX)) {
@@ -378,7 +477,7 @@ public partial class Chart {
     /// <param name="style">The chart series display options.</param>
     public void SetSeriesStyle(int index, ChartSeriesStyle style) {
         ArgumentNullException.ThrowIfNull(style);
-        if (!Enum.IsDefined(style.LineStyle) || !Enum.IsDefined(style.Marker)) {
+        if (!Enum.IsDefined(style.LineStyle) || !Enum.IsDefined(style.Marker) || !Enum.IsDefined(style.Role)) {
             throw new ArgumentException("Invalid series style.");
         }
 
@@ -397,12 +496,14 @@ public partial class Chart {
             series.Visible = style.Visible;
             series.LineStyle = style.LineStyle;
             series.Marker = style.Marker;
+            series.Role = style.Role;
         }
         else {
             data[index].Color = style.Color;
             data[index].Visible = style.Visible;
             data[index].LineStyle = style.LineStyle;
             data[index].Marker = style.Marker;
+            data[index].Role = style.Role;
         }
 
         Refresh();
@@ -415,24 +516,34 @@ public partial class Chart {
     }
 
     private bool HandleFeaturePointer(PointerEventArgs e) {
-        if (ShowLegend && e.UiY == Bounds.Y + TitleRows) {
+        if (ShowLegend && e.UiY >= Bounds.Y + TitleRows && e.UiY < Bounds.Y + TitleRows + LegendRows) {
             var data = GetData(Math.Max(1, Bounds.Width));
-            int column = Bounds.X;
-            for (int index = 0; index < data.Length; index++) {
-                int length = LegendLabel(data[index]).Length + 2;
-                if (e.UiX >= column && e.UiX < column + length) {
-                    SetSeriesVisible(index, !data[index].Visible);
+            foreach (var entry in GetLegend().Entries) {
+                if (entry.Index >= 0 && entry.Bounds.Contains(e.UiX - Bounds.X, e.UiY - Bounds.Y - TitleRows)) {
+                    if (entry.Point >= 0) {
+                        var series = data[entry.Index];
+                        var point = series.Points[entry.Point];
+                        if (point.Y is { } value) {
+                            var selection = new ChartSelection(entry.Index, series.Property, point.Index, point.X, value, point.Label, point.Source);
+                            Select(selection);
+                            if (e.ClickCount >= 2) {
+                                PointActivated?.Invoke(point.Index);
+                                PointInvoked?.Invoke(selection);
+                            }
+                        }
+                    }
+                    else {
+                        SetSeriesVisible(entry.Index, !data[entry.Index].Visible);
+                    }
                     break;
                 }
-
-                column += length;
             }
 
             e.Handled = true;
             return true;
         }
 
-        if ((e.Modifiers & TerminalModifiers.Shift) != 0 && PlotBounds.Contains(e.UiX, e.UiY)) {
+        if (!ChartTopology.Supports(GraphKind) && !ChartRadial.IsRadial(GraphKind) && !ChartMarket.Supports(GraphKind) && GraphKind != GraphKind.Flamegraph && (e.Modifiers & TerminalModifiers.Shift) != 0 && PlotBounds.Contains(e.UiX, e.UiY)) {
             _dragStart = PointerX(e.UiX);
             SelectRange(new(_dragStart.Value, _dragStart.Value));
             e.Handled = true;
@@ -444,6 +555,10 @@ public partial class Chart {
 
     /// <inheritdoc/>
     protected override void OnPointerMoved(PointerEventArgs e) {
+        if (Interactive && GraphKind == GraphKind.Flamegraph && e.RoutingPhase != RoutingPhase.Preview) {
+            FlameHover = PlotBounds.Contains(e.UiX, e.UiY) ? PickPoint(e.UiX, e.UiY) : null;
+            return;
+        }
         if (!Interactive || e.RoutingPhase == RoutingPhase.Preview || !_dragStart.HasValue) {
             return;
         }
@@ -464,17 +579,49 @@ public partial class Chart {
 
     /// <inheritdoc/>
     protected override void OnPointerWheel(PointerEventArgs e) {
-        if (!Interactive || e.RoutingPhase == RoutingPhase.Preview) {
+        if (!Interactive || e.RoutingPhase == RoutingPhase.Preview || ChartTopology.Supports(GraphKind) || ChartRadial.IsRadial(GraphKind) || ChartMarket.Supports(GraphKind) || GraphKind == GraphKind.Flamegraph) {
             return;
         }
 
-        Zoom(e.WheelDelta > 0 ? 1.25 : .8, (e.Modifiers & TerminalModifiers.Ctrl) != 0);
+        Zoom(e.WheelDelta > 0 ? 1.25 : .8, GraphKind != GraphKind.Gantt && (e.Modifiers & TerminalModifiers.Ctrl) != 0);
         e.Handled = true;
     }
 
     /// <inheritdoc/>
     protected override void OnTextInput(TextInputEventArgs e) {
         if (!Interactive || e.RoutingPhase == RoutingPhase.Preview) {
+            return;
+        }
+        if (GraphKind == GraphKind.Flamegraph) {
+            if (ChartTopology.Supports(GraphKind)) {
+                return;
+            }
+            switch (e.Text) {
+                case "f":
+                    FocusSelectedFrame();
+                    break;
+                case "u":
+                    FlameParent();
+                    break;
+                case "0":
+                    FlameFocusId = "";
+                    break;
+                case "r":
+                    FlameReverse = !FlameReverse;
+                    break;
+                case "/":
+                    FlameSearchRequested?.Invoke();
+                    break;
+                case " ":
+                    PauseRequested?.Invoke();
+                    break;
+                default:
+                    return;
+            }
+            e.Handled = true;
+            return;
+        }
+        if ((ChartRadial.IsRadial(GraphKind) || ChartMarket.Supports(GraphKind)) && e.Text != " ") {
             return;
         }
 
@@ -517,8 +664,70 @@ public partial class Chart {
             e.Handled = true;
             return;
         }
+        if (GraphKind == GraphKind.Flamegraph && e.Key == TerminalKey.Backspace) {
+            FlameParent();
+            e.Handled = true;
+            return;
+        }
 
+        if (GraphKind == GraphKind.Gantt && e.Key is TerminalKey.Up or TerminalKey.Down or TerminalKey.PageUp or TerminalKey.PageDown) {
+            int capacity = Math.Max(1, PlotBounds.Height / 2);
+            int delta = e.Key switch {
+                TerminalKey.Up => -1,
+                TerminalKey.Down => 1,
+                TerminalKey.PageUp => -capacity,
+                _ => capacity
+            };
+            int count = GetData(Math.Max(1, Bounds.Width))[0].Count;
+            TaskOffset = (int)Math.Clamp((long)TaskOffset + delta, 0, Math.Max(0, count - 1));
+            e.Handled = true;
+            return;
+        }
         if (e.Key is not (TerminalKey.Left or TerminalKey.Right or TerminalKey.Home or TerminalKey.End)) {
+            return;
+        }
+        if (ChartTopology.Supports(GraphKind)) {
+            NavigateDiagram(e.Key);
+            e.Handled = true;
+            return;
+        }
+
+        if (GraphKind == GraphKind.Flamegraph) {
+            var tree = GetFlameTree();
+            _pickGeometry.Build(tree.Data, RenderRange(tree.Data), GraphKind, PlotBounds.Width, PlotBounds.Height,
+                flameReverse: FlameReverse, flameFocus: FlameFocus(tree), flameFrameHeight: FlameFrameRows);
+            int first = -1, last = -1, current = -1, previous = -1, next = -1;
+            for (int shapeIndex = 0; shapeIndex < _pickGeometry.Primitives.Count; shapeIndex++) {
+                var shape = _pickGeometry.Primitives[shapeIndex];
+                if (shape.Kind != ChartPrimitiveKind.Rectangle) {
+                    continue;
+                }
+                if (first < 0) {
+                    first = shapeIndex;
+                }
+                if (current >= 0 && next < 0) {
+                    next = shapeIndex;
+                }
+                if (tree.Data[0].Points[shape.Point].Index == SelectedIndex) {
+                    current = shapeIndex;
+                    previous = last;
+                }
+                last = shapeIndex;
+            }
+            int target = e.Key switch {
+                TerminalKey.Home => first,
+                TerminalKey.End => last,
+                TerminalKey.Left => previous >= 0 ? previous : current >= 0 ? current : first,
+                _ => next >= 0 ? next : current >= 0 ? current : first
+            };
+            if (target >= 0) {
+                var shape = _pickGeometry.Primitives[target];
+                var picked = PickGrid(tree.Data, PlotBounds.X + shape.X0, PlotBounds.Y + shape.Y0);
+                if (picked is not null) {
+                    Select(picked);
+                }
+            }
+            e.Handled = true;
             return;
         }
 
@@ -535,6 +744,12 @@ public partial class Chart {
         }
 
         var point = points[index];
+        if (GraphKind == GraphKind.Gantt) {
+            int capacity = Math.Max(1, PlotBounds.Height / 2);
+            if (index < TaskOffset || index >= TaskOffset + capacity) {
+                TaskOffset = index < TaskOffset ? index : Math.Max(0, index - capacity + 1);
+            }
+        }
         Select(new(
             seriesIndex,
             data[seriesIndex].Property,
@@ -547,8 +762,6 @@ public partial class Chart {
         e.Handled = true;
     }
 
-    private static string LegendLabel(ChartDataSeries series) =>
-        (series.Visible ? "● " : "○ ") + (series.Property.Length == 0 ? "Values" : series.Property);
     private void WriteFeature(CellBuffer buffer, int x, int y, string text, Style style, int width) {
         if (width <= 0 || y < Bounds.Y || y >= Bounds.Bottom) {
             return;
@@ -571,24 +784,49 @@ public partial class Chart {
         }
 
         var range = RenderRange(data);
+        if (GraphKind == GraphKind.Heatmap && ShowLegend) {
+            RenderHeatmapScale(buffer, range);
+        }
+        if (GraphKind == GraphKind.Waterfall && ShowLegend) {
+            RenderWaterfallKey(buffer);
+        }
+        if (GraphKind == GraphKind.Kagi && ShowLegend) {
+            RenderKagiKey(buffer);
+        }
         if (ShowLegend) {
-            int x = Bounds.X, index = 0;
-            foreach (var series in GetData(Math.Max(1, Bounds.Width))) {
-                string label = LegendLabel(series);
+            var original = GetData(Math.Max(1, Bounds.Width));
+            foreach (var entry in GetLegend().Entries) {
+                var style = entry.Index < 0 ? Palette.Muted : entry.Point >= 0
+                    ? Palette.Body.WithForeground(GraphKind == GraphKind.Gauge ? Palette.Accent : DefaultSeriesColor(entry.Point))
+                    : original[entry.Index].Visible
+                    ? Palette.Body.WithForeground(original[entry.Index].Color ?? DefaultSeriesColor(entry.Index)) : Palette.Muted;
                 WriteFeature(
                     buffer,
-                    x,
-                    Bounds.Y + TitleRows,
-                    label,
-                    series.Visible ? Palette.Body.WithForeground(series.Color ?? DefaultSeriesColor(index)) : Palette.Muted,
-                    label.Length
+                    Bounds.X + entry.Bounds.X,
+                    Bounds.Y + TitleRows + entry.Bounds.Y,
+                    entry.Label,
+                    style,
+                    entry.Bounds.Width
                 );
-                x += label.Length + 2;
-                index++;
             }
         }
 
-        if (ShowAxes) {
+        if (ChartRadial.IsRadial(GraphKind)) {
+            RenderRadialLabels(buffer, data, range);
+            return;
+        }
+
+        if (GraphKind == GraphKind.Gantt && ShowAxes) {
+            int row = plotBounds.Bottom;
+            for (int tick = 0; tick < XAxis.TickCount; tick++) {
+                double fraction = tick / (double)(XAxis.TickCount - 1);
+                string label = FormatTick(XAxis, range.MinX * (1 - fraction) + range.MaxX * fraction, data, true);
+                int width = Math.Max(1, plotBounds.Width / XAxis.TickCount);
+                int column = plotBounds.X + (int)Math.Round(fraction * Math.Max(0, plotBounds.Width - width));
+                WriteFeature(buffer, column, row, label, Palette.Muted, width);
+            }
+        }
+        if (ShowAxes && !ChartTopology.Supports(GraphKind) && GraphKind is not (GraphKind.Flamegraph or GraphKind.Gantt)) {
             bool categoricalRows = GraphKind == GraphKind.Heatmap
                 || GraphKind == GraphKind.HorizontalBars && YAxis.Scale == ChartScale.Category;
             int categories = GraphKind == GraphKind.Heatmap ? data.Length : data.FirstOrDefault()?.Count ?? 0;
@@ -618,7 +856,35 @@ public partial class Chart {
                 Palette.Muted,
                 plotBounds.Width + 1
             );
-            for (int tick = 0; tick < XAxis.TickCount; tick++) {
+            if (ChartGrid.Supports(GraphKind)) {
+                int count = 0;
+                foreach (var series in data) {
+                    count = Math.Max(count, series.Count);
+                }
+                int visibleCount = 0;
+                for (int index = 0; index < count; index++) {
+                    var point = GridPoint(data, index);
+                    if (point.X >= range.MinX && point.X <= range.MaxX) {
+                        visibleCount++;
+                    }
+                }
+                int slot = 0, stride = Math.Max(1, (int)Math.Ceiling(visibleCount / (double)XAxis.TickCount));
+                for (int index = 0; index < count; index++) {
+                    var point = GridPoint(data, index);
+                    if (point.X < range.MinX || point.X > range.MaxX) {
+                        continue;
+                    }
+                    if (slot % stride == 0) {
+                        int column = plotBounds.X + (int)((long)slot * plotBounds.Width / Math.Max(1, visibleCount));
+                        WriteFeature(buffer, column, row, point.Label, Palette.Muted, Math.Max(1, (int)((long)stride * plotBounds.Width / Math.Max(1, visibleCount))));
+                    }
+                    slot++;
+                }
+            }
+            if (ChartMarket.Supports(GraphKind)) {
+                RenderMarketCategories(buffer, data, row);
+            }
+            for (int tick = 0; !ChartGrid.Supports(GraphKind) && !ChartMarket.Supports(GraphKind) && tick < XAxis.TickCount; tick++) {
                 double fraction = tick / (double)(XAxis.TickCount - 1), value = XAxis.Inverse(range.MinX * (1 - fraction) + range.MaxX * fraction);
                 string label = FormatTick(XAxis, value, data, true);
                 int width = Math.Max(1, plotBounds.Width / XAxis.TickCount), column = plotBounds.X + (int)Math.Round(fraction * Math.Max(0, plotBounds.Width - width));
@@ -650,7 +916,12 @@ public partial class Chart {
             Thresholds,
             Annotations,
             XAxis,
-            YAxis
+            YAxis,
+            ReversalAmount,
+            FlameReverse,
+            GraphKind == GraphKind.Flamegraph ? FlameFocus(GetFlameTree()) : -1,
+            flameFrameHeight: GraphKind == GraphKind.Flamegraph ? FlameFrameRows : 1,
+            taskOffset: TaskOffset
         );
         foreach (var primitive in _featureGeometry.Primitives) {
             if (primitive.Text is not null) {
@@ -659,14 +930,26 @@ public partial class Chart {
                     plotBounds.X + primitive.X0,
                     plotBounds.Y + primitive.Y0,
                     primitive.Text,
-                    Palette.Body.WithForeground(primitive.Color ?? Palette.Accent),
-                    plotBounds.Width - primitive.X0
+                    ChartTopology.Supports(GraphKind) && primitive.Series == 0
+                        ? Palette.Body.WithBackground(Color.Mix(PixelBackground, PixelInk,
+                            data[primitive.Series].Points[primitive.Point].Index == SelectedIndex ? .8f : .6f)).WithForeground(PixelBackground)
+                        : GraphKind == GraphKind.Flamegraph && primitive.Point >= 0
+                        ? Palette.Body.WithBackground(FlameColor(primitive.Shade)).WithForeground(PixelBackground)
+                        : Palette.Body.WithForeground(primitive.Color ?? Palette.Accent),
+                    ChartTopology.Supports(GraphKind) || GraphKind is GraphKind.Flamegraph or GraphKind.Gantt ? primitive.X1 - primitive.X0 + 1 : plotBounds.Width - primitive.X0
                 );
             }
         }
     }
 
     private string FormatTick(ChartAxis axis, double value, ChartDataSeries[] data, bool horizontal) {
+        if (horizontal && GraphKind == GraphKind.Gantt) {
+            long ticks = Math.Clamp((long)(value * TimeSpan.TicksPerSecond), 0, DateTimeOffset.MaxValue.UtcTicks);
+            return new DateTimeOffset(ticks, TimeSpan.Zero).ToString(axis.Format == "G4" ? "MM-dd HH:mm" : axis.Format, CultureInfo.InvariantCulture);
+        }
+        if (!horizontal && GraphKind is GraphKind.Marimekko or GraphKind.PercentStackedArea) {
+            return axis.FormatValue(value) + "%";
+        }
         if (!horizontal && GraphKind == GraphKind.Heatmap) {
             return data.Length == 0 ? "" : data[Math.Clamp(data.Length - 1 - (int)Math.Round(value), 0, data.Length - 1)].Property;
         }
@@ -699,7 +982,13 @@ public partial class Chart {
 
     internal IEnumerable<Rectangle> AnnotationBounds {
         get {
-            if (Annotations.Count == 0 && Thresholds.Count == 0) {
+            if (ChartRadial.IsRadial(GraphKind)) {
+                foreach (var label in GetRadialLabels(GetRenderData(Math.Max(1, Bounds.Width)))) {
+                    yield return label.Bounds;
+                }
+                yield break;
+            }
+            if (Annotations.Count == 0 && Thresholds.Count == 0 && !ChartTopology.Supports(GraphKind) && GraphKind is not (GraphKind.Flamegraph or GraphKind.Gantt)) {
                 yield break;
             }
 
@@ -713,14 +1002,19 @@ public partial class Chart {
                 Thresholds,
                 Annotations,
                 XAxis,
-                YAxis
+                YAxis,
+                ReversalAmount,
+                FlameReverse,
+                GraphKind == GraphKind.Flamegraph ? FlameFocus(GetFlameTree()) : -1,
+                flameFrameHeight: GraphKind == GraphKind.Flamegraph ? FlameFrameRows : 1,
+                taskOffset: TaskOffset
             );
             foreach (var primitive in _featureGeometry.Primitives) {
                 if (primitive.Text is { Length: > 0 } text) {
                     yield return new(
                         PlotBounds.X + primitive.X0,
                         PlotBounds.Y + primitive.Y0,
-                        Math.Min(text.Length, Math.Max(0, PlotBounds.Width - primitive.X0)),
+                        Math.Min(text.Length, ChartTopology.Supports(GraphKind) || GraphKind is GraphKind.Flamegraph or GraphKind.Gantt ? primitive.X1 - primitive.X0 + 1 : Math.Max(0, PlotBounds.Width - primitive.X0)),
                         1
                     );
                 }
@@ -738,5 +1032,11 @@ internal readonly record struct ChartViewKey(
     bool Legend,
     int Thresholds,
     int Annotations,
-    ChartSelectedRange? Selection
+    ChartSelectedRange? Selection,
+    double ReversalAmount = 1,
+    bool FlameReverse = false,
+    string FlameFocusId = "",
+    string FlameSearch = "",
+    int TaskOffset = 0,
+    int FlameFrameRows = 2
 );

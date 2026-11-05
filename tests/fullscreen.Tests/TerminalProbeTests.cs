@@ -83,7 +83,7 @@ public sealed class TerminalProbeTests {
     [DataRow("\u009b?65;3;4c", true, true)]
     public void Da1FlagsSelectOnlyAdvertisedProtocols(string response, bool sixel, bool regis) {
         var transport = new Transport(response);
-        var result = TerminalFeatureProbe.Read(transport, new(80, 24));
+        var result = TerminalFeatureProbe.Read(transport, new(80, 24), TestContext.CancellationToken);
         Assert.IsTrue(result.Completed);
         Assert.AreEqual(sixel, result.Sixel);
         Assert.AreEqual(regis, result.Regis);
@@ -98,7 +98,7 @@ public sealed class TerminalProbeTests {
     [DataRow("\x1b[4;920;1300t\x1b[8;40;130t\x1b[?65;4c", 10, 23)]
     [DataRow("\x1b[4;480;640t\x1b[?65;4c", 8, 20)]
     public void PixelReportsDetermineCellGeometry(string response, int width, int height) {
-        var result = TerminalFeatureProbe.Read(new Transport(response), new(80, 24));
+        var result = TerminalFeatureProbe.Read(new Transport(response), new(80, 24), TestContext.CancellationToken);
         Assert.AreEqual(width, result.Metrics!.Value.CellPixelWidth);
         Assert.AreEqual(height, result.Metrics.Value.CellPixelHeight);
     }
@@ -106,7 +106,7 @@ public sealed class TerminalProbeTests {
     [TestMethod]
     public void ProbeStopsAtFenceAndRestoresMode() {
         var transport = new Transport("\x1b[6;12;4t\x1b[?65;4cxyz");
-        var result = TerminalFeatureProbe.Read(transport, new(20, 10));
+        var result = TerminalFeatureProbe.Read(transport, new(20, 10), TestContext.CancellationToken);
         Assert.IsTrue(result.Sixel);
         CollectionAssert.AreEqual(new[] { TerminalFeatureProbe.DeviceQuery, TerminalFeatureProbe.Query }, transport.Queries);
         Assert.IsTrue(transport.WriteSawMode);
@@ -122,7 +122,7 @@ public sealed class TerminalProbeTests {
     [DataRow(false, true)]
     public void PendingOrUnavailableInputDoesNotQuery(bool pending, bool unavailable) {
         var transport = new Transport("\x1b[?65;4c") { PendingInput = pending, CanQuery = !unavailable };
-        var result = TerminalFeatureProbe.Read(transport, new(80, 24));
+        var result = TerminalFeatureProbe.Read(transport, new(80, 24), TestContext.CancellationToken);
         Assert.IsFalse(result.Attempted);
         Assert.AreEqual(0, transport.Reads);
         Assert.AreEqual(0, transport.ModeEntries);
@@ -133,7 +133,7 @@ public sealed class TerminalProbeTests {
     public void UnfencedRepliesNeverEnableGraphicsOrRetry() {
         var transport = new Transport("\x1b[6;20;10t");
         var cache = new TerminalProbeCache();
-        var first = cache.Get(new(80, 24), () => TerminalFeatureProbe.Read(transport, new(80, 24)));
+        var first = cache.Get(new(80, 24), () => TerminalFeatureProbe.Read(transport, new(80, 24), TestContext.CancellationToken));
         Assert.IsTrue(first.Attempted);
         Assert.IsFalse(first.Completed);
         Assert.IsFalse(first.Sixel);
@@ -154,7 +154,7 @@ public sealed class TerminalProbeTests {
         Assert.IsFalse(skipped.Attempted);
         var completed = cache.Get(size, () => {
             calls++;
-            return TerminalFeatureProbe.Read(new Transport("\x1b[?65;4c"), size);
+            return TerminalFeatureProbe.Read(new Transport("\x1b[?65;4c"), size, TestContext.CancellationToken);
         });
         Assert.AreSame(completed, cache.Get(size, () => throw new InvalidOperationException("Repeated query.")));
         cache.Get(new(100, 40), () => { calls++; return completed; });
@@ -167,7 +167,7 @@ public sealed class TerminalProbeTests {
     [DataRow("\x1b[6;0;10t\x1b[?65;4c")]
     public void MalformedReportsDoNotInventGeometryOrReplayDigits(string response) {
         var transport = new Transport(response);
-        var result = TerminalFeatureProbe.Read(transport, new(80, 24));
+        var result = TerminalFeatureProbe.Read(transport, new(80, 24), TestContext.CancellationToken);
         Assert.IsNull(result.Metrics);
         Assert.HasCount(0, transport.Preserved);
         if (!result.Completed) { Assert.IsFalse(result.Sixel); }
@@ -176,11 +176,11 @@ public sealed class TerminalProbeTests {
     [TestMethod]
     public void UserKeysDuringProbeArePreservedAndResponseSizeIsBounded() {
         var typed = new Transport("x\x1b[?65;4c");
-        Assert.IsFalse(TerminalFeatureProbe.Read(typed, new(80, 24)).Completed);
+        Assert.IsFalse(TerminalFeatureProbe.Read(typed, new(80, 24), TestContext.CancellationToken).Completed);
         Assert.AreEqual(1, typed.Reads);
         Assert.AreEqual('x', typed.Preserved.Single().KeyChar);
         var oversized = new Transport("\x1b[?" + new string('1', 5000)) { AdvanceOnRead = false };
-        Assert.IsFalse(TerminalFeatureProbe.Read(oversized, new(80, 24)).Completed);
+        Assert.IsFalse(TerminalFeatureProbe.Read(oversized, new(80, 24), TestContext.CancellationToken).Completed);
         Assert.AreEqual(4097, oversized.Reads);
         Assert.AreEqual(1, oversized.ModeExits);
     }
@@ -192,7 +192,7 @@ public sealed class TerminalProbeTests {
         Assert.ThrowsExactly<OperationCanceledException>(() => TerminalFeatureProbe.Read(canceled, new(80, 24), stop.Token));
         Assert.AreEqual(1, canceled.ModeExits);
         var failure = new Transport("") { FailWrite = true };
-        Assert.IsFalse(TerminalFeatureProbe.Read(failure, new(80, 24)).Completed);
+        Assert.IsFalse(TerminalFeatureProbe.Read(failure, new(80, 24), TestContext.CancellationToken).Completed);
         Assert.AreEqual(1, failure.ModeExits);
     }
 
@@ -225,21 +225,23 @@ public sealed class TerminalProbeTests {
         options.Graphics.PreferredProtocol = TerminalGraphicsProtocol.Sixel;
         options.Graphics.ForcedPixelMetrics = new(800, 480, 10, 20, 80, 24);
         using var session = Terminal.Open(backend, options, force: true);
-        using var fallback = Assert.IsInstanceOfType<SixelChartPresenter>(ChartPresenters.Create(session.Instance));
+        using var fallback = Assert.IsInstanceOfType<SixelChartPresenter>(ChartPresenters.Create(session.Instance, cancellationToken: TestContext.CancellationToken));
         Assert.AreEqual(options.Graphics.ForcedPixelMetrics, fallback.Capabilities.PixelMetrics);
         TerminalFeatureProbe.Record(session.Instance, TerminalProbeResult.Incomplete);
-        using var incomplete = Assert.IsInstanceOfType<SixelChartPresenter>(ChartPresenters.Create(session.Instance));
+        using var incomplete = Assert.IsInstanceOfType<SixelChartPresenter>(ChartPresenters.Create(session.Instance, cancellationToken: TestContext.CancellationToken));
         Assert.IsTrue(incomplete.CanPresent(TerminalGraphicsCapabilities.None));
         var positive = Observe(session.Instance, "\x1b[6;12;4t\x1b[?65;3;4c");
-        using var sixel = Assert.IsInstanceOfType<SixelChartPresenter>(ChartPresenters.Create(session.Instance));
+        using var sixel = Assert.IsInstanceOfType<SixelChartPresenter>(ChartPresenters.Create(session.Instance, cancellationToken: TestContext.CancellationToken));
         Assert.IsTrue(sixel.CanPresent(TerminalGraphicsCapabilities.None));
         Assert.AreEqual(positive.Metrics, sixel.Capabilities.PixelMetrics);
-        using var regis = Assert.IsInstanceOfType<RegisChartPresenterPrototype>(ChartPresenters.Create(session.Instance, ChartRenderer.Regis));
+        using var regis = Assert.IsInstanceOfType<RegisChartPresenterPrototype>(ChartPresenters.Create(session.Instance, ChartRenderer.Regis, cancellationToken: TestContext.CancellationToken));
         Assert.IsTrue(regis.CanPresent(TerminalGraphicsCapabilities.None));
         Observe(session.Instance, "\x1b[?65;4c");
-        Assert.IsNull(ChartPresenters.Create(session.Instance, ChartRenderer.Regis), "Sixel does not imply ReGIS.");
+        Assert.IsNull(ChartPresenters.Create(session.Instance, ChartRenderer.Regis, cancellationToken: TestContext.CancellationToken), "Sixel does not imply ReGIS.");
         Observe(session.Instance, "\x1b[?65;1c");
-        Assert.IsNull(ChartPresenters.Create(session.Instance));
-        Assert.IsNull(ChartPresenters.Create(session.Instance, ChartRenderer.Regis));
+        Assert.IsNull(ChartPresenters.Create(session.Instance, cancellationToken: TestContext.CancellationToken));
+        Assert.IsNull(ChartPresenters.Create(session.Instance, ChartRenderer.Regis, cancellationToken: TestContext.CancellationToken));
     }
+
+    public TestContext TestContext { get; set; }
 }

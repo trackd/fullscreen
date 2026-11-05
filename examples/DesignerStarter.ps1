@@ -7,14 +7,14 @@ Return the definition to the designer or run a small form with simulated graph d
 fullscreen theme name or custom palette.
 .PARAMETER Minimal
 Hide surrounding application chrome.
-.PARAMETER DefinitionOnly
+.PARAMETER DefinitionsOnly
 Return the layout without running the application.
 .EXAMPLE
-./DesignerStarter.ps1 -DefinitionOnly | Show-TuiDesigner
+./DesignerStarter.ps1 -DefinitionsOnly | Show-TuiDesigner
 .EXAMPLE
 ./DesignerStarter.ps1
 .OUTPUTS
-The layout with DefinitionOnly; otherwise the accepted name.
+The layout with DefinitionsOnly; otherwise the accepted name. DefinitionOnly remains an alias.
 .NOTES
 Import fullscreen first. Samples are simulated and require no external source.
 #>
@@ -22,7 +22,8 @@ Import fullscreen first. Samples are simulated and require no external source.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [switch]$DefinitionOnly
+    [Alias('DefinitionOnly')]
+    [switch]$DefinitionsOnly
 )
 $ErrorActionPreference = 'Stop'
 # Layout contains only data. IDs identify events; Bind names identify state values.
@@ -81,7 +82,7 @@ $layout = New-TuiDefinition -Title 'My first TUI' -State @{
         }
     )
 }
-if ($DefinitionOnly.IsPresent) {
+if ($DefinitionsOnly.IsPresent) {
     return $layout
 }
 # Callbacks run on the UI thread. Keep them short; assign command output to variables.
@@ -114,8 +115,18 @@ $onTick = {
     $state.phase += 0.1
     $state.load = 50 + 35 * [Math]::Sin($state.phase)
 }
-$result = $layout |
-    Invoke-Tui -Theme $Theme -Minimal:$Minimal.IsPresent -OnEvent $onEvent -OnTick $onTick -TickInterval 250
+$options = @{
+    OnEvent = $onEvent
+    OnTick = $onTick
+    TickInterval = 250
+}
+if ($PSBoundParameters.ContainsKey('Theme')) {
+    $options.Theme = $Theme
+}
+if ($PSBoundParameters.ContainsKey('Minimal')) {
+    $options.Minimal = $Minimal.IsPresent
+}
+$result = $layout | Invoke-Tui @options
 if (-not $result.Cancelled) {
     $result.Value
 }

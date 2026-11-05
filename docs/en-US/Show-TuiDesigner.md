@@ -74,6 +74,7 @@ Show-TuiDesigner -Path ./tool.tui.json
 F5 rebuilds the live preview.
 
 ```powershell
+New-TuiDefinition -Title 'Editable tool' | Export-TuiDefinition -Path './tool[1].tui.json' -Script:$false -Force
 Show-TuiDesigner -LiteralPath './tool[1].tui.json' -Theme 'Light Modern'
 ```
 

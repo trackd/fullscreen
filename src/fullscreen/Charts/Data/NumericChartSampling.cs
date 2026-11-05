@@ -6,7 +6,7 @@ internal readonly record struct NumericChartSamples(ChartDataSeries Series, Char
     internal double? ValueAt(int index) =>
         Series.Points[index].Y;
     internal double PositionAt(int index) =>
-        Chart.Fraction(Series.Points[index].X, Range.MinX, Range.MaxX);
+        ChartMath.Fraction(Series.Points[index].X, Range.MinX, Range.MaxX);
 }
 
 internal static class NumericChartSampling {

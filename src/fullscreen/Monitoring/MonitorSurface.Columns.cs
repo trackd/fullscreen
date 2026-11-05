@@ -69,7 +69,7 @@ public sealed partial class MonitorSurface {
         _firstProcessColumn = Math.Clamp(_firstProcessColumn, 0, Math.Max(0, selected.Count - 1));
         int x = 1;
         for (int i = _firstProcessColumn; i < selected.Count && x < Bounds.Width - 1; i++) {
-            var (Header, Width, Priority, Sort) = DescribeColumn(selected[i]);
+            var (Header, Width, _, Sort) = DescribeColumn(selected[i]);
             _columns[_columnCount++] = new(x, Math.Min(Width, Math.Max(1, Bounds.Width - 1 - x)), Header, Sort, selected[i]);
             x += Width + 1;
         }

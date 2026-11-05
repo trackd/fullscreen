@@ -46,7 +46,8 @@ internal sealed partial class ObjectChartApp {
         XenoAtom.Terminal.UI.Color? Color,
         bool Visible,
         ChartLineStyle LineStyle,
-        ChartMarker Marker
+        ChartMarker Marker,
+        ChartSeriesRole Role = ChartSeriesRole.Auto
     );
     private int[] SourceIndices(ChartSelection? selection) {
         if (selection is null || selection.SeriesIndex < 0 || selection.SeriesIndex >= Surface.Series.Length) {
@@ -70,7 +71,7 @@ internal sealed partial class ObjectChartApp {
 
             foreach (var point in series.Span) {
                 double x = Surface.GraphType == GraphKind.HorizontalBars ? point.Y ?? double.NaN : point.X;
-                if (!double.IsFinite(x) || x < range.MinimumX || x > range.MaximumX) {
+                if (!double.IsFinite(x) || x > range.MaximumX || (Surface.GraphType == GraphKind.Gantt ? point.Upper ?? x : x) < range.MinimumX) {
                     continue;
                 }
 
@@ -138,7 +139,7 @@ internal sealed partial class ObjectChartApp {
         string[] previousY = YProperties;
         Data = next;
         try {
-            if (_automaticY && YProperties.Length == 0) {
+            if (_automaticY && YProperties.Length == 0 && Surface.GraphType != GraphKind.Gantt) {
                 YProperties = next.DefaultYProperty is { } initialY ? [initialY] : [];
             }
 
@@ -272,6 +273,7 @@ internal sealed partial class ObjectChartApp {
         var chart = Surface.Plot;
         TextBox xmin = new(chart.MinimumX?.ToString(CultureInfo.InvariantCulture) ?? ""), xmax = new(chart.MaximumX?.ToString(CultureInfo.InvariantCulture) ?? "");
         TextBox ymin = new(chart.Minimum?.ToString(CultureInfo.InvariantCulture) ?? ""), ymax = new(chart.Maximum?.ToString(CultureInfo.InvariantCulture) ?? "");
+        TextBox reversal = new(chart.ReversalAmount.ToString(CultureInfo.InvariantCulture));
         string[] scales = Enum.GetNames<ChartScale>();
         Select<string> xscale = new(scales, (int)chart.XAxis.Scale), yscale = new(scales, (int)chart.YAxis.Scale);
         TextBox xlabel = new(chart.XAxis.Title), ylabel = new(chart.YAxis.Title), xunit = new(chart.XAxis.Unit), yunit = new(chart.YAxis.Unit);
@@ -282,6 +284,7 @@ internal sealed partial class ObjectChartApp {
             Field("X maximum", xmax),
             Field("Y minimum", ymin),
             Field("Y maximum", ymax),
+            Field("Kagi reversal (price units)", reversal),
             Field("X scale", xscale),
             Field("Y scale", yscale),
             Field("X title", xlabel),
@@ -298,6 +301,7 @@ internal sealed partial class ObjectChartApp {
                 MaximumX = Number(xmax),
                 Minimum = Number(ymin),
                 Maximum = Number(ymax),
+                ReversalAmount = Number(reversal) ?? throw new ArgumentException("Kagi reversal amount cannot be blank."),
                 XAxis = chart.XAxis with {
                     Scale = (ChartScale)xscale.SelectedIndex,
                     Title = xlabel.Text ?? "",
@@ -369,10 +373,12 @@ internal sealed partial class ObjectChartApp {
         Menu(Surface.Series.Select((series, index) => new MenuItem(series.Property, () => {
             var visible = new CheckBox("Visible", series.Visible);
             var color = new TextBox(series.Color is { } value ? ColorText(value) : "");
+            var role = new Select<string>(Enum.GetNames<ChartSeriesRole>(), (int)series.Role);
             Select<string> line = new(Enum.GetNames<ChartLineStyle>(), (int)series.LineStyle), marker = new(Enum.GetNames<ChartMarker>(), (int)series.Marker);
             Editor(series.Property.Length == 0 ? "Series" : series.Property, [
                 visible,
                 Field("Color (#RRGGBB)", color),
+                Field("Column/line role", role),
                 Field("Line", line),
                 Field("Marker", marker)
             ], () => {
@@ -380,11 +386,24 @@ internal sealed partial class ObjectChartApp {
                     ParseColor(color.Text),
                     visible.IsChecked,
                     (ChartLineStyle)line.SelectedIndex,
-                    (ChartMarker)marker.SelectedIndex
+                    (ChartMarker)marker.SelectedIndex,
+                    (ChartSeriesRole)role.SelectedIndex
                 );
                 Replot();
             });
         })));
+    internal void SetSeriesRoles(ChartSeriesRole[] roles) {
+        if (roles.Length != Surface.Series.Length || roles.Any(role => !Enum.IsDefined(role))) {
+            throw new ArgumentException("SeriesRole must contain one Auto, Column or Line role per selected Y property.");
+        }
+
+        for (int index = 0; index < roles.Length; index++) {
+            var series = Surface.Series[index];
+            _styles[series.Property] = new(series.Color, series.Visible, series.LineStyle, series.Marker, roles[index]);
+        }
+
+        Replot();
+    }
     private void EditAnnotations() {
         var type = new Select<string>([
             "Horizontal threshold",

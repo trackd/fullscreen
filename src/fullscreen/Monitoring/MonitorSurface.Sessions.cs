@@ -70,11 +70,11 @@ public sealed partial class MonitorSurface {
             choices.Add(new TextBlock("No Windows sessions with a verified logon time are available. Logoff is unavailable on other platforms.") { Wrap = true });
         }
         choices.Add(new HStack(
-            new Button("Mark all").Click(() => { foreach (var entry in checks) { entry.Check.IsChecked = true; } }),
-            new Button("Clear marks").Click(() => { foreach (var entry in checks) { entry.Check.IsChecked = false; } })));
+            new Button("Mark all").Click(() => { foreach (var (Login, Check) in checks) { Check.IsChecked = true; } }),
+            new Button("Clear marks").Click(() => { foreach (var (Login, Check) in checks) { Check.IsChecked = false; } })));
         var rows = new VStack();
-        foreach (var entry in checks) {
-            rows.Add(entry.Check);
+        foreach (var (Login, Check) in checks) {
+            rows.Add(Check);
         }
         choices.Add(rows);
         var selectionMessage = new TextBlock("") { Wrap = true };
@@ -88,8 +88,8 @@ public sealed partial class MonitorSurface {
                     selectionMessage.Text = "Select at least one session to log off.";
                     return;
                 }
-                foreach (var entry in checks) {
-                    _markedSessions.Remove(SessionKey(entry.Login));
+                foreach (var (Login, Check) in checks) {
+                    _markedSessions.Remove(SessionKey(Login));
                 }
                 foreach (var login in selected) {
                     _markedSessions[SessionKey(login)] = login;

@@ -17,16 +17,21 @@ internal readonly record struct ChartPrimitive(
     int Series = 0,
     byte Shade = 0,
     string? Text = null,
-    Color? Color = null
+    Color? Color = null,
+    int Point = -1,
+    int Stroke = 1
 );
 /// <summary>Shared geometry for additional plot styles and overlays, independent of terminal protocol.</summary>
 internal sealed class ChartGeometry {
     internal List<ChartPrimitive> Primitives { get; } = [];
 
     private readonly Dictionary<double, (double Positive, double Negative)> _stacks = [];
+    private readonly List<ChartMarket.PriceSegment> _prices = [];
+    private readonly ChartFlame _flame = new();
     internal static bool IsAdditional(GraphKind kind) =>
         kind is GraphKind.HorizontalBars or GraphKind.StackedBars or GraphKind.Heatmap
-        or GraphKind.ErrorBars;
+        or GraphKind.ErrorBars or GraphKind.Waterfall or GraphKind.Marimekko or GraphKind.Kagi or GraphKind.Flamegraph or GraphKind.Gantt
+        or GraphKind.FlowChart or GraphKind.NetworkDiagram or GraphKind.StackedArea or GraphKind.PercentStackedArea;
     internal void Build(
         ChartDataSeries[] data,
         ChartRange range,
@@ -36,18 +41,58 @@ internal sealed class ChartGeometry {
         IEnumerable<ChartThreshold>? thresholds = null,
         IEnumerable<ChartAnnotation>? annotations = null,
         ChartAxis? xAxis = null,
-        ChartAxis? yAxis = null
+        ChartAxis? yAxis = null,
+        double reversalAmount = 1,
+        bool flameReverse = false,
+        int flameFocus = -1,
+        int flameFrameHeight = 1,
+        int taskOffset = 0
     ) {
         Primitives.Clear();
         _stacks.Clear();
         if (width <= 0 || height <= 0) {
             return;
         }
+        if (ChartTopology.Supports(kind)) {
+            if (data.Length != 2 || data[0].Topology is not { } graph) {
+                throw new ArgumentException("Relationship diagrams require separate node and edge collections.");
+            }
+            ChartDiagram.Build(Primitives, graph, kind, width, height);
+            return;
+        }
+        if (kind == GraphKind.Gantt) {
+            ChartGantt.Build(Primitives, data, range, width, height, flameFrameHeight, taskOffset);
+            return;
+        }
+        if (ChartGrid.Supports(kind)) {
+            ChartGrid.Build(Primitives, data, range, kind, width, height);
+        }
+        if (ChartStackedArea.Supports(kind)) {
+            ChartStackedArea.Build(Primitives, data, range, kind, width, height);
+        }
+        if (ChartMarket.Supports(kind)) {
+            ChartMarket.Validate(data, kind);
+            if (kind == GraphKind.Marimekko) {
+                ChartMarket.BuildMekko(Primitives, data, width, height);
+            }
+            else {
+                int columns = ChartMarket.BuildKagi(_prices, data, reversalAmount);
+                ChartMarket.MapKagi(Primitives, _prices, columns, range, width, height);
+            }
+        }
+        if (kind == GraphKind.Flamegraph) {
+            if (data.Length != 1 || data[0].FlameTree is not { } tree) {
+                throw new ArgumentException("Flamegraph requires hierarchical frames and exclusive self weights.");
+            }
+            if (data[0].Visible) {
+                _flame.Build(Primitives, tree, width, height, flameReverse, flameFocus, flameFrameHeight);
+            }
+        }
 
         int X(double value) =>
-            (int)Math.Round(Chart.Fraction(value, range.MinX, range.MaxX) * (width - 1));
+            (int)Math.Round(ChartMath.Fraction(value, range.MinX, range.MaxX) * (width - 1));
         int Y(double value) =>
-            height - 1 - (int)Math.Round(Chart.Fraction(value, range.MinY, range.MaxY) * (height - 1));
+            height - 1 - (int)Math.Round(ChartMath.Fraction(value, range.MinY, range.MaxY) * (height - 1));
         void Line(
             int x0,
             int y0,
@@ -74,29 +119,8 @@ internal sealed class ChartGeometry {
                 series,
                 shade
             ));
-        double minValue = double.PositiveInfinity, maxValue = double.NegativeInfinity;
-        if (kind == GraphKind.Heatmap) {
-            foreach (var series in data) {
-                foreach (var point in series.Span) {
-                    if (point.Y is { } value) {
-                        minValue = Math.Min(minValue, value);
-                        maxValue = Math.Max(maxValue, value);
-                    }
-                }
-            }
-        }
-
-        for (int seriesIndex = 0; seriesIndex < data.Length; seriesIndex++) {
+        for (int seriesIndex = 0; !ChartGrid.Supports(kind) && !ChartStackedArea.Supports(kind) && seriesIndex < data.Length; seriesIndex++) {
             var series = data[seriesIndex];
-            int visibleColumns = 0;
-            if (kind == GraphKind.Heatmap) {
-                foreach (var candidate in series.Span) {
-                    if (candidate.X >= range.MinX && candidate.X <= range.MaxX) {
-                        visibleColumns++;
-                    }
-                }
-            }
-
             foreach (var point in series.Span) {
                 if (point.Y is not { } value) {
                     continue;
@@ -104,7 +128,7 @@ internal sealed class ChartGeometry {
 
                 if (kind == GraphKind.HorizontalBars) {
                     int span = Math.Max(1, height / Math.Max(1, series.Count) - 1);
-                    int center = Chart.BarCenter(point.X, 0, Math.Max(0, series.Count - 1), height, series.Count);
+                    int center = ChartMath.BarCenter(point.X, 0, Math.Max(0, series.Count - 1), height, series.Count);
                     int top = Math.Clamp(center - span / 2, 0, height - span);
                     int from = top + seriesIndex * span / Math.Max(1, data.Length), to = top + (seriesIndex + 1) * span / Math.Max(1, data.Length) - 1;
                     Rect(X(0), from, X(value), Math.Max(from, to), seriesIndex);
@@ -115,23 +139,9 @@ internal sealed class ChartGeometry {
                     double end = start + value;
                     _stacks[point.X] = value >= 0 ? (end, stack.Negative) : (stack.Positive, end);
                     int span = Math.Max(1, width / Math.Max(1, series.Count) - 1);
-                    int center = Chart.BarCenter(point.X, range.MinX, range.MaxX, width, series.Count);
+                    int center = ChartMath.BarCenter(point.X, range.MinX, range.MaxX, width, series.Count);
                     int left = Math.Clamp(center - span / 2, 0, width - span);
                     Rect(left, Y(start), left + span - 1, Y(end), seriesIndex);
-                }
-                else if (kind == GraphKind.Heatmap) {
-                    int span = Math.Max(1, width / Math.Max(1, visibleColumns));
-                    int center = Chart.BarCenter(point.X, range.MinX, range.MaxX, width, visibleColumns);
-                    int left = Math.Clamp(center - span / 2, 0, width - span), right = left + span - 1;
-                    int top = seriesIndex * height / Math.Max(1, data.Length), bottom = (seriesIndex + 1) * height / Math.Max(1, data.Length) - 1;
-                    Rect(
-                        left,
-                        top,
-                        Math.Max(left, right),
-                        Math.Max(top, bottom),
-                        seriesIndex,
-                        (byte)(2 + Math.Round(Chart.Fraction(value, minValue, maxValue) * 4))
-                    );
                 }
                 else if (kind == GraphKind.ErrorBars) {
                     double lower = point.Lower ?? value, upper = point.Upper ?? value;

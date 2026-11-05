@@ -79,8 +79,8 @@ dotnet_diagnostic.IDE0011.severity = warning
 # Collector namespaces are shared with the host and intentionally span folders.
 dotnet_style_namespace_match_folder = false
 
-[src/fullscreen/Charts/disabled/**]
-# Parked implementations retain the chart namespace for reuse.
+[src/fullscreen/Charts/**]
+# Responsibility folders retain the shared public chart namespace.
 dotnet_style_namespace_match_folder = false
 
 [tests/**/*.cs]

@@ -26,9 +26,12 @@ public sealed record TuiReply(IDictionary? State = null, bool Close = false, obj
 public sealed partial class CustomTuiApp : IFullscreenApp {
     private sealed record Binding(TuiNode Node, Visual Control) {
         public object? Last { get; set; }
+        public object? LastEdges { get; set; }
     }
 
     private readonly List<Binding> _bindings = [];
+    private readonly Dictionary<Charts.Chart, Charts.ChartTopology> _diagramSnapshots = [];
+    private readonly Dictionary<Charts.Chart, Charts.ChartDataSeries[]> _objectSeriesSnapshots = [];
     private readonly List<Visual> _chrome = [];
     private readonly List<(TuiNode Node, ReusableTable Table)> _tables = [];
     private readonly List<(TuiNode Node, ReusableObjectExplorer Explorer)> _explorers = [];
@@ -111,11 +114,11 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
 
         _toastHost = new ToastHost(content);
         var viewport = new ScrollViewer(_toastHost) {
-                HorizontalScrollEnabled = false,
-                VerticalScrollEnabled = content.VerticalAlignment != Align.Stretch,
-                HorizontalAlignment = Align.Stretch,
-                VerticalAlignment = Align.Stretch
-            };
+            HorizontalScrollEnabled = false,
+            VerticalScrollEnabled = content.VerticalAlignment != Align.Stretch,
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch
+        };
         if (document.Title.Length > 0) {
             _chrome.Add(new TextBlock(document.Title));
             _chrome.Add(new Rule());
@@ -262,22 +265,48 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                 control = new ProgressBar(value is null ? node.Value : Math.Clamp(Number(value), 0, 1));
                 break;
             case "Chart":
-                if (IsChartCollection(value)) {
+                if (IsChartCollection(value) || node.YProperty.Length > 0 || Charts.ChartTopology.Supports(Enum.Parse<Charts.GraphKind>(node.GraphKind, true))) {
                     var numericChart = new Charts.Chart {
                         Title = node.Text,
                         Minimum = node.Minimum,
                         Maximum = node.Maximum,
+                        ReversalAmount = node.ReversalAmount,
+                        FlameReverse = node.FlameReverse,
+                        FlameFrameRows = node.FlameFrameRows,
                         GraphKind = Enum.Parse<Charts.GraphKind>(node.GraphKind, true),
+                        ShowLegend = node.ShowLegend,
+                        ShowAxes = node.ShowAxes,
                         MinHeight = node.Height ?? 8
                     };
-                    ReplaceChartValues(numericChart, value);
+                    if (Charts.ChartTopology.Supports(numericChart.GraphKind)) {
+                        ReplaceChartTopology(numericChart, node, value);
+                    }
+                    else if (numericChart.GraphKind == Charts.GraphKind.Gantt) {
+                        ReplaceChartTasks(numericChart, node, value);
+                    }
+                    else if (numericChart.GraphKind == Charts.GraphKind.Flamegraph) {
+                        ReplaceChartFrames(numericChart, node, value);
+                    }
+                    else if (node.YProperty.Length > 0) {
+                        ReplaceChartObjectSeries(numericChart, node, value);
+                    }
+                    else {
+                        ReplaceChartValues(numericChart, value);
+                    }
                     control = numericChart;
                 }
                 else {
+                    if (Charts.ChartMarket.Supports(Enum.Parse<Charts.GraphKind>(node.GraphKind, true))
+                        || Charts.ChartStackedArea.Supports(Enum.Parse<Charts.GraphKind>(node.GraphKind, true))
+                        || node.GraphKind.Equals("Flamegraph", StringComparison.OrdinalIgnoreCase) || node.GraphKind.Equals("Gantt", StringComparison.OrdinalIgnoreCase)) {
+                        throw new ArgumentException("Marimekko/Kagi and stacked areas require ordered collections; Flamegraph/Gantt require frame/task records. These kinds cannot use the scalar history adapter.");
+                    }
                     var chart = new Charts.HistoryChart {
                         Title = node.Text,
                         Maximum = node.Maximum ?? 0,
                         GraphKind = Enum.Parse<Charts.GraphKind>(node.GraphKind, true),
+                        ShowLegend = node.ShowLegend,
+                        ShowAxes = node.ShowAxes,
                         MinHeight = node.Height ?? 8
                     };
                     chart.Add(value is null ? null : Number(value), DateTimeOffset.UtcNow);
@@ -381,9 +410,19 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
 
         Controls.Add(node.Id, control);
+        if (control is Charts.Chart frameChart && (node.YProperty.Length > 0 || Charts.ChartTopology.Supports(frameChart.GraphKind) || frameChart.GraphKind is Charts.GraphKind.Flamegraph or Charts.GraphKind.Gantt)) {
+            frameChart.SelectionChanged += selection => {
+                if (node.SelectionBind.Length > 0) {
+                    State[node.SelectionBind] = selection.Source;
+                }
+                _events.Enqueue(new(node.Id, "Selection", selection.Source));
+            };
+            frameChart.PointInvoked += selection => _events.Enqueue(new(node.Id, "Invoke", selection.Source));
+        }
         if (node.Bind.Length != 0) {
             var binding = new Binding(node, control) {
-                Last = control is ReusableTable or ReusableObjectExplorer ? value : Read(control)
+                Last = control is ReusableTable or ReusableObjectExplorer ? value : Read(control),
+                LastEdges = node.EdgeBind.Length == 0 ? null : State[node.EdgeBind]
             };
             if (IsInput(control) && !State.ContainsKey(node.Bind)) {
                 State[node.Bind] = binding.Last;
@@ -409,6 +448,64 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         value is System.Management.Automation.PSObject wrapped ? wrapped.BaseObject : value;
     private static bool IsChartCollection(object? value) =>
         UnwrapChartValue(value) is IEnumerable and not string;
+    private void ReplaceChartTopology(Charts.Chart chart, TuiNode node, object? value) {
+        List<object> Rows(object? collection, string field) {
+            if (_preview && collection is null) {
+                return [];
+            }
+            if (UnwrapChartValue(collection) is not IEnumerable rows || collection is string) {
+                throw new ArgumentException($"Relationship Chart requires separate node/edge collections; '{field}' is not a collection.");
+            }
+            var result = new List<object>();
+            foreach (var row in rows) {
+                result.Add(row ?? throw new ArgumentException($"Diagram '{field}' records cannot be null."));
+            }
+            return result;
+        }
+        var topology = Charts.ChartTopology.FromObjects(Rows(value, node.Bind), Rows(State[node.EdgeBind], node.EdgeBind));
+        if (_diagramSnapshots.TryGetValue(chart, out var previous)
+            && previous.Nodes.AsSpan().SequenceEqual(topology.Nodes) && previous.Edges.AsSpan().SequenceEqual(topology.Edges)) {
+            return;
+        }
+        _ = topology.Layout(chart.GraphKind);
+        chart.SetData(topology.Data);
+        _diagramSnapshots[chart] = topology;
+    }
+    private static void ReplaceChartTasks(Charts.Chart chart, TuiNode node, object? value) {
+        if (UnwrapChartValue(value) is not IEnumerable values || value is string) {
+            throw new ArgumentException("Gantt requires a collection of absolute task intervals.");
+        }
+        var rows = new List<System.Management.Automation.PSObject>();
+        foreach (var item in values) {
+            rows.Add(item is null ? throw new ArgumentException("Gantt task rows cannot be null.") : System.Management.Automation.PSObject.AsPSObject(item));
+        }
+        if (rows.Count == 0) {
+            chart.SetData(new Charts.ChartSchedule([]).Data);
+            return;
+        }
+        var data = new Charts.ObjectChartData(rows);
+        chart.SetData(data.ProjectTasks(node.StartProperty, node.EndProperty, node.TaskNameProperty,
+            node.ProgressProperty.Length == 0 ? null : node.ProgressProperty, [.. Enumerable.Range(0, rows.Count)]));
+    }
+    private static void ReplaceChartFrames(Charts.Chart chart, TuiNode node, object? value) {
+        if (UnwrapChartValue(value) is not IEnumerable values || value is string) {
+            throw new ArgumentException("Flamegraph requires a collection of FrameId/ParentId/self-weight records.");
+        }
+        var rows = new List<System.Management.Automation.PSObject>();
+        foreach (var item in values) {
+            if (item is null) {
+                throw new ArgumentException("Flamegraph frame rows cannot be null.");
+            }
+            rows.Add(System.Management.Automation.PSObject.AsPSObject(item));
+        }
+        if (rows.Count == 0) {
+            chart.SetData(new Charts.ChartFlameTree([]).Data);
+            return;
+        }
+        var data = new Charts.ObjectChartData(rows);
+        chart.SetData(data.ProjectFrames(node.FrameIdProperty, node.ParentIdProperty, node.FrameNameProperty.Length == 0 ? null : node.FrameNameProperty,
+            data.Resolve(node.WeightProperty), [.. Enumerable.Range(0, rows.Count)]));
+    }
     private static void ReplaceChartValues(Charts.Chart chart, object? value) {
         chart.Values.Clear();
         if (UnwrapChartValue(value) is IEnumerable values and not string) {
@@ -419,6 +516,63 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         else {
             chart.Values.Add(value is null ? double.NaN : Number(value));
         }
+    }
+
+    private void ReplaceChartObjectSeries(Charts.Chart chart, TuiNode node, object? value) {
+        if (_preview && value is null) {
+            chart.SetData([.. node.YProperty.Select(name => new Charts.ChartDataSeries(name, []))]);
+            return;
+        }
+        if (UnwrapChartValue(value) is not IEnumerable values || value is string) {
+            throw new ArgumentException("Chart YProperty requires a collection of numeric object rows.");
+        }
+        var sources = new List<object>();
+        var rows = new List<System.Management.Automation.PSObject>();
+        foreach (var item in values) {
+            if (item is null) {
+                throw new ArgumentException("Chart object-series rows cannot be null.");
+            }
+            if (rows.Count >= 1_000_000) {
+                throw new ArgumentException("Chart object-series binding supports at most 1,000,000 rows.");
+            }
+            sources.Add(item);
+            rows.Add(System.Management.Automation.PSObject.AsPSObject(item));
+        }
+        var projection = rows.Count == 0 ? null : new Charts.ObjectChartData(rows);
+        var data = projection is null
+            ? [.. node.YProperty.Select(name => new Charts.ChartDataSeries(name, []))]
+            : projection.Project(node.XProperty.Length == 0 ? null : node.XProperty, node.YProperty);
+        if (projection is not null && !_objectSeriesSnapshots.ContainsKey(chart)) {
+            chart.XAxis = chart.XAxis with { Scale = projection.ScaleFor(node.XProperty.Length == 0 ? null : node.XProperty) };
+        }
+        for (int series = 0; series < data.Length; series++) {
+            data[series].SourceIndex = series;
+            data[series].Role = node.SeriesRole.Length == 0 ? Charts.ChartSeriesRole.Auto
+                : Enum.Parse<Charts.ChartSeriesRole>(node.SeriesRole[series], true);
+            for (int index = 0; index < data[series].Points.Length; index++) {
+                data[series].Points[index] = data[series].Points[index] with { Source = sources[index] };
+            }
+        }
+        var previous = _objectSeriesSnapshots.GetValueOrDefault(chart) ?? [];
+        bool unchanged = previous.Length == data.Length;
+        for (int series = 0; series < data.Length; series++) {
+            if (series >= previous.Length || previous[series].Property != data[series].Property) {
+                unchanged = false;
+                continue;
+            }
+            data[series].Visible = previous[series].Visible;
+            data[series].Color = previous[series].Color;
+            data[series].LineStyle = previous[series].LineStyle;
+            data[series].Marker = previous[series].Marker;
+            // Retain user-edited presentation when the sampled source rows change.
+            data[series].Role = previous[series].Role;
+            unchanged &= previous[series].Span.SequenceEqual(data[series].Span);
+        }
+        if (unchanged) {
+            return;
+        }
+        chart.SetData(data);
+        _objectSeriesSnapshots[chart] = data;
     }
 
     private static bool Flag(object? value) =>
@@ -539,11 +693,27 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
             }
 
             if (binding.Control is Charts.Chart numericChart) {
-                if (_chartSampleDue || !ReferenceEquals(value, binding.Last)) {
-                    ReplaceChartValues(numericChart, value);
+                object? edges = binding.Node.EdgeBind.Length == 0 ? null : State[binding.Node.EdgeBind];
+                if (_chartSampleDue || !ReferenceEquals(value, binding.Last) || !ReferenceEquals(edges, binding.LastEdges)) {
+                    if (Charts.ChartTopology.Supports(numericChart.GraphKind)) {
+                        ReplaceChartTopology(numericChart, binding.Node, value);
+                    }
+                    else if (numericChart.GraphKind == Charts.GraphKind.Gantt) {
+                        ReplaceChartTasks(numericChart, binding.Node, value);
+                    }
+                    else if (numericChart.GraphKind == Charts.GraphKind.Flamegraph) {
+                        ReplaceChartFrames(numericChart, binding.Node, value);
+                    }
+                    else if (binding.Node.YProperty.Length > 0) {
+                        ReplaceChartObjectSeries(numericChart, binding.Node, value);
+                    }
+                    else {
+                        ReplaceChartValues(numericChart, value);
+                    }
                 }
 
                 binding.Last = value;
+                binding.LastEdges = edges;
                 continue;
             }
 

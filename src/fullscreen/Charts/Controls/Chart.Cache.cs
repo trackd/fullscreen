@@ -61,7 +61,7 @@ public partial class Chart {
         for (int index = 0; index < data.Length; index++) {
             var series = data[index];
             if (GraphKind == GraphKind.Histogram) {
-                results[index] = new(Histogram(series.Span, range.MinX, range.MaxX, bins), []);
+                results[index] = new(ChartStatistics.Histogram(series.Span, range.MinX, range.MaxX, bins), []);
             }
             else {
                 int count = 0;

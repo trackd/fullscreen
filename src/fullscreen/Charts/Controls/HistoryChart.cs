@@ -28,6 +28,16 @@ public sealed partial class HistoryChart : Themes.ThemedSurface {
         get => _trend.GraphKind;
         set => _trend.GraphKind = value;
     }
+    /// <summary>Gets or sets whether the history chart shows its series legend.</summary>
+    public bool ShowLegend {
+        get => _trend.ShowLegend;
+        set => _trend.ShowLegend = value;
+    }
+    /// <summary>Gets or sets whether the history chart shows supported coordinate axes.</summary>
+    public bool ShowAxes {
+        get => _trend.ShowAxes;
+        set => _trend.ShowAxes = value;
+    }
     private bool Distribution => _trend.UseSixel && GraphKind is GraphKind.Histogram or GraphKind.BoxPlot;
 
     /// <summary>Appends a timestamped sample and refreshes the displayed history.</summary>

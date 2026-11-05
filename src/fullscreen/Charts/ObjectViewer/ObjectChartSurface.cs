@@ -13,7 +13,8 @@ namespace fullscreen.Charts;
 internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
     private ObjectChartData _data;
     internal Chart Plot { get; } = new() {
-        ShowAxes = true
+        ShowAxes = true,
+        ShowLegend = true
     };
     internal ChartDataSeries[] Series { get; private set; } = [];
     internal ChartPoint[] ValidPoints { get; private set; } = [];
@@ -38,6 +39,7 @@ internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
     internal bool Accepted { get; private set; }
 
     internal Action? ChooseX, ChooseY, ChooseType, ChooseFilter, Inspect, ShowData;
+    internal Action? SearchFrames;
     [Bindable]
     private partial int Revision { get; set; }
 
@@ -221,6 +223,30 @@ internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
         if (e.RoutingPhase == RoutingPhase.Preview) {
             return;
         }
+        if (GraphType == GraphKind.Flamegraph) {
+            switch (e.Text.ToLowerInvariant()) {
+                case "f":
+                    Plot.FocusSelectedFrame();
+                    e.Handled = true;
+                    return;
+                case "u":
+                    Plot.FlameParent();
+                    e.Handled = true;
+                    return;
+                case "r":
+                    Plot.FlameReverse = !Plot.FlameReverse;
+                    e.Handled = true;
+                    return;
+                case "0":
+                    Plot.FlameFocusId = "";
+                    e.Handled = true;
+                    return;
+                case "/":
+                    SearchFrames?.Invoke();
+                    e.Handled = true;
+                    return;
+            }
+        }
 
         switch (e.Text.ToLowerInvariant()) {
             case "x":
@@ -291,25 +317,12 @@ internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
         buffer.PopClip();
     }
 
-    private Style Ink(int index) =>
-        Palette.Body.WithForeground((index % 5) switch {
-            0 => Palette.Accent,
-            1 => Palette.Success,
-            2 => Palette.Warning,
-            3 => Palette.Purple,
-            _ => Palette.Error
-        });
     protected override void RenderOverride(CellBuffer buffer) {
         _ = Revision;
         int titleColumn = MenuColumn(MenuLabels.Length);
         Write(buffer, titleColumn, 0, Title + " · " + GraphType, Palette.AccentStyle);
-        int legend = titleColumn + Title.Length + GraphType.ToString().Length + 5;
-        foreach (var series in Series) {
-            Write(buffer, legend, 0, series.Property, Ink(Array.IndexOf(Series, series)));
-            legend += series.Property.Length + 3;
-        }
-
-        string axis = GraphType is GraphKind.Histogram or GraphKind.BoxPlot ? "Y distribution" : XProperty ?? "input order";
+        string axis = GraphType == GraphKind.Gantt ? "absolute schedule time (UTC)" : GraphType == GraphKind.Flamegraph ? "alphabetical stack population (not time)"
+            : GraphType is GraphKind.Histogram or GraphKind.BoxPlot ? "Y distribution" : XProperty ?? "input order";
         string count = VisibleIndices.Length == _data.Objects.Count ? $"{_data.Objects.Count} objects" : $"{VisibleIndices.Length}/{_data.Objects.Count} objects";
         string details = $"{count} · {FilterLabel} · X: {axis}";
         if (_message.Length > 0) {
@@ -317,7 +330,7 @@ internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
         }
 
         string selected = "";
-        if (Plot.Selection is { } selection) {
+        if ((GraphType == GraphKind.Flamegraph ? Plot.FlameHover ?? Plot.Selection : Plot.Selection) is { } selection) {
             selected = $" · {selection.Label} · {selection.SeriesName}: {selection.Y.ToString("G6", CultureInfo.InvariantCulture)}";
         }
         else if (SelectedIndex >= 0) {
@@ -346,7 +359,9 @@ internal sealed partial class ObjectChartSurface : Themes.ThemedSurface {
                 buffer,
                 0,
                 Bounds.Height - 1,
-                PassThru ? "Q/F10 return rows · Esc cancel · Double-click/D details · T data · Wheel zoom · Shift-drag range" : "Double-click/D details · T data · Wheel zoom · Shift-drag range · Q quit",
+                GraphType == GraphKind.Flamegraph ? "Click zoom · Hover details · U parent · 0 roots · R reverse · / search · D details · T data · Q quit"
+                    : GraphType == GraphKind.Gantt ? "Up/Down/Page lanes · Wheel/+/- time zoom · [/] pan · 0 reset · Click/D task · Shift-drag intervals · Q quit"
+                    : PassThru ? "Q/F10 return rows · Esc cancel · Double-click/D details · T data · Wheel zoom · Shift-drag range" : "Double-click/D details · T data · Wheel zoom · Shift-drag range · Q quit",
                 Palette.Muted
             );
         }

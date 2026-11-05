@@ -95,8 +95,8 @@ Run a custom TUI created with Fullscreen's designer.
 Edit the layout with Show-TuiDesigner; wire behavior in Handler and OnTick below.
 .PARAMETER Theme
 Fullscreen theme name.
-.PARAMETER DefinitionOnly
-Return the layout for designer editing without opening a terminal.
+.PARAMETER DefinitionsOnly
+Return the layout for designer editing without opening a terminal. DefinitionOnly is a compatibility alias.
 .PARAMETER State
 Runtime state overriding layout defaults. Live objects belong here.
 .PARAMETER Minimal
@@ -106,11 +106,11 @@ Milliseconds between callbacks and binding updates, from 16 to 60000.
 .EXAMPLE
 ./MyTui.ps1
 .EXAMPLE
-./MyTui.ps1 -DefinitionOnly | Show-TuiDesigner
+./MyTui.ps1 -DefinitionsOnly | Show-TuiDesigner
 .EXAMPLE
 ./MyTui.ps1 -Minimal -State @{ message = 'Ready' } -TickInterval 500
 .OUTPUTS
-The definition with DefinitionOnly; otherwise the accepted handler result.
+The definition with DefinitionsOnly; otherwise the accepted handler result.
 .NOTES
 Requires Fullscreen. The layout contains data; callbacks stay in this script.
 #>
@@ -120,20 +120,23 @@ param(
     [object]$Theme = 'Default',
 
     [Parameter()]
-    [switch]$DefinitionOnly,
+    [switch]$Minimal,
+
+    [Parameter()]
+    [Alias('DefinitionOnly')]
+    [switch]$DefinitionsOnly,
 
     [Parameter()]
     [hashtable]$State = @{},
-
-    [Parameter()]
-    [switch]$Minimal,
 
     [Parameter()]
     [ValidateRange(16, 60000)]
     [int]$TickInterval = 250
 )
 $ErrorActionPreference = 'Stop'
-if (-not (Get-Module fullscreen)) { Import-Module fullscreen -ErrorAction Stop }
+if (-not (Get-Module fullscreen)) {
+    Import-Module fullscreen -ErrorAction Stop
+}
 
 # Linked exports load a sibling PSD1 or JSON file. Re-exporting updates that layout
 # and keeps this script intact. Inline exports embed the layout below; export future
@@ -151,7 +154,11 @@ $definition =
         }
 
         script.AppendLine(layoutFile is null ? "$layout = $definition | New-TuiDefinition" : "$layout = $definition");
-        script.AppendLine("if ($DefinitionOnly.IsPresent) { return $layout }");
+        script.AppendLine("""
+if ($DefinitionsOnly.IsPresent) {
+    return $layout
+}
+""");
         script.AppendLine();
         script.AppendLine("# STATE REFERENCE · generated for this layout");
         script.AppendLine("# State keys are application-defined; add your own keys as your tool grows.");
@@ -215,12 +222,26 @@ $onTick = {
 }
 # Use try/finally to stop and dispose any workers YOU create when the TUI closes.
 # See examples/BackgroundJob.ps1 in Fullscreen's repository for that pattern.
-$result = $layout | Invoke-Tui -Theme $Theme -Minimal:$Minimal.IsPresent -State $State -Handler $handler -OnTick $onTick -TickInterval $TickInterval
+$options = @{
+    State = $State
+    Handler = $handler
+    OnTick = $onTick
+    TickInterval = $TickInterval
+}
+if ($PSBoundParameters.ContainsKey('Theme')) {
+    $options.Theme = $Theme
+}
+if ($PSBoundParameters.ContainsKey('Minimal')) {
+    $options.Minimal = $Minimal.IsPresent
+}
+$result = $layout | Invoke-Tui @options
 # F12 toggles diagnostics (timings, repaint, focus); F10 exits from any control.
 # Result fields: State = final state snapshot; Value = your handler's return value;
 # Cancelled = $true after Escape/cancellation, $false after a successful close;
 # LastEvent = last processed control ID (may be empty if no control event occurred).
-if (-not $result.Cancelled) { $result.Value }
+if (-not $result.Cancelled) {
+    $result.Value
+}
 """);
         return script.ToString();
     }
@@ -230,6 +251,7 @@ if (-not $result.Cancelled) { $result.Value }
             "TextBox" or "TextArea" => "editable string; user edits update state before Change.",
             "CheckBox" => "boolean ($true / $false); toggles update state before Change.",
             "Select" => "selected string from this control's Items; changes update state before Change.",
+            "Chart" when node.YProperty.Length > 0 => "object rows projected by XProperty/YProperty into named series; selections retain the original record.",
             "Chart" => "numeric collection with NaN/null gaps; scalar bindings use timestamped history.",
             "Progress" => "number from 0 to 1 (fraction complete).",
             "NumberBox" or "Slider" => "number; edits update state before Change.",

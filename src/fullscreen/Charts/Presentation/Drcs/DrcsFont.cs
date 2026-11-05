@@ -208,7 +208,7 @@ internal sealed class DrcsFont {
 
         int n = font.Levels, side = n + 1;
         double Height(double value) =>
-            Chart.Fraction(value, minimum, maximum) * top;
+            ChartMath.Fraction(value, minimum, maximum) * top;
         int Q(double local) =>
             (int)Math.Round(Math.Clamp(local, 0, H) * n / H);
         switch (kind) {
@@ -301,7 +301,7 @@ internal sealed class DrcsFont {
                         if (source.ValueAt(i) is double value && value >= minimum && value <= maximum) {
                             peak = Math.Max(
                                 peak,
-                                ++bins[Math.Min(binCount - 1, (int)(Chart.Fraction(value, minimum, maximum) * binCount))]
+                                ++bins[Math.Min(binCount - 1, (int)(ChartMath.Fraction(value, minimum, maximum) * binCount))]
                             );
                         }
                     }
@@ -343,9 +343,9 @@ internal sealed class DrcsFont {
             return;
         }
 
-        var box = SixelPlot.Summarize(scratch.AsSpan(0, count));
+        var box = ChartStatistics.Summarize(scratch.AsSpan(0, count));
         int X(double value) =>
-            (int)Math.Round(Chart.Fraction(value, source.Range.MinX, source.Range.MaxX) * (columns - 1));
+            (int)Math.Round(ChartMath.Fraction(value, source.Range.MinX, source.Range.MaxX) * (columns - 1));
         int center = rows / 2, upper = rows / 4, lower = Math.Max(upper, rows * 3 / 4);
         int left = X(box.FirstQuartile), right = X(box.ThirdQuartile), low = X(box.LowerWhisker), high = X(box.UpperWhisker);
         var masks = new byte[columns * rows];

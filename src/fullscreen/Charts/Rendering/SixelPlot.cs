@@ -1,34 +1,6 @@
 using XenoAtom.Terminal.UI;
 
 namespace fullscreen.Charts;
-/// <summary>Shape used by the pixel chart backend.</summary>
-public enum GraphKind {
-    /// <summary>Connects adjacent numeric points with line segments, leaving gaps for missing values.</summary>
-    Line,
-    /// <summary>Fills the area between a series and its baseline.</summary>
-    Area,
-    /// <summary>Draws vertical bars for individual values.</summary>
-    Bars,
-    /// <summary>Connects values with horizontal and vertical step segments.</summary>
-    Step,
-    /// <summary>Draws independent markers at explicit X and Y coordinates.</summary>
-    Scatter,
-    /// <summary>Draws a stem from the baseline to each data point.</summary>
-    Stem,
-    /// <summary>Groups values into bins and displays their frequencies.</summary>
-    Histogram,
-    /// <summary>Summarizes a distribution using quartiles and whiskers.</summary>
-    BoxPlot,
-    /// <summary>Draws horizontal bars for individual values.</summary>
-    HorizontalBars,
-    /// <summary>Stacks series values within each bar category.</summary>
-    StackedBars,
-    /// <summary>Maps numeric values to colored cells arranged by series and position.</summary>
-    Heatmap,
-    /// <summary>Draws values with associated lower and upper uncertainty bounds.</summary>
-    ErrorBars
-}
-
 /// <summary>Reusable indexed chart raster, with palette-based antialiasing.</summary>
 internal sealed partial class SixelPlot {
     private byte[] _pixels = [];
@@ -41,21 +13,20 @@ internal sealed partial class SixelPlot {
     private bool _hasPalette;
     public int Width { get; private set; }
     public int Height { get; private set; }
-    public ReadOnlySpan<byte> Pixels => _pixels.AsSpan(0, Width * Height);
+    public ReadOnlySpan<byte> Pixels =>
+        _pixels.AsSpan(0, Width * Height);
     public Color[] Palette { get; } = new Color[7];
     internal int BandCount => (Height + 5) / 6;
 
-    internal ReadOnlySpan<byte> Plane(
-        int band,
-        int color
-    ) =>
+    internal ReadOnlySpan<byte> Plane(int band,int color) =>
         _planes.AsSpan((band * InkColors + color - 1) * Width, Width);
     internal (int First, int Last) Columns(int band, int color) {
         int index = band * InkColors + color - 1;
         return (_firstColumns[index], _lastColumns[index]);
     }
 
-    internal ReadOnlySpan<int> HistogramCounts => _bins.AsSpan(0, BinCount);
+    internal ReadOnlySpan<int> HistogramCounts =>
+        _bins.AsSpan(0, BinCount);
     private int BinCount { get; set; }
 
     private void Initialize(int width, int height, Color ink, Color background, GraphKind kind) {
@@ -106,40 +77,14 @@ internal sealed partial class SixelPlot {
 
         BinCount = 0;
         for (int y = 0; y < height; y++) {
-            if (y == height - 1 || y == height / 2 || y == 0) {
+            if (!ChartTopology.Supports(kind) && !ChartRadial.IsRadial(kind) &&
+            kind is not (GraphKind.Heatmap or GraphKind.Flamegraph or GraphKind.Gantt) &&
+            (y == height - 1 || y == height / 2 || y == 0)) {
                 for (int x = 0; x < width; x++) {
                     SetPixel(x, y, 1);
                 }
             }
         }
-    }
-
-    // Linear-interpolated quantiles (R type 7); Tukey whiskers stop at observed
-    // values within 1.5 IQR. The span is plot-owned scratch storage, sorted in place.
-    internal static BoxSummary Summarize(Span<double> values) {
-        if (values.IsEmpty) {
-            throw new ArgumentException("Expected observations.", nameof(values));
-        }
-
-        values.Sort();
-        double q1 = Quantile(values, .25), median = Quantile(values, .5), q3 = Quantile(values, .75), iqr = q3 - q1;
-        int lower = 0, upper = values.Length - 1;
-        while (lower < upper && values[lower] < q1 - 1.5 * iqr) {
-            lower++;
-        }
-
-        while (upper > lower && values[upper] > q3 + 1.5 * iqr) {
-            upper--;
-        }
-
-        return new(q1, median, q3, values[lower], values[upper]);
-    }
-
-    private static double Quantile(ReadOnlySpan<double> sorted, double fraction) {
-        double position = (sorted.Length - 1) * fraction;
-        int index = (int)position;
-        double weight = position - index;
-        return sorted[index] * (1 - weight) + sorted[Math.Min(index + 1, sorted.Length - 1)] * weight;
     }
 
     private void Stroke(double x0, double y0, double x1, double y1) {
@@ -186,11 +131,3 @@ internal sealed partial class SixelPlot {
         _lastColumns[plane] = Math.Max(_lastColumns[plane], x + 1);
     }
 }
-
-internal readonly record struct BoxSummary(
-    double FirstQuartile,
-    double Median,
-    double ThirdQuartile,
-    double LowerWhisker,
-    double UpperWhisker
-);

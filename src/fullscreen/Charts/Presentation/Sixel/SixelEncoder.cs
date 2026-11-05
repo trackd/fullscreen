@@ -7,24 +7,31 @@ internal sealed class SixelEncoder {
     private readonly StringBuilder _output = new(4096);
     private byte[] _planes = [];
     private readonly Color[] _chartPalette = new Color[SixelPlot.InkColors + 1];
-    private string? _chartPaletteHeader;
+    private readonly StringBuilder _chartPaletteHeader = new(256);
     internal string EncodePlot(SixelPlot plot) {
+        return BuildPlot(plot).ToString();
+    }
+
+    internal void EncodePlot(SixelPlot plot, SixelPayload destination) {
+        destination.CopyFrom(BuildPlot(plot));
+    }
+
+    private StringBuilder BuildPlot(SixelPlot plot) {
         var output = _output;
         output.Clear();
         // These six theme-derived shades are known before any pixels are drawn.
         // Cache their protocol definitions until the theme/ink changes.
-        if (_chartPaletteHeader is null || !plot.Palette.AsSpan().SequenceEqual(_chartPalette)) {
+        if (_chartPaletteHeader.Length == 0 || !plot.Palette.AsSpan().SequenceEqual(_chartPalette)) {
+            _chartPaletteHeader.Clear();
             for (int color = 1; color <= SixelPlot.InkColors; color++) {
-                var rgb = plot.Palette[color].ToRgb();
-                output.Append('#').Append(color).Append(";2;").Append((rgb.R * 100 + 127) / 255).Append(';').Append((rgb.G * 100 + 127) / 255).Append(';').Append((rgb.B * 100 + 127) / 255);
+                _chartPaletteHeader.AddSixelColor(color, plot.Palette[color]);
             }
 
-            _chartPaletteHeader = output.ToString();
-            plot.Palette.CopyTo(_chartPalette, 0);
-            output.Clear();
+            plot.Palette.AsSpan().CopyTo(_chartPalette);
         }
 
-        output.Append("\x1bP0;1q\"1;1;").Append(plot.Width).Append(';').Append(plot.Height).Append(_chartPaletteHeader);
+        output.AddSixelCanvas(plot.Width, plot.Height);
+        output.Append(_chartPaletteHeader);
         int emittedBand = 0, selectedColor = SixelPlot.InkColors;
         bool painted = false;
         for (int band = 0; band < plot.BandCount; band++) {
@@ -60,24 +67,24 @@ internal sealed class SixelEncoder {
                 first = false;
                 painted = true;
                 if (selectedColor != color) {
-                    output.Append('#').Append(color);
+                    output.SelectSixelColor(color);
                     selectedColor = color;
                 }
 
-                Repeat(output, 0, left);
+                output.AddSixelRepeat(0, left);
                 int previous = -1, count = 0;
                 foreach (byte mask in plane[left..right]) {
                     if (mask == previous) {
                         count++;
                     }
                     else {
-                        Repeat(output, previous, count);
+                        output.AddSixelRepeat(previous, count);
                         previous = mask;
                         count = 1;
                     }
                 }
 
-                Repeat(output, previous, count);
+                output.AddSixelRepeat(previous, count);
             }
         }
 
@@ -85,7 +92,8 @@ internal sealed class SixelEncoder {
             output.Append('?');
         }
 
-        return output.Append("\x1b\\").ToString();
+        output.EndSixel();
+        return output;
     }
 
     public static string Encode(
@@ -96,6 +104,14 @@ internal sealed class SixelEncoder {
     ) =>
         new SixelEncoder().EncodeFrame(pixels, width, height, palette);
     public string EncodeFrame(ReadOnlySpan<byte> pixels, int width, int height, ReadOnlySpan<Color> palette) {
+        return BuildFrame(pixels, width, height, palette).ToString();
+    }
+
+    internal void EncodeFrame(ReadOnlySpan<byte> pixels, int width, int height, ReadOnlySpan<Color> palette, SixelPayload destination) {
+        destination.CopyFrom(BuildFrame(pixels, width, height, palette));
+    }
+
+    private StringBuilder BuildFrame(ReadOnlySpan<byte> pixels, int width, int height, ReadOnlySpan<Color> palette) {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
         if (pixels.Length != checked(width * height) || palette.Length is < 1 or > 256) {
@@ -111,7 +127,8 @@ internal sealed class SixelEncoder {
 
         // Declare the complete canvas on every frame, but only transmit graph ink.
         // Palette index zero is absent; the presenter owns erasing previous ink.
-        output.Append("\x1bP0;1q\"1;1;").Append(width).Append(';').Append(height);
+        output.AddSixelCanvas(width, height);
+
         Span<byte> defined = stackalloc byte[256];
         defined.Clear();
         Span<int> lastColumn = stackalloc int[256];
@@ -142,8 +159,7 @@ internal sealed class SixelEncoder {
 
                     // Define registers at their first source pixel; no palette discovery pass.
                     if (defined[color] == 0) {
-                        var rgb = palette[color].ToRgb();
-                        output.Append('#').Append(color).Append(";2;").Append((rgb.R * 100 + 127) / 255).Append(';').Append((rgb.G * 100 + 127) / 255).Append(';').Append((rgb.B * 100 + 127) / 255);
+                        output.AddSixelColor(color, palette[color]);
                         defined[color] = 1;
                         selectedColor = color;
                     }
@@ -168,7 +184,7 @@ internal sealed class SixelEncoder {
                 first = false;
                 painted = true;
                 if (selectedColor != color) {
-                    output.Append('#').Append(color);
+                    output.SelectSixelColor(color);
                     selectedColor = color;
                 }
 
@@ -180,13 +196,13 @@ internal sealed class SixelEncoder {
                         count++;
                     }
                     else {
-                        Repeat(output, previous, count);
+                        output.AddSixelRepeat(previous, count);
                         previous = mask;
                         count = 1;
                     }
                 }
 
-                Repeat(output, previous, count);
+                output.AddSixelRepeat(previous, count);
             }
         }
 
@@ -195,21 +211,7 @@ internal sealed class SixelEncoder {
             output.Append('?');
         }
 
-        return output.Append("\x1b\\").ToString();
-    }
-
-    private static void Repeat(StringBuilder output, int mask, int count) {
-        if (count == 0) {
-            return;
-        }
-
-        char value = (char)(63 + mask);
-        int digits = count < 10 ? 1 : count < 100 ? 2 : count < 1000 ? 3 : count < 10000 ? 4 : count < 100000 ? 5 : count < 1000000 ? 6 : count < 10000000 ? 7 : count < 100000000 ? 8 : count < 1000000000 ? 9 : 10;
-        if (count > digits + 2) {
-            output.Append('!').Append(count).Append(value);
-        }
-        else {
-            output.Append(value, count);
-        }
+        output.EndSixel();
+        return output;
     }
 }

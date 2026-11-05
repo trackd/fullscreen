@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Xml.Linq;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Rendering;
 
@@ -24,6 +25,11 @@ public partial class Chart {
     public ChartSettings CaptureSettings() =>
         new() {
             GraphKind = GraphKind,
+            ReversalAmount = ReversalAmount,
+            FlameReverse = FlameReverse,
+            FlameFrameRows = FlameFrameRows,
+            FlameFocusId = FlameFocusId,
+            TaskOffset = TaskOffset,
             Title = Title,
             Minimum = Minimum,
             Maximum = Maximum,
@@ -36,7 +42,7 @@ public partial class Chart {
             Thresholds = [.. Thresholds],
             Annotations = [.. Annotations],
             SelectedRange = SelectedRange,
-            Series = [.. GetData(Math.Max(1, Bounds.Width)).Select(series => new ChartSeriesStyle(series.Property, series.Color, series.Visible, series.LineStyle, series.Marker))]
+            Series = [.. GetData(Math.Max(1, Bounds.Width)).Select(series => new ChartSeriesStyle(series.Property, series.Color, series.Visible, series.LineStyle, series.Marker) { Role = series.Role })]
         };
     /// <summary>Applies presentation settings while retaining the chart&apos;s data source.</summary>
     /// <param name="settings">The chart presentation settings to apply.</param>
@@ -51,7 +57,7 @@ public partial class Chart {
         }
 
         if (settings.Series.Any(style => style is null || style.Name is null || !Enum.IsDefined(style.LineStyle)
-            || !Enum.IsDefined(style.Marker))
+            || !Enum.IsDefined(style.Marker) || !Enum.IsDefined(style.Role))
             || settings.XAxis.Unit is null
             || settings.YAxis.Unit is null
             || settings.XAxis.Title is null
@@ -101,9 +107,36 @@ public partial class Chart {
             throw new ArgumentException("This chart uses linear or categorical Y positions.");
         }
 
+        ChartRadial.ValidateOptions(settings.GraphKind, settings.Minimum, settings.Maximum,
+            settings.XAxis.Scale, settings.YAxis.Scale, settings.Thresholds.Length, settings.Annotations.Length);
+        ChartGrid.ValidateOptions(settings.GraphKind, settings.XAxis.Scale, settings.YAxis.Scale);
+        ChartStackedArea.ValidateOptions(settings.GraphKind, settings.Minimum, settings.Maximum, settings.XAxis.Scale, settings.YAxis.Scale);
+        ChartMarket.ValidateOptions(settings.GraphKind, settings.ReversalAmount, settings.Minimum, settings.Maximum,
+            settings.MinimumX, settings.MaximumX, settings.XAxis.Scale, settings.YAxis.Scale, settings.Thresholds.Length, settings.Annotations.Length);
+        if (settings.GraphKind == GraphKind.Flamegraph && (settings.Minimum is not null || settings.Maximum is not null
+            || settings.MinimumX is not null || settings.MaximumX is not null || settings.XAxis.Scale == ChartScale.Logarithmic
+            || settings.YAxis.Scale == ChartScale.Logarithmic || settings.Thresholds.Length != 0 || settings.Annotations.Length != 0
+            || settings.SelectedRange is not null || settings.FlameFocusId is null)) {
+            throw new ArgumentException("Flamegraph uses intrinsic inclusive widths/depth rows, not numeric bounds/overlays.");
+        }
+        if (settings.FlameFrameRows is < 1 or > 8) {
+            throw new ArgumentException("FlameFrameRows must be between 1 and 8 terminal rows.");
+        }
         _ = settings.XAxis.FormatValue(1);
+        if (settings.GraphKind == GraphKind.Gantt) {
+            ChartSchedule.ValidateOptions(settings.Minimum, settings.Maximum, settings.XAxis.Scale, settings.YAxis.Scale, settings.Thresholds.Length, settings.Annotations.Length, settings.TaskOffset);
+        }
         _ = settings.YAxis.FormatValue(1);
+        if (ChartTopology.Supports(settings.GraphKind)) {
+            ChartTopology.ValidateOptions(settings.Minimum, settings.Maximum, settings.MinimumX, settings.MaximumX,
+                settings.XAxis.Scale, settings.YAxis.Scale, settings.Thresholds.Length, settings.Annotations.Length, settings.SelectedRange);
+        }
         GraphKind = settings.GraphKind;
+        ReversalAmount = settings.ReversalAmount;
+        FlameReverse = settings.FlameReverse;
+        FlameFrameRows = settings.FlameFrameRows;
+        FlameFocusId = settings.FlameFocusId;
+        TaskOffset = settings.TaskOffset;
         Title = settings.Title;
         Minimum = settings.Minimum;
         Maximum = settings.Maximum;
@@ -162,9 +195,10 @@ public partial class Chart {
         };
         snapshot.SetData(GetData(columns));
         snapshot.ApplySettings(CaptureSettings());
+        snapshot.FlameSearch = FlameSearch;
         snapshot.SelectedIndex = SelectedIndex;
         var buffer = VisualSnapshotRenderer.Render(snapshot, columns, rows);
-        string svg = CellBufferSvgExporter.Export(
+        var svg = PrepareSvgText(CellBufferSvgExporter.Export(
             buffer,
             CellBufferSvgExportOptions.Default with {
                 CellWidthPx = cellWidth,
@@ -172,20 +206,29 @@ public partial class Chart {
                 AutoCrop = false,
                 FillBackground = true
             }
-        );
-        if (snapshot.PlotBounds.Width <= 0 || snapshot.PlotBounds.Height <= 0) {
-            return svg;
+        ), cellHeight);
+        var plotBounds = snapshot.PlotBounds;
+        if (plotBounds.Width <= 0 || plotBounds.Height <= 0) {
+            return svg.ToString(SaveOptions.DisableFormatting);
         }
 
         var plot = new SixelPlot();
-        snapshot.DrawPixels(plot, snapshot.PlotBounds.Width * cellWidth, snapshot.PlotBounds.Height * cellHeight);
+        snapshot.DrawPixels(plot, plotBounds.Width * cellWidth, plotBounds.Height * cellHeight);
         var exclusions = snapshot.AnnotationBounds.ToArray();
-        var pixels = new StringBuilder($"<g transform=\"translate({snapshot.PlotBounds.X * cellWidth} {snapshot.PlotBounds.Y * cellHeight})\" shape-rendering=\"crispEdges\">");
-        bool Hidden(
-            int x,
-            int y
-        ) =>
-            exclusions.Any(area => area.Contains(snapshot.PlotBounds.X + x / cellWidth, snapshot.PlotBounds.Y + y / cellHeight));
+        var pixels = new StringBuilder($"<g transform=\"translate({plotBounds.X * cellWidth} {plotBounds.Y * cellHeight})\" shape-rendering=\"crispEdges\">");
+        bool Hidden(int x, int y) {
+            if (exclusions.Length == 0) {
+                return false;
+            }
+            int cellX = plotBounds.X + x / cellWidth;
+            int cellY = plotBounds.Y + y / cellHeight;
+            foreach (var area in exclusions) {
+                if (area.Contains(cellX, cellY)) {
+                    return true;
+                }
+            }
+            return false;
+        }
         for (int y = 0; y < plot.Height; y++) {
             for (int x = 0; x < plot.Width;) {
                 byte color = plot.Pixels[y * plot.Width + x];
@@ -208,7 +251,52 @@ public partial class Chart {
             }
         }
 
-        return svg.Replace("</svg>", pixels.Append("</g></svg>").ToString(), StringComparison.Ordinal);
+        pixels.Append("</g>");
+        var root = svg.Root!;
+        var raster = XElement.Parse(pixels.ToString());
+        foreach (var element in raster.DescendantsAndSelf()) {
+            element.Name = root.Name.Namespace + element.Name.LocalName;
+        }
+        root.Add(raster);
+        var text = root.Elements(root.Name.Namespace + "text").ToArray();
+        foreach (var element in text) {
+            element.Remove();
+            root.Add(element);
+        }
+        return svg.ToString(SaveOptions.DisableFormatting);
+    }
+
+    private static XDocument PrepareSvgText(string svg, int cellHeight) {
+        var document = XDocument.Parse(svg);
+        var root = document.Root!;
+        var ns = root.Name.Namespace;
+        var style = root.Element(ns + "style")!;
+        // Font size is an em, not a cell's line-box height. Center a smaller em
+        // within the row and clip font fallback glyphs to that row.
+        style.Value = style.Value
+            .Replace($"font-size:{cellHeight}px", $"font-size:{(cellHeight * .75).ToString(CultureInfo.InvariantCulture)}px", StringComparison.Ordinal)
+            .Replace("dominant-baseline:text-before-edge", "dominant-baseline:central", StringComparison.Ordinal);
+        var definitions = new XElement(ns + "defs");
+        var rows = new HashSet<int>();
+        foreach (var text in root.Elements(ns + "text")) {
+            int y = int.Parse(text.Attribute("y")!.Value, CultureInfo.InvariantCulture);
+            text.SetAttributeValue("y", y + cellHeight / 2d);
+            text.SetAttributeValue("lengthAdjust", "spacingAndGlyphs");
+            string id = "chart-text-row-" + y.ToString(CultureInfo.InvariantCulture);
+            text.SetAttributeValue("clip-path", $"url(#{id})");
+            if (rows.Add(y)) {
+                definitions.Add(new XElement(ns + "clipPath",
+                    new XAttribute("id", id),
+                    new XAttribute("clipPathUnits", "userSpaceOnUse"),
+                    new XElement(ns + "rect",
+                        new XAttribute("x", 0),
+                        new XAttribute("y", y),
+                        new XAttribute("width", root.Attribute("width")!.Value),
+                        new XAttribute("height", cellHeight))));
+            }
+        }
+        root.AddFirst(definitions);
+        return document;
     }
 
     /// <summary>Exports the pixel plot as PNG; use SVG when axes and terminal text are required.</summary>

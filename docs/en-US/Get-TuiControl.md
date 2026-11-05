@@ -44,8 +44,7 @@ Native widgets keep their XenoAtom names. FTable and FLogView are fullscreen's
 object table and log view; Table and LogControl are the native widgets. Grid
 accepts Options.Rows and Options.Columns arrays such as @('Auto', '*', '2*').
 UserList shows login sessions; set IncludeProcesses to add account processes and
-process actions. Run examples/ControlGallery.ps1 or examples/NativeControls.ps1
-from the repository to see the controls with sample data.
+process actions. Use New-TuiControl to compose controls with native sample data.
 
 ## EXAMPLES
 
@@ -122,10 +121,8 @@ Returns Name, Category, Description, ReusedBy, Binding, Events, Properties and L
 
 ## NOTES
 
-All output is native PowerShell data. Saved definitions contain only layout and default values; keep live objects in Invoke-Tui -State. See the custom TUI cookbook for composition examples.
+All output is native PowerShell data. Saved definitions contain only layout and default values; keep live objects in Invoke-Tui -State.
 
 ## RELATED LINKS
 
 [Invoke-Tui](Invoke-Tui.md)
-
-[Custom TUI examples](../../README.md#examples)

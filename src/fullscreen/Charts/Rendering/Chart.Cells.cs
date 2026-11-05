@@ -1,11 +1,16 @@
 using System.Globalization;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Rendering;
+using static fullscreen.Charts.ChartMath;
 
 namespace fullscreen.Charts;
 
 public partial class Chart {
     private void DrawCells(CellBuffer buffer, ChartDataSeries[] data) {
+        if (ChartRadial.IsRadial(GraphKind)) {
+            DrawRadialCells(buffer, data);
+            return;
+        }
         if (ChartGeometry.IsAdditional(GraphKind)) {
             DrawGeometryCells(buffer, data);
             return;
@@ -46,7 +51,7 @@ public partial class Chart {
             }
         }
 
-        ChartLineStyle lineStyle = ChartLineStyle.Solid;
+        ChartLineStyle lineStyle;
         void Line(int x0, int y0, int x1, int y1, Style ink, bool area = false) {
             int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
             int dy = -Math.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1, error = dx + dy;
@@ -79,10 +84,17 @@ public partial class Chart {
             }
         }
 
-        for (int seriesIndex = 0; seriesIndex < data.Length; seriesIndex++) {
+        var columns = new ChartColumns(data, GraphKind);
+        for (int draw = 0; draw < data.Length * (GraphKind == GraphKind.ColumnLine ? 2 : 1); draw++) {
+            int seriesIndex = draw % data.Length;
             var series = data[seriesIndex];
+            GraphKind kind = ChartColumns.Kind(series, GraphKind, seriesIndex);
+            if (GraphKind == GraphKind.ColumnLine && (draw < data.Length) != (kind == GraphKind.Bars)) {
+                continue;
+            }
+
             lineStyle = series.LineStyle;
-            Style ink = Ink(seriesIndex);
+            Style ink = Palette.Body.WithForeground(series.Color ?? DefaultSeriesColor(series.SourceIndex < 0 ? seriesIndex : series.SourceIndex));
             if (GraphKind == GraphKind.Histogram) {
                 int[] counts = distributions[seriesIndex].Bins;
                 for (int bin = 0; bin < counts.Length; bin++) {
@@ -104,8 +116,9 @@ public partial class Chart {
                     continue;
                 }
 
-                double q1 = Quantile(values, .25), median = Quantile(values, .5), q3 = Quantile(values, .75), iqr = q3 - q1;
-                double low = values.First(value => value >= q1 - 1.5 * iqr), high = values.Last(value => value <= q3 + 1.5 * iqr);
+                var box = ChartStatistics.SummarizeSorted(values);
+                double q1 = box.FirstQuartile, median = box.Median, q3 = box.ThirdQuartile;
+                double low = box.LowerWhisker, high = box.UpperWhisker;
                 int row = top + Math.Min(
                     height - 1,
                     seriesIndex * Math.Max(1, height / data.Length) + height / (data.Length * 2)
@@ -135,27 +148,25 @@ public partial class Chart {
                     continue;
                 }
 
-                int x = GraphKind == GraphKind.Bars ? BarCenter(point.X, minX, maxX, width, series.Count) : X(point.X), y = Y(point.Y.Value);
-                if (GraphKind == GraphKind.Bars) {
-                    int span = Math.Max(1, width / Math.Max(1, series.Count) - 1);
-                    int start = Math.Clamp(x - span / 2, left, left + width - span);
-                    int from = start + seriesIndex * span / data.Length, to = start + (seriesIndex + 1) * span / data.Length;
-                    for (int column = from; column < Math.Max(from + 1, to); column++) {
+                int x = GraphKind is GraphKind.Bars or GraphKind.ColumnLine ? columns.Center(point.X, range, width) : X(point.X), y = Y(point.Y.Value);
+                if (kind == GraphKind.Bars) {
+                    var bounds = columns.Bounds(seriesIndex, point.X, range, width);
+                    for (int column = bounds.X; column < bounds.Right; column++) {
                         Vertical(column, Y(0), y, "█", ink);
                     }
                 }
-                else if (GraphKind is GraphKind.Stem or GraphKind.Area) {
-                    Vertical(x, Y(0), y, GraphKind == GraphKind.Area ? "░" : "│", ink);
+                else if (kind is GraphKind.Stem or GraphKind.Area) {
+                    Vertical(x, Y(0), y, kind == GraphKind.Area ? "░" : "│", ink);
                 }
 
-                if (previous is { } before && GraphKind is GraphKind.Line or GraphKind.Area or GraphKind.Step) {
-                    int oldX = X(before.X), oldY = Y(before.Y!.Value);
-                    if (GraphKind == GraphKind.Step) {
+                if (previous is { } before && kind is GraphKind.Line or GraphKind.Area or GraphKind.Step) {
+                    int oldX = GraphKind == GraphKind.ColumnLine ? columns.Center(before.X, range, width) : X(before.X), oldY = Y(before.Y!.Value);
+                    if (kind == GraphKind.Step) {
                         Line(oldX, oldY, x, oldY, ink);
                         Line(x, oldY, x, y, ink);
                     }
                     else {
-                        Line(oldX, oldY, x, y, ink, GraphKind == GraphKind.Area);
+                        Line(oldX, oldY, x, y, ink, kind == GraphKind.Area);
                     }
                 }
 
@@ -172,34 +183,4 @@ public partial class Chart {
         }
     }
 
-    internal static double Fraction(double value, double minimum, double maximum) {
-        if (minimum == maximum) {
-            return .5;
-        }
-
-        double scale = Math.Max(Math.Abs(minimum), Math.Abs(maximum));
-        return Math.Clamp((value / scale - minimum / scale) / (maximum / scale - minimum / scale), 0, 1);
-    }
-
-    internal static int BarCenter(double value, double minimum, double maximum, int width, int count) {
-        int span = Math.Max(1, width / Math.Max(1, count) - 1);
-        return span / 2 + (int)Math.Round(Fraction(value, minimum, maximum) * (width - span));
-    }
-
-    internal static int[] Histogram(ReadOnlySpan<ChartPoint> points, double minimum, double maximum, int count) {
-        var bins = new int[count];
-        foreach (var point in points) {
-            if (point.Y.HasValue) {
-                bins[Math.Min(count - 1, (int)(Fraction(point.Y.Value, minimum, maximum) * count))]++;
-            }
-        }
-
-        return bins;
-    }
-
-    internal static double Quantile(double[] sorted, double fraction) {
-        double index = (sorted.Length - 1) * fraction;
-        int start = (int)index;
-        return sorted[start] * (1 - (index - start)) + sorted[Math.Min(start + 1, sorted.Length - 1)] * (index - start);
-    }
 }

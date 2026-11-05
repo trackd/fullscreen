@@ -4,6 +4,7 @@ using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Controls;
+using static fullscreen.Charts.ChartClipping;
 
 namespace fullscreen.Charts;
 /// <summary>Presents managed chart rasters within XenoAtom's synchronized frame writer.</summary>
@@ -29,10 +30,13 @@ internal sealed class SixelChartPresenter(
         ChartPixelKey Key,
         int CellWidth,
         int CellHeight,
-        string Payload,
+        string? ImagePayload,
+        SixelPayload? ChartPayload,
         Rectangle[] Windows,
         Color? Background
-    );
+    ) {
+        internal ReadOnlySpan<char> Payload => ChartPayload is { } chart ? chart.Span : ImagePayload.AsSpan();
+    }
     private Dictionary<ulong, Placement> _previous = [], _next = [];
     private readonly SixelPlot _plot = new();
     private readonly SixelEncoder _encoder = new();
@@ -114,7 +118,7 @@ internal sealed class SixelChartPresenter(
                 || previous.Clip != clip
                 || previous.Key != key
                 || !SameWindows(previous)
-                || image is not null && !ReferenceEquals(previous.Payload, image)
+                || image is not null && !ReferenceEquals(previous.ImagePayload, image)
                 || previous.CellWidth != pixelMetrics.CellPixelWidth
                 || previous.CellHeight != pixelMetrics.CellPixelHeight
                 || context.TextFrameKind != TerminalGraphicsTextFrameKind.None
@@ -201,12 +205,12 @@ internal sealed class SixelChartPresenter(
                 continue;
             }
 
-            string payload;
+            SixelPayload? payload;
             if (_previous.TryGetValue(command.VisualRenderId, out var previous) && previous.Bounds == bounds
                 && previous.Clip == clip
                 && previous.Key == key
                 && SameWindows(previous)
-                && (image is null || ReferenceEquals(previous.Payload, image))
+                && (image is null || ReferenceEquals(previous.ImagePayload, image))
                 && previous.CellWidth == cellWidth
                 && previous.CellHeight == cellHeight) {
                 _diagnostics = _diagnostics with {
@@ -222,15 +226,16 @@ internal sealed class SixelChartPresenter(
                     LastCacheMissCount = _diagnostics.LastCacheMissCount + 1
                 };
                 if (image is not null) {
-                    next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, image, [.. _windows], null);
+                    next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, image, null, [.. _windows], null);
                     continue;
                 }
 
+                payload = previous?.ChartPayload ?? new SixelPayload();
                 chart!.DrawPixels(_plot, checked(bounds.Width * cellWidth), checked(bounds.Height * cellHeight));
                 int width = clip.Width * cellWidth, height = clip.Height * cellHeight;
                 long encodeStarted = Stopwatch.GetTimestamp();
                 if (clip == bounds && !Covered(clip)) {
-                    payload = _encoder.EncodePlot(_plot);
+                    _encoder.EncodePlot(_plot, payload);
                 }
                 else {
                     int size = checked(width * height);
@@ -245,8 +250,8 @@ internal sealed class SixelChartPresenter(
                         ).CopyTo(_cropped.AsSpan(y * width));
                     }
 
-                    // Leave popup cells transparent so the cell-based menu stays
-                    // above the chart while all uncovered pixels remain visible.
+                    // Reserve native text/popup cells, rather than painting a text
+                    // overlay. P2=1 preserves omitted pixels on supporting terminals.
                     foreach (var window in _windows) {
                         var covered = Intersect(clip, window);
                         if (covered.Width <= 0 || covered.Height <= 0) {
@@ -258,7 +263,7 @@ internal sealed class SixelChartPresenter(
                         }
                     }
 
-                    payload = _encoder.EncodeFrame(_cropped.AsSpan(0, size), width, height, _plot.Palette);
+                    _encoder.EncodeFrame(_cropped.AsSpan(0, size), width, height, _plot.Palette, payload);
                 }
 
                 var elapsed = Stopwatch.GetElapsedTime(encodeStarted);
@@ -275,7 +280,7 @@ internal sealed class SixelChartPresenter(
                 };
             }
 
-            next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, payload, [.. _windows], key.Background);
+            next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, null, payload, [.. _windows], key.Background);
         }
 
         writer.SaveCursor();
@@ -327,53 +332,11 @@ internal sealed class SixelChartPresenter(
         return ValueTask.CompletedTask;
     }
 
-    internal static Rectangle Intersect(Rectangle a, Rectangle b) {
-        int x = Math.Max(a.X, b.X), y = Math.Max(a.Y, b.Y);
-        return new(x, y, Math.Max(0, Math.Min(a.Right, b.Right) - x), Math.Max(0, Math.Min(a.Bottom, b.Bottom) - y));
-    }
-
     private static void SetBackground(AnsiWriter writer, Color? color) {
         if (color is { } value) {
             var rgb = value.ToRgb();
             writer.Write($"\x1b[48;2;{rgb.R};{rgb.G};{rgb.B}m");
         }
-    }
-
-    /// <summary>Erases an old graphic's cells except those under popup windows, which are already painted.</summary>
-    internal static void Erase(
-        AnsiWriter writer,
-        Rectangle area,
-        IReadOnlyList<Rectangle> windows,
-        Rectangle viewport
-    ) {
-        var visible = Intersect(area, new(0, 0, viewport.Width, viewport.Height));
-        for (int y = visible.Y; y < visible.Bottom; y++) {
-            for (int x = visible.X; x < visible.Right;) {
-                if (Inside(windows, x, y)) {
-                    x++;
-                    continue;
-                }
-
-                int start = x++;
-                while (x < visible.Right && !Inside(windows, x, y)) {
-                    x++;
-                }
-
-                writer.CursorPosition(y + viewport.Y + 1, start + viewport.X + 1);
-                // ECH erases cells without advancing/wrapping the cursor.
-                writer.Write($"\x1b[{x - start}X");
-            }
-        }
-    }
-
-    private static bool Inside(IReadOnlyList<Rectangle> windows, int x, int y) {
-        foreach (var window in windows) {
-            if (x >= window.X && x < window.Right && y >= window.Y && y < window.Bottom) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public void Reset() {

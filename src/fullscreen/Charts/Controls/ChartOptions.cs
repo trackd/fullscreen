@@ -140,6 +140,16 @@ public sealed record ChartThreshold(double Value, string Label = "", bool Vertic
 /// <param name="Text">The source text to parse or display.</param>
 /// <param name="Color">The display color, or null to use the palette default. Defaults to null.</param>
 public sealed record ChartAnnotation(double X, double Y, string Text, Color? Color = null);
+/// <summary>Selects a series role in a column/line combination.</summary>
+public enum ChartSeriesRole {
+    /// <summary>Uses columns for the first series and lines for subsequent series.</summary>
+    Auto,
+    /// <summary>Draws grouped columns.</summary>
+    Column,
+    /// <summary>Draws a line.</summary>
+    Line
+}
+
 /// <summary>Stores display options for an individual chart series.</summary>
 /// <param name="Name">The display name. Defaults to &quot;&quot;.</param>
 /// <param name="Color">The display color, or null to use the palette default. Defaults to null.</param>
@@ -152,11 +162,24 @@ public sealed record ChartSeriesStyle(
     bool Visible = true,
     ChartLineStyle LineStyle = ChartLineStyle.Solid,
     ChartMarker Marker = ChartMarker.Circle
-);
+) {
+    /// <summary>Gets or sets the series role in a ColumnLine chart; ignored by other graph kinds.</summary>
+    public ChartSeriesRole Role { get; init; }
+}
 /// <summary>Serializable chart presentation; values and executable formatters stay with their data source.</summary>
 public sealed record ChartSettings {
     /// <summary>Gets or sets the visual representation used to draw the data.</summary>
     public GraphKind GraphKind { get; init; }
+    /// <summary>Gets or sets the positive fixed Kagi reversal amount in price units; default 1.</summary>
+    public double ReversalAmount { get; init; } = 1;
+    /// <summary>Gets or sets whether flamegraph roots appear at the top.</summary>
+    public bool FlameReverse { get; init; }
+    /// <summary>Gets or sets terminal rows per flamegraph depth, from 1 through 8; default 2.</summary>
+    public int FlameFrameRows { get; init; } = 2;
+    /// <summary>Gets or sets the representative frame ID used as the flamegraph focus; empty shows all roots.</summary>
+    public string FlameFocusId { get; init; } = "";
+    /// <summary>Gets or sets the first visible Gantt task lane.</summary>
+    public int TaskOffset { get; init; }
     /// <summary>Gets or sets the displayed heading.</summary>
     public string Title { get; init; } = "";
     /// <summary>Gets or sets the lower Y-axis limit, or null for automatic scaling.</summary>

@@ -12,7 +12,8 @@ internal sealed partial class ObjectChartApp {
         string? Color,
         bool Visible,
         ChartLineStyle LineStyle,
-        ChartMarker Marker
+        ChartMarker Marker,
+        ChartSeriesRole Role = ChartSeriesRole.Auto
     );
     private sealed record Configuration {
         public int Version { get; init; } = 1;
@@ -25,6 +26,8 @@ internal sealed partial class ObjectChartApp {
         public ObjectChartFilter Filter { get; init; }
         public int Count { get; init; } = 30;
         public ChartAggregate Aggregate { get; init; }
+        public FrameFields Frames { get; init; } = new();
+        public TaskFields Tasks { get; init; } = new();
         public SavedCalculation[] Calculations { get; init; } = [];
         public SavedStyle[] Styles { get; init; } = [];
         public JsonElement Chart { get; init; }
@@ -53,13 +56,16 @@ internal sealed partial class ObjectChartApp {
                 Filter = FilterMode,
                 Count = Count,
                 Aggregate = Aggregate,
+                Frames = new(FrameIdProperty, ParentIdProperty, FrameNameProperty),
+                Tasks = TaskProperties,
                 Calculations = [.. Data.Calculated.Select(column => new SavedCalculation(column.Definition.Name, column.Definition.Body))],
                 Styles = [.. Surface.Series.Select(series => new SavedStyle(
                     series.Property,
                     series.Color is { } color ? ColorText(color) : null,
                     series.Visible,
                     series.LineStyle,
-                    series.Marker
+                    series.Marker,
+                    series.Role
                 ))],
                 Chart = view.RootElement.Clone()
             },
@@ -72,10 +78,13 @@ internal sealed partial class ObjectChartApp {
         if (settings.Version != 1 || !Enum.IsDefined(settings.Filter) || !Enum.IsDefined(settings.Aggregate)
             || settings.Count is < 1 or > 1000000
             || settings.Y is null
+            || settings.Frames is null
+            || settings.Tasks is null
             || settings.Calculations is null
             || settings.Styles is null) {
             throw new ArgumentException("Invalid chart configuration.");
         }
+        settings.Tasks.Validate();
 
         var next = new ObjectChartData(Data.Objects, _token);
         foreach (var calculation in settings.Calculations) {
@@ -90,12 +99,22 @@ internal sealed partial class ObjectChartApp {
         view.ImportSettings(settings.Chart.GetRawText());
         var styles = settings.Styles.GroupBy(style => style.Name, StringComparer.Ordinal).ToDictionary(group => group.Key, group => {
             var style = group.Last();
-            return new SeriesAppearance(ParseColor(style.Color), style.Visible, style.LineStyle, style.Marker);
+            if (!Enum.IsDefined(style.Role)) {
+                throw new ArgumentException("Invalid column/line series role.");
+            }
+
+            return new SeriesAppearance(ParseColor(style.Color), style.Visible, style.LineStyle, style.Marker, style.Role);
         }, StringComparer.Ordinal);
         var previous = (Data, XProperty, YProperties, FilterMode, Count, RankProperty, GroupProperty, Aggregate, LowerProperty, UpperProperty, RowSubset);
         var oldView = Surface.Plot.CaptureSettings();
         var oldStyles = new Dictionary<string, SeriesAppearance>(_styles);
+        var oldFrames = (FrameIdProperty, ParentIdProperty, FrameNameProperty);
+        var oldTasks = TaskProperties;
         try {
+            TaskProperties = settings.Tasks;
+            FrameIdProperty = settings.Frames.Id;
+            ParentIdProperty = settings.Frames.Parent;
+            FrameNameProperty = settings.Frames.Name;
             Data = next;
             GroupProperty = group;
             Aggregate = settings.Aggregate;
@@ -109,10 +128,15 @@ internal sealed partial class ObjectChartApp {
 
             Apply(x, y, view.GraphKind, settings.Filter, settings.Count, rank);
             Surface.Plot.ImportSettings(settings.Chart.GetRawText());
+            if (Surface.Plot.GraphKind is GraphKind.Flamegraph or GraphKind.Gantt) {
+                _ = Surface.Plot.GetRenderData(Math.Max(1, Surface.Plot.Bounds.Width));
+            }
             Surface.ReplaceSource(next);
             _automaticAxisFormatting = false;
         }
         catch {
+            TaskProperties = oldTasks;
+            (FrameIdProperty, ParentIdProperty, FrameNameProperty) = oldFrames;
             (Data, XProperty, YProperties, FilterMode, Count, RankProperty, GroupProperty, Aggregate, LowerProperty, UpperProperty, RowSubset) = previous;
             _styles.Clear();
             foreach (var pair in oldStyles) {

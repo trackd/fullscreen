@@ -41,8 +41,10 @@ opens and no handlers run during export.
 
 Scaffolds include help, shared state, control-event stubs and an OnTick callback.
 Edit the .ps1 to add application behavior. Generated scripts accept Theme,
-Minimal, State, TickInterval and DefinitionOnly. Runtime State overrides layout
-defaults; DefinitionOnly returns the layout without running the UI.
+Minimal, State, TickInterval and DefinitionsOnly (DefinitionOnly remains an alias).
+Runtime State overrides layout defaults; DefinitionsOnly returns the complete
+layout without running the UI. Omitted Theme/Minimal use host defaults; explicit
+values, including Minimal:$false, are forwarded.
 
 For .ps1 exports, LinkedLayout uses a sibling .tui.psd1 instead of embedding
 the layout. Data-file exports are already linked to their companion. Script
@@ -66,7 +68,7 @@ The script contains the layout, help and event/update stubs to customize.
 
 ```powershell
 New-TuiDefinition -Title 'My tool' | Export-TuiDefinition -Path ./MyTool.ps1
-./MyTool.ps1 -DefinitionOnly | Show-TuiDesigner
+./MyTool.ps1 -DefinitionsOnly | Show-TuiDesigner
 ```
 
 ### Export a portable PowerShell data file
@@ -83,7 +85,7 @@ $layout = Import-PowerShellDataFile -LiteralPath ./MyTool.tui.psd1
 ```powershell
 New-TuiDefinition -Title 'My tool' |
     Export-TuiDefinition -Path ./MyTui.ps1 -LinkedLayout
-./MyTui.ps1 -DefinitionOnly | Show-TuiDesigner
+./MyTui.ps1 -DefinitionsOnly | Show-TuiDesigner
 ./MyTui.ps1 -Minimal -State @{ name = 'Ada' } -TickInterval 500
 ```
 
@@ -93,6 +95,8 @@ Force replaces only the layout file. MyTool.tui.ps1 remains unchanged.
 WhatIf previews both the target and operation without changing files.
 
 ```powershell
+$edited = New-TuiDefinition -Title 'Updated tool'
+$edited | Export-TuiDefinition -Path ./MyTool.tui.psd1 -Force
 $edited | Export-TuiDefinition -Path ./MyTool.tui.psd1 -Force -WhatIf
 $saved = $edited | Export-TuiDefinition -Path ./MyTool.tui.psd1 -Force -PassThru
 ```
@@ -100,6 +104,7 @@ $saved = $edited | Export-TuiDefinition -Path ./MyTool.tui.psd1 -Force -PassThru
 ### Export layout data without a scaffold
 
 ```powershell
+$layout = New-TuiDefinition -Title 'Layout only'
 $layout | Export-TuiDefinition -Path ./layout.json -Script:$false
 ```
 
@@ -168,28 +173,6 @@ ParameterSets:
   ValueFromRemainingArguments: false
 ```
 
-### -Confirm
-
-Prompts you for confirmation before running the cmdlet.
-
-```yaml
-Type: System.Management.Automation.SwitchParameter
-DefaultValue: ''
-SupportsWildcards: false
-Aliases:
-- cf
-ParameterSets:
-- Name: (All)
-  Position: Named
-  IsRequired: false
-  ValueFromPipeline: false
-  ValueFromPipelineByPropertyName: false
-  ValueFromRemainingArguments: false
-DontShow: false
-AcceptedValues: []
-HelpMessage: ''
-```
-
 ### -Definition
 
 One version-1 layout to validate and save.
@@ -252,28 +235,6 @@ ParameterSets:
   IsRequired: true
   ValueFromPipeline: false
   ValueFromPipelineByPropertyName: true
-  ValueFromRemainingArguments: false
-DontShow: false
-AcceptedValues: []
-HelpMessage: ''
-```
-
-### -WhatIf
-
-Runs the command in a mode that only reports what would happen without performing the actions.
-
-```yaml
-Type: System.Management.Automation.SwitchParameter
-DefaultValue: ''
-SupportsWildcards: false
-Aliases:
-- wi
-ParameterSets:
-- Name: (All)
-  Position: Named
-  IsRequired: false
-  ValueFromPipeline: false
-  ValueFromPipelineByPropertyName: false
   ValueFromRemainingArguments: false
 DontShow: false
 AcceptedValues: []

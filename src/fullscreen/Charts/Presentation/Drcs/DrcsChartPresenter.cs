@@ -39,8 +39,8 @@ internal sealed class DrcsChartPresenter(
         GraphicsCommand command,
         TerminalGraphicsPresentContext context
     ) =>
-        SixelChartPresenter.Intersect(
-            SixelChartPresenter.Intersect(command.CellBounds, command.ClipBounds),
+        ChartClipping.Intersect(
+            ChartClipping.Intersect(command.CellBounds, command.ClipBounds),
             new(0, 0, context.ViewportBounds.Width, context.ViewportBounds.Height)
         );
     private static Rectangle[] Windows(TerminalGraphicsPresentContext context) =>
@@ -130,7 +130,7 @@ internal sealed class DrcsChartPresenter(
             foreach (var old in _previous) {
                 if (!next.Any(placement => placement.Id == old.Id && placement.Clip == old.Clip)) {
                     removed = true;
-                    SixelChartPresenter.Erase(writer, old.Clip, windows, context.ViewportBounds);
+                    ChartClipping.Erase(writer, old.Clip, windows, context.ViewportBounds);
                 }
             }
 

@@ -7,104 +7,9 @@ using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Rendering;
+using static fullscreen.Charts.ChartMath;
 
 namespace fullscreen.Charts;
-/// <summary>A numeric series, optionally with explicit X coordinates and point labels.</summary>
-public sealed class ChartSeries {
-    private Color? _color;
-    private bool _visible = true;
-    private ChartLineStyle _lineStyle;
-    private ChartMarker _marker;
-    internal event Action? Changed;
-    /// <summary>Gets the display name.</summary>
-    public string Name { get; }
-    /// <summary>Gets the initial Y values; NaN leaves a gap.</summary>
-    public BindableList<double> Values { get; }
-    /// <summary>Gets the explicit X coordinates corresponding to numeric values.</summary>
-    public BindableList<double> XValues { get; }
-    /// <summary>Gets the display labels associated with data points.</summary>
-    public BindableList<string> Labels { get; }
-    /// <summary>Gets the original source objects associated with data points.</summary>
-    public BindableList<object?> Sources { get; }
-    /// <summary>Gets the lower bounds corresponding to data points.</summary>
-    public BindableList<double> LowerValues { get; }
-    /// <summary>Gets the upper bounds corresponding to data points.</summary>
-    public BindableList<double> UpperValues { get; }
-
-    /// <summary>Gets or sets the display color, or null to use the palette default.</summary>
-    public Color? Color {
-        get => _color;
-        set {
-            if (_color != value) {
-                _color = value;
-                Changed?.Invoke();
-            }
-        }
-    }
-
-    /// <summary>Gets or sets whether the series participates in rendering.</summary>
-    public bool Visible {
-        get => _visible;
-        set {
-            if (_visible != value) {
-                _visible = value;
-                Changed?.Invoke();
-            }
-        }
-    }
-
-    /// <summary>Gets or sets the series stroke pattern.</summary>
-    public ChartLineStyle LineStyle {
-        get => _lineStyle;
-        set {
-            if (_lineStyle != value) {
-                _lineStyle = value;
-                Changed?.Invoke();
-            }
-        }
-    }
-
-    /// <summary>Gets or sets the point marker style.</summary>
-    public ChartMarker Marker {
-        get => _marker;
-        set {
-            if (_marker != value) {
-                _marker = value;
-                Changed?.Invoke();
-            }
-        }
-    }
-
-    internal ChartSeriesVersion Version => new(
-        Values.Version,
-        XValues.Version,
-        Labels.Version,
-        Sources.Version,
-        LowerValues.Version,
-        UpperValues.Version,
-        Color,
-        Visible,
-        LineStyle,
-        Marker
-    );
-
-    /// <summary>Initializes a new ChartSeries instance.</summary>
-    /// <param name="name">The display name.</param>
-    /// <param name="values">The initial Y values; NaN leaves a gap.</param>
-    public ChartSeries(string name, IEnumerable<double> values) {
-        Name = name;
-        Values = new(this, nameof(Values));
-        XValues = new(this, nameof(XValues));
-        Labels = new(this, nameof(Labels));
-        Sources = new(this, nameof(Sources));
-        LowerValues = new(this, nameof(LowerValues));
-        UpperValues = new(this, nameof(UpperValues));
-        foreach (double value in values) {
-            Values.Add(value);
-        }
-    }
-}
-
 /// <summary>Reusable numeric chart with automatic Sixel presentation and a terminal-cell fallback.</summary>
 /// <remarks>Values, Minimum and Maximum follow XenoAtom's LineChart contract. NaN represents a gap.</remarks>
 public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
@@ -176,19 +81,15 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     internal bool UseSixel => _exportingPixels || ChartPresenters.Supports(App, GraphKind);
     internal Rectangle PlotBounds => ContentPlotBounds;
     internal virtual bool UsesWidthForData => false;
-    internal ChartPixelKey PixelKey => new(
-        this,
-        DataVersion,
-        Minimum,
-        Maximum,
-        PixelInk,
-        PixelBackground,
-        Palette,
-        GraphKind,
-        SelectedIndex,
-        InspectionColumn,
-        ViewVersion
-    );
+    internal ChartPixelKey PixelKey {
+        get {
+            UpdateAutomaticColors();
+            return new(
+                this, DataVersion, Minimum, Maximum, PixelInk, PixelBackground, Palette,
+                GraphKind, SelectedIndex, InspectionColumn, ViewVersion
+            );
+        }
+    }
 
     internal virtual long DataVersion {
         get {
@@ -199,16 +100,24 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
 
     /// <summary>Initializes a new Chart instance.</summary>
     public Chart() {
+        ReversalAmount = 1;
+        FlameFocusId = "";
+        FlameFrameRows = 2;
         Title = "";
         XAxis = new();
         YAxis = new();
         Interactive = true;
         SelectedIndex = InspectionColumn = -1;
+        FlameSearch = "";
         Values = new(this, nameof(Values));
         XValues = new(this, nameof(XValues));
         Series = new(this, nameof(Series), series => series.Changed += Refresh, series => series.Changed -= Refresh);
         Labels = new(this, nameof(Labels));
         Sources = new(this, nameof(Sources));
+        Frames = new(this, nameof(Frames));
+        Tasks = new(this, nameof(Tasks));
+        Nodes = new(this, nameof(Nodes));
+        Edges = new(this, nameof(Edges));
         Thresholds = new(this, nameof(Thresholds));
         Annotations = new(this, nameof(Annotations));
         HorizontalAlignment = Align.Stretch;
@@ -242,15 +151,53 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         PixelBackground = background;
     }
 
+    private void UpdateAutomaticColors() {
+        if (!_explicitColors) {
+            PixelInk = Palette.Accent;
+            PixelBackground = Palette.Background;
+        }
+    }
+
     internal void SetData(ChartDataSeries[] series) {
         InvalidateDerivedData();
         _adapted = series;
+        for (int index = 0; index < series.Length; index++) {
+            series[index].SourceIndex = index;
+        }
         Revision = unchecked((int)++_dataVersion);
     }
 
     internal virtual ChartDataSeries[] GetData(int width) {
         if (_adapted is not null) {
             return _adapted;
+        }
+        if (ChartTopology.Supports(GraphKind)) {
+            if (_topology is null || _nodeVersion != Nodes.Version || _edgeVersion != Edges.Version) {
+                _topology = new(Nodes, Edges);
+                _nodeVersion = Nodes.Version;
+                _edgeVersion = Edges.Version;
+                InvalidateDerivedData();
+                _dataVersion++;
+            }
+            return _topology.Data;
+        }
+        if (GraphKind == GraphKind.Gantt) {
+            if (_schedule is null || _taskVersion != Tasks.Version) {
+                _schedule = new(Tasks);
+                _taskVersion = Tasks.Version;
+                InvalidateDerivedData();
+                _dataVersion++;
+            }
+            return _schedule.Data;
+        }
+        if (GraphKind == GraphKind.Flamegraph) {
+            if (_flameTree is null || _frameVersion != Frames.Version) {
+                _flameTree = new(Frames);
+                _frameVersion = Frames.Version;
+                InvalidateDerivedData();
+                _dataVersion++;
+            }
+            return _flameTree.Data;
         }
 
         bool changed = _valuesVersion != Values.Version || _xVersion != XValues.Version || _seriesVersion != Series.Version;
@@ -272,6 +219,8 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             primary.Visible = _primaryStyle.Visible;
             primary.LineStyle = _primaryStyle.LineStyle;
             primary.Marker = _primaryStyle.Marker;
+            primary.Role = _primaryStyle.Role;
+            primary.SourceIndex = 0;
             data.Add(primary);
         }
 
@@ -291,6 +240,8 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             projected.Visible = series.Visible;
             projected.LineStyle = series.LineStyle;
             projected.Marker = series.Marker;
+            projected.Role = series.Role;
+            projected.SourceIndex = data.Count;
             data.Add(projected);
             versions[index] = series.Version;
         }
@@ -348,6 +299,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     internal virtual ChartRange Range(ChartDataSeries[] data) =>
         ChartRange.From(data, GraphKind, Minimum, Maximum);
     internal void DrawPixels(SixelPlot plot, int width, int height) {
+        UpdateAutomaticColors();
         var data = GetRenderData(width);
         plot.Draw(
             data,
@@ -363,7 +315,14 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             RenderThresholds,
             Annotations.Count == 0 ? null : Annotations,
             XAxis,
-            YAxis
+            YAxis,
+            ReversalAmount,
+            FlameReverse,
+            GraphKind == GraphKind.Flamegraph ? FlameFocus(GetFlameTree()) : -1,
+            GraphKind is GraphKind.Flamegraph or GraphKind.Gantt
+                ? Math.Max(1, PlotBounds.Height > 0 ? height / PlotBounds.Height : 16) * (GraphKind == GraphKind.Flamegraph ? FlameFrameRows : 1)
+                : 1,
+            TaskOffset
         );
     }
 
@@ -396,10 +355,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
 
     /// <inheritdoc/>
     protected override void RenderOverride(CellBuffer buffer) {
-        if (!_explicitColors) {
-            PixelInk = Palette.Accent;
-            PixelBackground = Palette.Background;
-        }
+        UpdateAutomaticColors();
 
         for (int y = 0; y < Bounds.Height; y++) {
             for (int x = 0; x < Bounds.Width; x++) {
@@ -432,36 +388,68 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     private ChartSelection? PickPoint(int x, int y) {
         var data = GetData(Math.Max(1, Bounds.Width));
         var rendered = GetRenderData(Math.Max(1, Bounds.Width));
+        if (ChartRadial.IsRadial(GraphKind)) {
+            return PickRadial(rendered, x, y);
+        }
+        if (ChartGrid.Supports(GraphKind) || ChartStackedArea.Supports(GraphKind)) {
+            return PickGrid(rendered, x, y);
+        }
+        if (ChartMarket.Supports(GraphKind)) {
+            return PickGrid(rendered, x, y);
+        }
+        if (ChartTopology.Supports(GraphKind)) {
+            return PickDiagram(rendered, x, y);
+        }
+        if (GraphKind is GraphKind.Flamegraph or GraphKind.Gantt) {
+            return PickGrid(rendered, x, y);
+        }
         var range = RenderRange(rendered);
         var plotBounds = PlotBounds;
         bool distribution = GraphKind is GraphKind.Histogram or GraphKind.BoxPlot;
         double best = double.PositiveInfinity;
         ChartSelection? selected = null;
         var stacks = GraphKind == GraphKind.StackedBars ? new Dictionary<double, (double Positive, double Negative)>() : null;
+        var columns = new ChartColumns(data, GraphKind);
         for (int seriesIndex = 0; seriesIndex < data.Length; seriesIndex++) {
             var series = data[seriesIndex];
             if (!series.Visible) {
                 continue;
             }
 
+            ChartPoint? previous = null;
             foreach (var point in series.Span) {
                 if (!point.Y.HasValue) {
+                    previous = null;
                     continue;
                 }
 
                 double px = XAxis.Transform(distribution || GraphKind == GraphKind.HorizontalBars ? point.Y.Value : point.X), py = YAxis.Transform(point.Y.Value);
                 if (!double.IsFinite(px) || !double.IsFinite(py)) {
+                    previous = null;
                     continue;
                 }
 
                 double viewX = GraphKind == GraphKind.HorizontalBars ? point.Y.Value : point.X;
                 if (MinimumX is { } low && viewX < low || MaximumX is { } high && viewX > high) {
+                    previous = null;
                     continue;
                 }
 
-                double center = GraphKind == GraphKind.Bars ? BarCenter(px, range.MinX, range.MaxX, plotBounds.Width, series.Count) : Fraction(px, range.MinX, range.MaxX) * Math.Max(0, plotBounds.Width - 1);
+                double center = GraphKind is GraphKind.Bars or GraphKind.ColumnLine ? columns.Center(px, range, plotBounds.Width) : Fraction(px, range.MinX, range.MaxX) * Math.Max(0, plotBounds.Width - 1);
                 double dx = center - (x - plotBounds.X);
                 double dy = distribution ? 0 : (1 - Fraction(py, range.MinY, range.MaxY)) * Math.Max(0, plotBounds.Height - 1) - (y - plotBounds.Y);
+                if (GraphKind == GraphKind.ColumnLine) {
+                    dy = Math.Round(dy + y - plotBounds.Y) - (y - plotBounds.Y);
+                }
+                if (GraphKind is GraphKind.Bars or GraphKind.ColumnLine && ChartColumns.Kind(series, GraphKind, seriesIndex) == GraphKind.Bars) {
+                    var column = columns.Bounds(seriesIndex, px, range, plotBounds.Width);
+                    double mouseX = x - plotBounds.X, mouseY = y - plotBounds.Y;
+                    dx = mouseX < column.X ? column.X - mouseX : mouseX >= column.Right ? mouseX - (column.Right - 1) : 0;
+                    double baseline = (1 - Fraction(0, range.MinY, range.MaxY)) * Math.Max(0, plotBounds.Height - 1);
+                    double valueY = dy + mouseY;
+                    double top = Math.Min(baseline, valueY), bottom = Math.Max(baseline, valueY);
+                    dy = mouseY < top ? top - mouseY : mouseY > bottom ? bottom - mouseY : 0;
+                }
                 if (GraphKind == GraphKind.HorizontalBars) {
                     dx = Fraction(XAxis.Transform(point.Y.Value), range.MinX, range.MaxX) * Math.Max(0, plotBounds.Width - 1) - (x - plotBounds.X);
                     dy = BarCenter(point.X, 0, Math.Max(0, series.Count - 1), plotBounds.Height, series.Count) - (y - plotBounds.Y);
@@ -483,16 +471,34 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
                 }
 
                 double distance = dx * dx + dy * dy;
-                if (distance < best) {
+                var candidate = point;
+                if (GraphKind == GraphKind.ColumnLine && ChartColumns.Kind(series, GraphKind, seriesIndex) == GraphKind.Line
+                    && previous is { } before) {
+                    double x0 = columns.Center(XAxis.Transform(before.X), range, plotBounds.Width);
+                    double y0 = Math.Round((1 - Fraction(YAxis.Transform(before.Y!.Value), range.MinY, range.MaxY)) * Math.Max(0, plotBounds.Height - 1));
+                    double x1 = center, y1 = dy + y - plotBounds.Y;
+                    double sx = x1 - x0, sy = y1 - y0, length = sx * sx + sy * sy;
+                    double t = length == 0 ? 0 : Math.Clamp(((x - plotBounds.X - x0) * sx + (y - plotBounds.Y - y0) * sy) / length, 0, 1);
+                    double segmentX = x0 + t * sx - (x - plotBounds.X), segmentY = y0 + t * sy - (y - plotBounds.Y);
+                    double segmentDistance = segmentX * segmentX + segmentY * segmentY;
+                    if (segmentDistance <= .5 || segmentDistance < distance) {
+                        distance = segmentDistance <= .5 ? 0 : segmentDistance;
+                        candidate = t < .5 ? before : point;
+                    }
+                }
+
+                previous = point;
+                if (distance < best || distance == best && GraphKind == GraphKind.ColumnLine
+                    && ChartColumns.Kind(series, GraphKind, seriesIndex) == GraphKind.Line) {
                     best = distance;
                     selected = new(
                         seriesIndex,
                         series.Property,
-                        point.Index,
-                        point.X,
-                        point.Y.Value,
-                        point.Label,
-                        point.Source
+                        candidate.Index,
+                        candidate.X,
+                        candidate.Y!.Value,
+                        candidate.Label,
+                        candidate.Source
                     );
                 }
             }
@@ -521,6 +527,9 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         }
 
         Select(selected);
+        if (GraphKind == GraphKind.Flamegraph && e.ClickCount < 2) {
+            FocusSelectedFrame();
+        }
         if (e.ClickCount >= 2) {
             PointActivated?.Invoke(selected.PointIndex);
             PointInvoked?.Invoke(selected);
@@ -529,50 +538,37 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         e.Handled = true;
     }
 
-    private Style Ink(int index) =>
-        Palette.Body.WithForeground(SeriesColor(index));
-    private Color SeriesColor(int index) =>
-        GetData(Math.Max(1, Bounds.Width)).ElementAtOrDefault(index)?.Color ?? DefaultSeriesColor(index);
     private Color DefaultSeriesColor(int index) =>
-        (index % 5) switch {
-            0 => PixelInk,
-            1 => Palette.Success,
-            2 => Palette.Warning,
-            3 => Palette.Purple,
-            _ => Palette.Error
+        AutomaticSeriesColor(Palette, PixelInk, GraphKind, index);
+
+    internal static bool UsesStackedPalette(GraphKind kind) =>
+        kind is GraphKind.StackedBars or GraphKind.StackedArea or GraphKind.PercentStackedArea or GraphKind.Marimekko;
+
+    internal static Color AutomaticSeriesColor(Themes.ThemePalette palette, Color ink, GraphKind kind, int index) {
+        if (index >= 0 && UsesStackedPalette(kind)) {
+            var primary = ink.ToRgb();
+            var purple = palette.Purple.ToRgb();
+            bool errorFirst = (primary.R - purple.R) * (primary.R - purple.R)
+                + (primary.G - purple.G) * (primary.G - purple.G)
+                + (primary.B - purple.B) * (primary.B - purple.B) < 10_000;
+            return (index % 5) switch {
+                0 => ink,
+                1 => errorFirst ? palette.Error : palette.Purple,
+                2 => errorFirst ? palette.Purple : palette.Warning,
+                3 => errorFirst ? palette.Warning : palette.Success,
+                _ => errorFirst ? palette.Success : palette.Error
+            };
+        }
+        return (index % 5) switch {
+            0 => ink,
+            1 => palette.Success,
+            2 => palette.Warning,
+            3 => palette.Purple,
+            _ => palette.Error
         };
+    }
 }
 
-internal readonly record struct ChartPoint(int Index, double X, double? Y, string Label) {
-    internal object? Source { get; init; }
-    internal int[]? SourceIndices { get; init; }
-    internal double? Lower { get; init; }
-    internal double? Upper { get; init; }
-}
-
-internal sealed class ChartDataSeries(string property, ChartPoint[] points) {
-    internal string Property { get; } = property;
-    internal ChartPoint[] Points { get; } = points;
-    internal int Count { get; set; } = points.Length;
-    internal Color? Color { get; set; }
-    internal bool Visible { get; set; } = true;
-    internal ChartLineStyle LineStyle { get; set; }
-    internal ChartMarker Marker { get; set; }
-    internal ReadOnlySpan<ChartPoint> Span => Points.AsSpan(0, Count);
-}
-
-internal readonly record struct ChartSeriesVersion(
-    int Values,
-    int X,
-    int Labels,
-    int Sources,
-    int Lower,
-    int Upper,
-    Color? Color,
-    bool Visible,
-    ChartLineStyle LineStyle,
-    ChartMarker Marker
-);
 internal readonly record struct ChartPixelKey(
     Chart Source,
     long Version,
@@ -586,118 +582,3 @@ internal readonly record struct ChartPixelKey(
     int InspectionColumn,
     ChartViewKey ViewVersion
 );
-internal readonly record struct ChartRange(double MinX, double MaxX, double MinY, double MaxY) {
-    internal static ChartRange From(ChartDataSeries[] data, GraphKind kind, double? minimum, double? maximum) {
-        if (!Enum.IsDefined(kind)) {
-            throw new ArgumentOutOfRangeException(nameof(kind));
-        }
-
-        if (minimum.HasValue && !double.IsFinite(minimum.Value)
-            || maximum.HasValue && !double.IsFinite(maximum.Value)) {
-            throw new ArgumentException("Minimum and Maximum must be finite or null.");
-        }
-
-        double minX = double.PositiveInfinity, maxX = double.NegativeInfinity, minY = double.PositiveInfinity, maxY = double.NegativeInfinity;
-        bool distribution = kind is GraphKind.Histogram or GraphKind.BoxPlot;
-        foreach (var series in data) {
-            if (!series.Visible) {
-                continue;
-            }
-
-            foreach (var point in series.Span) {
-                if (!point.Y.HasValue) {
-                    continue;
-                }
-
-                double x = distribution ? point.Y.Value : point.X;
-                minX = Math.Min(minX, x);
-                maxX = Math.Max(maxX, x);
-                minY = Math.Min(minY, point.Y.Value);
-                maxY = Math.Max(maxY, point.Y.Value);
-                if (kind == GraphKind.ErrorBars) {
-                    if (point.Lower is { } lower && double.IsFinite(lower)) {
-                        minY = Math.Min(minY, lower);
-                    }
-
-                    if (point.Upper is { } upper && double.IsFinite(upper)) {
-                        maxY = Math.Max(maxY, upper);
-                    }
-                }
-            }
-        }
-
-        if (kind == GraphKind.StackedBars) {
-            var totals = new Dictionary<double, (double Positive, double Negative)>();
-            foreach (var series in data) {
-                if (!series.Visible) {
-                    continue;
-                }
-
-                foreach (var point in series.Span) {
-                    if (point.Y is not { } value) {
-                        continue;
-                    }
-
-                    totals.TryGetValue(point.X, out var total);
-                    total = value >= 0 ? (total.Positive + value, total.Negative) : (total.Positive, total.Negative + value);
-                    if (!double.IsFinite(total.Positive) || !double.IsFinite(total.Negative)) {
-                        throw new ArgumentException("Stack totals must fit in finite double values.");
-                    }
-
-                    totals[point.X] = total;
-                }
-            }
-
-            minY = Math.Min(0, totals.Values.Select(total => total.Negative).DefaultIfEmpty(0).Min());
-            maxY = Math.Max(0, totals.Values.Select(total => total.Positive).DefaultIfEmpty(0).Max());
-        }
-
-        if (!double.IsFinite(minX)) {
-            minX = minY = 0;
-            maxX = maxY = 1;
-        }
-
-        if (kind == GraphKind.Heatmap) {
-            return new(minX, maxX, 0, Math.Max(0, data.Length - 1));
-        }
-
-        if (kind == GraphKind.HorizontalBars) {
-            double valueMinimum = minimum ?? Math.Min(0, minY), valueMaximum = maximum ?? Math.Max(0, maxY);
-            if (valueMinimum > valueMaximum) {
-                throw new ArgumentException("Minimum must be less than or equal to Maximum.");
-            }
-
-            return new(
-                valueMinimum,
-                valueMaximum,
-                0,
-                Math.Max(0, data.Select(series => series.Count).DefaultIfEmpty(0).Max() - 1)
-            );
-        }
-
-        if (kind is GraphKind.Area or GraphKind.Bars or GraphKind.Stem or GraphKind.StackedBars) {
-            minY = Math.Min(0, minY);
-            maxY = Math.Max(0, maxY);
-        }
-
-        if (minimum is { } low && double.IsFinite(low)) {
-            minY = low;
-            if (distribution) {
-                minX = low;
-            }
-        }
-
-        if (maximum is { } high && double.IsFinite(high)) {
-            maxY = high;
-            if (distribution) {
-                maxX = high;
-            }
-        }
-
-        if (minY > maxY) {
-            throw new ArgumentException("Minimum must be less than or equal to Maximum.");
-        }
-
-        return new(minX, maxX, minY, maxY);
-    }
-}

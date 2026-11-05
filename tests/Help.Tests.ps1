@@ -6,10 +6,68 @@ BeforeDiscovery {
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '../output/fullscreen.psd1') -Force
     Import-Module Microsoft.PowerShell.PlatyPS -ErrorAction Stop
-    $commonParameters = @('Verbose', 'Debug', 'ErrorAction', 'WarningAction', 'InformationAction', 'ProgressAction', 'ErrorVariable', 'WarningVariable', 'InformationVariable', 'OutVariable', 'OutBuffer', 'PipelineVariable', 'WhatIf', 'Confirm')
+    $commonParameters = @([System.Management.Automation.PSCmdlet]::CommonParameters) +
+        @([System.Management.Automation.PSCmdlet]::OptionalCommonParameters)
 }
 
 Describe 'Cmdlet help' {
+    It 'Generates complete chart input in the error bounds and column line examples without opening a host' {
+        $text = Get-Content (Join-Path $PSScriptRoot '../docs/en-US/Out-Chart.md') -Raw
+        foreach ($kind in 'ErrorBars', 'ColumnLine') {
+            $block = @([regex]::Matches($text, '(?ms)^```powershell\s*\r?\n(.*?)^```') |
+                Where-Object { $_.Groups[1].Value -match "-GraphType $kind\b" })
+            $block.Count | Should -Be 1
+            $tokens = $null; $parseErrors = $null
+            $ast = [Management.Automation.Language.Parser]::ParseInput($block[0].Groups[1].Value, [ref]$tokens, [ref]$parseErrors)
+            $assignment = @($ast.EndBlock.Statements | Where-Object {
+                $_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$measurements'
+            })
+            $assignment.Count | Should -Be 1
+            $data = @(& ([scriptblock]::Create($assignment[0].Extent.Text + "`n`$measurements")))
+            $data.Count | Should -Be 12
+            if ($kind -eq 'ErrorBars') {
+                @($data | Where-Object { $_.Low -ge $_.Mean -or $_.High -le $_.Mean }).Count | Should -Be 0
+                ($data.Time -join ',') | Should -Be (1..12 -join ',')
+            }
+            else {
+                @($data | Where-Object { $_.Target -ne 30 -or $null -eq $_.Actual -or $null -eq $_.Forecast }).Count | Should -Be 0
+                ($data.Sample -join ',') | Should -Be (1..12 -join ',')
+            }
+        }
+    }
+    It 'Keeps shipped examples independent of repository files and undeclared input variables' {
+        $automatic = @('true', 'false', 'null', '_', 'PSItem', 'PWD', 'HOME', 'LASTEXITCODE')
+        foreach ($path in Get-ChildItem (Join-Path $PSScriptRoot '../docs/en-US') -Filter '*.md' -File) {
+            $text = Get-Content -LiteralPath $path.FullName -Raw
+            $text | Should -Not -Match '(?i)(?:examples[/\\]|docs[/\\]images[/\\])' -Because "$($path.Name) ships without repository examples or images"
+            foreach ($match in [regex]::Matches($text, '(?ms)^```powershell\s*\r?\n(.*?)^```')) {
+                $tokens = $null; $parseErrors = $null
+                $ast = [Management.Automation.Language.Parser]::ParseInput($match.Groups[1].Value, [ref]$tokens, [ref]$parseErrors)
+                $parseErrors | Should -BeNullOrEmpty
+                $declared = @($automatic)
+                foreach ($node in $ast.FindAll({
+                    param($node)
+                    $node -is [Management.Automation.Language.AssignmentStatementAst] -or
+                    $node -is [Management.Automation.Language.ParameterAst] -or
+                    $node -is [Management.Automation.Language.ForEachStatementAst]
+                }, $true)) {
+                    if ($node -is [Management.Automation.Language.ParameterAst]) {
+                        $declared += $node.Name.VariablePath.UserPath
+                    }
+                    elseif ($node -is [Management.Automation.Language.ForEachStatementAst]) {
+                        $declared += $node.Variable.VariablePath.UserPath
+                    }
+                    else {
+                        $declared += @($node.Left.FindAll({ param($child) $child -is [Management.Automation.Language.VariableExpressionAst] }, $true) |
+                            ForEach-Object { $_.VariablePath.UserPath })
+                    }
+                }
+                foreach ($variable in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.VariableExpressionAst] }, $true)) {
+                    $declared | Should -Contain $variable.VariablePath.UserPath -Because "$($path.Name) must define $($variable.Extent.Text) in the same code block"
+                }
+            }
+        }
+    }
     It 'Uses current Fullscreen command parameters in every documented PowerShell example' {
         $paths = @((Join-Path $PSScriptRoot '../README.md')) + @(Get-ChildItem (Join-Path $PSScriptRoot '../docs/en-US') -Filter '*.md' -File | ForEach-Object FullName)
         foreach ($path in $paths) {
@@ -42,6 +100,8 @@ Describe 'Cmdlet help' {
         $model.Title | Should -Be $CommandName
         $model.Locale.Name | Should -Be 'en-US'
         $model.ExternalHelpFile | Should -Be 'fullscreen.dll-Help.xml'
+        @($model.Parameters.Name | Where-Object { $_ -in $commonParameters }).Count |
+            Should -Be 0 -Because 'PowerShell built-ins must not have individually authored parameter sections'
         $command = Get-Command "Fullscreen\$CommandName"
         $actual = @($command.Parameters.Keys | Where-Object { $_ -notin $commonParameters })
         $documented = @($model.Parameters.Name | Where-Object { $_ -notin $commonParameters })
@@ -55,6 +115,17 @@ Describe 'Cmdlet help' {
         Join-Path $output 'LICENSE' | Should -Not -Exist
         @(Get-ChildItem $output -Filter '*.xml' -File -Recurse).Count | Should -Be 1
         @(Get-ChildItem (Join-Path $PSScriptRoot '../docs/en-US') -Filter '*.md').Count | Should -Be 17
+        $xml = [xml](Get-Content (Join-Path $output 'en-US/fullscreen.dll-Help.xml') -Raw)
+        $documentedNames = @($xml.SelectNodes("//*[local-name()='parameters']/*[local-name()='parameter']/*[local-name()='name']") |
+            ForEach-Object InnerText)
+        @($documentedNames | Where-Object { $_ -in $commonParameters }).Count | Should -Be 0
+        $syntaxNames = @($xml.SelectNodes("//*[local-name()='command'][*[local-name()='details']/*[local-name()='name']='Export-TuiDefinition']/*[local-name()='syntax']/*[local-name()='syntaxItem']/*[local-name()='parameter']/*[local-name()='name']") |
+            ForEach-Object InnerText)
+        $syntaxNames | Should -Contain 'WhatIf'
+        $syntaxNames | Should -Contain 'Confirm'
+        $export = Get-Command fullscreen\Export-TuiDefinition
+        $export.Parameters.ContainsKey('WhatIf') | Should -BeTrue
+        $export.Parameters.ContainsKey('Confirm') | Should -BeTrue
     }
 
     It 'Documents every parameter and three parseable examples for <CommandName>' -ForEach $commands {

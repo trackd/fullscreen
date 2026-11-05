@@ -10,11 +10,13 @@ Describe 'DesignerScaffold' -Tag 'Integration' {
             Id = 'name'; Type = 'TextBox'; Text = 'Initial'; Bind = 'name'; Enabled = $false; Width = 32
         }
         $layout | Export-TuiDefinition -Path $path -Script
-        $copy = & $path -DefinitionOnly -Minimal -TickInterval 500 -State @{ name = 'Override' }
+        $copy = & $path -DefinitionsOnly -Minimal -TickInterval 500 -State @{ name = 'Override' }
         $copy.Root.Enabled | Should -BeFalse
         $copy.Root.Width | Should -Be 32
         $copy.State.name | Should -BeExactly 'Default' -Because 'DefinitionOnly must not merge live state into portable data.'
         $source = Get-Content -LiteralPath $path -Raw
+        (Get-Command $path).Parameters['DefinitionsOnly'].Aliases | Should -Contain 'DefinitionOnly'
+        (& $path -DefinitionOnly).State.name | Should -Be 'Default'
         $source | Should -Not -Match "'RefreshInterval'"
         Mock Invoke-Tui {
             $State.name | Should -BeExactly 'Override'
@@ -23,6 +25,24 @@ Describe 'DesignerScaffold' -Tag 'Integration' {
             @{ Cancelled = $false; Value = 'Accepted' }
         }
         & $path -State @{ name = 'Override' } -Minimal -TickInterval 500 | Should -BeExactly 'Accepted'
+    }
+    It 'Does not force omitted presentation values and forwards explicit false switches' {
+        $path = Join-Path $TestDrive 'Presentation.ps1'
+        New-TuiDefinition -Root @{ Id = 'root'; Type = 'Text'; Text = 'Ready' } |
+            Export-TuiDefinition -Path $path -Script
+        Mock Invoke-Tui {
+            @{
+                Cancelled = $false
+                Value = @{} + $PesterBoundParameters
+            }
+        }
+        $default = & $path
+        $default.ContainsKey('Theme') | Should -BeFalse
+        $default.ContainsKey('Minimal') | Should -BeFalse
+        $explicit = & $path -Theme Monokai -Minimal:$false
+        $explicit.Theme | Should -Be 'Monokai'
+        $explicit.ContainsKey('Minimal') | Should -BeTrue
+        [bool]$explicit.Minimal | Should -BeFalse
     }
     It 'Exports a runnable scaffold with styling, state and event references' {
         $temporaryPath = Join-Path ($TestDrive) ('FullscreenDesigner-' + [Guid]::NewGuid().ToString('N') + '.ps1')

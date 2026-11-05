@@ -22,6 +22,19 @@ $script:folders = @{
     TestCsprojPath   = Join-Path $PSScriptRoot 'tests' "$moduleName.Tests" "$moduleName.Tests.csproj"
 }
 
+function Remove-BuiltinParameterHelp {
+    param([object[]]$CommandHelp)
+    $builtins = @([System.Management.Automation.PSCmdlet]::CommonParameters) +
+        @([System.Management.Automation.PSCmdlet]::OptionalCommonParameters)
+    foreach ($model in $CommandHelp) {
+        for ($index = $model.Parameters.Count - 1; $index -ge 0; $index--) {
+            if ($model.Parameters[$index].Name -in $builtins) {
+                $model.Parameters.RemoveAt($index)
+            }
+        }
+    }
+}
+
 task Clean {
     if (Test-Path -LiteralPath $folders.OutputPath) {
         if ((Get-Item -LiteralPath $folders.OutputPath).LinkType) { throw 'Build output must not be a directory link.' }
@@ -48,6 +61,7 @@ task Build {
         $folders.CsprojPath
         '--configuration', $Configuration
         '--nologo'
+        '-m:2'
         '--verbosity', 'minimal'
         ('-p:Version={0}' -f $ModuleFile.Version.ToString())
     )
@@ -78,9 +92,37 @@ task GenerateHelp -If (-not $SkipHelp.IsPresent) {
     $commandHelp = @(Get-ChildItem -LiteralPath $folders.DocsPath -Filter '*.md' -File |
         Where-Object { $_.Name -ne "$moduleName.md" } |
         Import-MarkdownCommandHelp)
+    Remove-BuiltinParameterHelp -CommandHelp $commandHelp
     Export-MamlCommandHelp -CommandHelp $commandHelp -OutputFolder $tempOutputPath | Out-Null
-    Get-ChildItem -LiteralPath $tempOutputPath -Filter '*.xml' -File -Recurse |
-        Move-Item -Destination $helpOutputPath -Force
+    $builtins = @([System.Management.Automation.PSCmdlet]::CommonParameters) +
+        @([System.Management.Automation.PSCmdlet]::OptionalCommonParameters)
+    foreach ($file in Get-ChildItem -LiteralPath $tempOutputPath -Filter '*.xml' -File -Recurse) {
+        $xml = [xml](Get-Content -LiteralPath $file.FullName -Raw)
+        foreach ($model in $commandHelp) {
+            $syntaxItems = $xml.SelectNodes("//*[local-name()='command'][*[local-name()='details']/*[local-name()='name']='$($model.Title)']/*[local-name()='syntax']/*[local-name()='syntaxItem']")
+            for ($index = 0; $index -lt $syntaxItems.Count; $index++) {
+                $item = $syntaxItems[$index]
+                # PlatyPS omits built-ins from MAML syntax when their authored sections are absent.
+                foreach ($parameter in $model.Syntax[$index].SyntaxParameters | Where-Object { $_.ParameterName -in $builtins }) {
+                    $node = $xml.CreateElement('command', 'parameter', $item.NamespaceURI)
+                    $node.SetAttribute('required', 'false')
+                    $node.SetAttribute('position', 'Named')
+                    $name = $xml.CreateElement('maml', 'name', 'http://schemas.microsoft.com/maml/2004/10')
+                    $name.InnerText = $parameter.ParameterName
+                    $null = $node.AppendChild($name)
+                    if (-not $parameter.IsSwitchParameter) {
+                        $value = $xml.CreateElement('command', 'parameterValue', $item.NamespaceURI)
+                        $value.SetAttribute('required', 'true')
+                        $value.InnerText = $parameter.ParameterType
+                        $null = $node.AppendChild($value)
+                    }
+                    $null = $item.AppendChild($node)
+                }
+            }
+        }
+        $xml.Save($file.FullName)
+        Move-Item -LiteralPath $file.FullName -Destination $helpOutputPath -Force
+    }
     Remove-Item -LiteralPath $tempOutputPath -Recurse -Force
 }
 
@@ -111,7 +153,7 @@ task Test -If (-not $SkipTests.IsPresent) {
 }
 
 task DotNetTest -If (-not $SkipTests.IsPresent) {
-    exec { dotnet test $folders.TestCsprojPath --configuration $Configuration --nologo --logger 'trx;LogFileName=dotnet.trx' --results-directory $folders.TestResultPath }
+    exec { dotnet test $folders.TestCsprojPath --configuration $Configuration --nologo -m:2 --logger 'trx;LogFileName=dotnet.trx' --results-directory $folders.TestResultPath }
 }
 
 task UpdateHelp {
@@ -123,6 +165,7 @@ task UpdateHelp {
     foreach ($file in Get-ChildItem -LiteralPath $folders.DocsPath -Filter '*.md' -File) {
         $source = Microsoft.PowerShell.PlatyPS\Import-MarkdownCommandHelp -LiteralPath $file.FullName -ErrorAction Stop
         $model = Microsoft.PowerShell.PlatyPS\Update-CommandHelp -LiteralPath $file.FullName -ErrorAction Stop
+        Remove-BuiltinParameterHelp -CommandHelp $model
         $model.Locale = [cultureinfo]'en-US'
         $model.Metadata['Locale'] = 'en-US'
         # PlatyPS 1.0.1 strips [] from imported input type headings, then appends

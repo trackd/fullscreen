@@ -72,8 +72,8 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
             }
 
             var bounds = command.CellBounds;
-            var clip = SixelChartPresenter.Intersect(
-                SixelChartPresenter.Intersect(bounds, command.ClipBounds),
+            var clip = ChartClipping.Intersect(
+                ChartClipping.Intersect(bounds, command.ClipBounds),
                 new(0, 0, viewport.Width, viewport.Height)
             );
             if (clip.Width <= 0 || clip.Height <= 0) {
@@ -102,13 +102,9 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
                     continue;
                 }
 
-                var color = shape.Color ?? (shape.Shade > 0 ? Color.Mix(chart.PixelKey.Background, chart.PixelKey.Ink, (shape.Shade - 1) / 5f) : data.ElementAtOrDefault(shape.Series)?.Color ?? ((shape.Series % 5) switch {
-                    1 => chart.PixelKey.Palette.Success,
-                    2 => chart.PixelKey.Palette.Warning,
-                    3 => chart.PixelKey.Palette.Purple,
-                    4 => chart.PixelKey.Palette.Error,
-                    _ => chart.PixelKey.Ink
-                }));
+                var color = shape.Color ?? (chart.GraphKind == GraphKind.Heatmap ? ChartGrid.HeatColor(chart.PixelKey.Background, chart.PixelKey.Ink, shape.Shade)
+                    : shape.Shade > 0 ? Color.Mix(chart.PixelKey.Background, chart.PixelKey.Ink, (shape.Shade - 1) / 5f)
+                    : data.ElementAtOrDefault(shape.Series)?.Color ?? Chart.AutomaticSeriesColor(chart.PixelKey.Palette, chart.PixelKey.Ink, chart.GraphKind, shape.Series));
                 var rgb = color.ToRgb();
                 int pattern = data.ElementAtOrDefault(shape.Series)?.LineStyle switch {
                     ChartLineStyle.Dashed => 2,
@@ -150,9 +146,10 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
         }
 
         int X(double value) =>
-            (int)Math.Round(Chart.Fraction(value, range.MinX, range.MaxX) * (width - 1));
+            (int)Math.Round(ChartMath.Fraction(value, range.MinX, range.MaxX) * (width - 1));
         int Y(double value) =>
-            height - 1 - (int)Math.Round(Chart.Fraction(value, range.MinY, range.MaxY) * (height - 1));
+            height - 1 - (int)Math.Round(ChartMath.Fraction(value, range.MinY, range.MaxY) * (height - 1));
+        var columns = new ChartColumns(data, chart.GraphKind);
         for (int index = 0; index < data.Length; index++) {
             var series = data[index];
             ChartPoint? previous = null;
@@ -171,10 +168,8 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
                 ) =>
                     _geometry.Primitives.Add(new(ChartPrimitiveKind.Line, a, b, c, d, index));
                 if (chart.GraphKind == GraphKind.Bars) {
-                    int span = Math.Max(1, width / Math.Max(1, series.Count) - 1);
-                    int center = Chart.BarCenter(point.X, range.MinX, range.MaxX, width, series.Count);
-                    int start = Math.Clamp(center - span / 2, 0, width - span);
-                    int a = start + index * span / Math.Max(1, data.Length), c = start + (index + 1) * span / Math.Max(1, data.Length) - 1;
+                    var bounds = columns.Bounds(index, point.X, range, width);
+                    int a = bounds.X, c = bounds.Right - 1;
                     _geometry.Primitives.Add(new(
                         ChartPrimitiveKind.Rectangle,
                         a,
@@ -212,7 +207,7 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
     private static List<Rectangle> Subtract(List<Rectangle> source, Rectangle hole) {
         var result = new List<Rectangle>();
         foreach (var cell in source) {
-            var overlap = SixelChartPresenter.Intersect(cell, hole);
+            var overlap = ChartClipping.Intersect(cell, hole);
             if (overlap.Width <= 0 || overlap.Height <= 0) {
                 result.Add(cell);
                 continue;
