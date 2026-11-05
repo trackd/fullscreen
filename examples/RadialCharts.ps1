@@ -18,8 +18,8 @@ Built-in palette or custom theme.
 Hide surrounding application chrome.
 .PARAMETER DataOnly
 Return generated original rows without opening a terminal.
-.PARAMETER DefinitionsOnly
-Return a complete portable TUI definition without opening a terminal. DefinitionOnly is a compatibility alias.
+.PARAMETER DefinitionOnly
+Return a complete portable TUI definition without opening a terminal.
 .EXAMPLE
 .\RadialCharts.ps1 -GraphType Pie
 .EXAMPLE
@@ -29,9 +29,9 @@ Return a complete portable TUI definition without opening a terminal. Definition
 .EXAMPLE
 .\RadialCharts.ps1 -GraphType Radar
 .EXAMPLE
-.\RadialCharts.ps1 -GraphType Radar -DefinitionsOnly | Invoke-Tui -Theme Monokai -Minimal
+.\RadialCharts.ps1 -GraphType Radar -DefinitionOnly | Invoke-Tui -Theme Monokai -Minimal
 .OUTPUTS
-Original rows with DataOnly; a complete TUI definition with DefinitionsOnly; otherwise no output.
+Original rows with DataOnly; a complete TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
 Import fullscreen first. No external inputs or extra modules are required.
 #>
@@ -39,8 +39,7 @@ Import fullscreen first. No external inputs or extra modules are required.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
     [ValidateSet('Pie', 'Gauge', 'RadialBars', 'Radar')]
     [string]$GraphType = 'Gauge',
     [double]$Maximum = 100,
@@ -94,7 +93,7 @@ if ($GraphType -ne 'Pie') {
     $options.Minimum = 0
     $options.Maximum = $Maximum
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     $root = @{
         Id = 'chart'
         Type = 'Chart'

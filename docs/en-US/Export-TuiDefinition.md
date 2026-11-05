@@ -41,8 +41,8 @@ opens and no handlers run during export.
 
 Scaffolds include help, shared state, control-event stubs and an OnTick callback.
 Edit the .ps1 to add application behavior. Generated scripts accept Theme,
-Minimal, State, TickInterval and DefinitionsOnly (DefinitionOnly remains an alias).
-Runtime State overrides layout defaults; DefinitionsOnly returns the complete
+Minimal, State, TickInterval and DefinitionOnly.
+Runtime State overrides layout defaults; DefinitionOnly returns the complete
 layout without running the UI. Omitted Theme/Minimal use host defaults; explicit
 values, including Minimal:$false, are forwarded.
 
@@ -68,7 +68,7 @@ The script contains the layout, help and event/update stubs to customize.
 
 ```powershell
 New-TuiDefinition -Title 'My tool' | Export-TuiDefinition -Path ./MyTool.ps1
-./MyTool.ps1 -DefinitionsOnly | Show-TuiDesigner
+./MyTool.ps1 -DefinitionOnly | Show-TuiDesigner
 ```
 
 ### Export a portable PowerShell data file
@@ -85,7 +85,7 @@ $layout = Import-PowerShellDataFile -LiteralPath ./MyTool.tui.psd1
 ```powershell
 New-TuiDefinition -Title 'My tool' |
     Export-TuiDefinition -Path ./MyTui.ps1 -LinkedLayout
-./MyTui.ps1 -DefinitionsOnly | Show-TuiDesigner
+./MyTui.ps1 -DefinitionOnly | Show-TuiDesigner
 ./MyTui.ps1 -Minimal -State @{ name = 'Ada' } -TickInterval 500
 ```
 

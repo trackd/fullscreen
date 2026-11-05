@@ -35,7 +35,7 @@ Describe 'Chart example entrypoint contracts' {
         [object]::ReferenceEquals($hostCalls[0].Theme, $palette) | Should -BeTrue
         [bool]$hostCalls[0].Minimal | Should -BeTrue
 
-        $hostCalls = @(& $path @Arguments -Theme Default -Minimal:$false -DefinitionsOnly:$false -DataOnly:$false)
+        $hostCalls = @(& $path @Arguments -Theme Default -Minimal:$false -DefinitionOnly:$false -DataOnly:$false)
         $hostCalls[0].Theme | Should -Be 'Default'
         $hostCalls[0].ContainsKey('Minimal') | Should -BeTrue
         [bool]$hostCalls[0].Minimal | Should -BeFalse
@@ -49,19 +49,17 @@ Describe 'Chart example entrypoint contracts' {
         }
     }
 
-    It '<File> returns a runnable portable definition and keeps DefinitionOnly compatible' -ForEach $chartExamples {
+    It '<File> returns a runnable portable definition using the established DefinitionOnly switch' -ForEach $chartExamples {
         $path = Join-Path $PSScriptRoot "..\examples\$File"
         $command = Get-Command $path
-        $command.Parameters['DefinitionsOnly'].ParameterType | Should -Be ([System.Management.Automation.SwitchParameter])
-        $command.Parameters['DefinitionsOnly'].Aliases | Should -Contain 'DefinitionOnly'
-        Mock Out-Chart { throw 'DefinitionsOnly entered Out-Chart.' }
-        Mock Invoke-Tui { throw 'DefinitionsOnly entered Invoke-Tui.' }
-        $layouts = @(& $path @Arguments -DefinitionsOnly -Theme Monokai -Minimal)
+        $command.Parameters['DefinitionOnly'].ParameterType | Should -Be ([System.Management.Automation.SwitchParameter])
+        $command.Parameters['DefinitionOnly'].Aliases.Count | Should -Be 0
+        Mock Out-Chart { throw 'DefinitionOnly entered Out-Chart.' }
+        Mock Invoke-Tui { throw 'DefinitionOnly entered Invoke-Tui.' }
+        $layouts = @(& $path @Arguments -DefinitionOnly -Theme Monokai -Minimal)
         $layouts.Count | Should -Be 1
         $document = [fullscreen.Custom.TuiDocument]::FromObject($layouts[0])
         $document.Root.ShowAxes | Should -BeTrue -Because 'Portable examples must retain the normal Out-Chart coordinate axes.'
-        $alias = [fullscreen.Custom.TuiDocument]::FromObject((& $path @Arguments -DefinitionOnly))
-        $document.Root.GraphKind | Should -Be $alias.Root.GraphKind
         $document.Root.Bind | Should -Not -BeNullOrEmpty
         $document.State.ContainsKey($document.Root.Bind) | Should -BeTrue
         $document.Root.Minimal | Should -BeFalse -Because 'Presentation options must not mutate portable data.'
@@ -119,7 +117,7 @@ Describe 'Chart example entrypoint contracts' {
             foreach ($kind in $kinds) {
                 $variantArguments = @{} + $Arguments
                 $variantArguments.GraphType = $kind
-                $variant = [fullscreen.Custom.TuiDocument]::FromObject((& $path @variantArguments -DefinitionsOnly))
+                $variant = [fullscreen.Custom.TuiDocument]::FromObject((& $path @variantArguments -DefinitionOnly))
                 $app = [fullscreen.Custom.CustomTuiApp]::new($variant)
                 try {
                     ([xml]$app.Controls['chart'].ExportSvg(100, 32)).DocumentElement.LocalName | Should -Be 'svg'
@@ -130,6 +128,6 @@ Describe 'Chart example entrypoint contracts' {
                 }
             }
         }
-        @(& $path @Arguments -DataOnly -DefinitionsOnly).Count | Should -Be $Count -Because 'DataOnly compatibility takes precedence.'
+        @(& $path @Arguments -DataOnly -DefinitionOnly).Count | Should -Be $Count -Because 'DataOnly compatibility takes precedence.'
     }
 }

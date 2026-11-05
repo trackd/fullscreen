@@ -10,13 +10,14 @@ Describe 'DesignerScaffold' -Tag 'Integration' {
             Id = 'name'; Type = 'TextBox'; Text = 'Initial'; Bind = 'name'; Enabled = $false; Width = 32
         }
         $layout | Export-TuiDefinition -Path $path -Script
-        $copy = & $path -DefinitionsOnly -Minimal -TickInterval 500 -State @{ name = 'Override' }
+        $copy = & $path -DefinitionOnly -Minimal -TickInterval 500 -State @{ name = 'Override' }
         $copy.Root.Enabled | Should -BeFalse
         $copy.Root.Width | Should -Be 32
         $copy.State.name | Should -BeExactly 'Default' -Because 'DefinitionOnly must not merge live state into portable data.'
         $source = Get-Content -LiteralPath $path -Raw
-        (Get-Command $path).Parameters['DefinitionsOnly'].Aliases | Should -Contain 'DefinitionOnly'
-        (& $path -DefinitionOnly).State.name | Should -Be 'Default'
+        $parameter = (Get-Command $path).Parameters['DefinitionOnly']
+        $parameter.ParameterType | Should -Be ([System.Management.Automation.SwitchParameter])
+        $parameter.Aliases.Count | Should -Be 0
         $source | Should -Not -Match "'RefreshInterval'"
         Mock Invoke-Tui {
             $State.name | Should -BeExactly 'Override'

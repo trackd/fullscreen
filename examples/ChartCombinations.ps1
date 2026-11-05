@@ -21,8 +21,8 @@ Built-in palette or custom theme.
 Hide surrounding application chrome.
 .PARAMETER DataOnly
 Return the simulated original objects without opening a terminal.
-.PARAMETER DefinitionsOnly
-Return a complete portable TUI definition without opening a terminal. DefinitionOnly is a compatibility alias.
+.PARAMETER DefinitionOnly
+Return a complete portable TUI definition without opening a terminal.
 .EXAMPLE
 .\ChartCombinations.ps1 -GraphType Line
 .EXAMPLE
@@ -32,13 +32,13 @@ Return a complete portable TUI definition without opening a terminal. Definition
 .EXAMPLE
 .\ChartCombinations.ps1 -GraphType ColumnLine -SeriesRole Column, Line, Line
 .EXAMPLE
-.\ChartCombinations.ps1 -DefinitionsOnly | Invoke-Tui -Theme Monokai -Minimal
+.\ChartCombinations.ps1 -DefinitionOnly | Invoke-Tui -Theme Monokai -Minimal
 .EXAMPLE
 .\ChartCombinations.ps1 -GraphType StackedArea -Theme Monokai
 .EXAMPLE
 .\ChartCombinations.ps1 -GraphType PercentStackedArea -Minimal
 .OUTPUTS
-Original measurements with DataOnly; a complete TUI definition with DefinitionsOnly; otherwise no output.
+Original measurements with DataOnly; a complete TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
 Import fullscreen first. No additional dependencies or external data sources.
 #>
@@ -46,8 +46,7 @@ Import fullscreen first. No additional dependencies or external data sources.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
     [ValidateSet('Line', 'Area', 'Bars', 'ColumnLine', 'StackedArea', 'PercentStackedArea')]
     [string]$GraphType = 'ColumnLine',
     [ValidateSet('Auto', 'Column', 'Line')]
@@ -87,7 +86,7 @@ if ($PSBoundParameters.ContainsKey('Minimal')) {
 if ($PSBoundParameters.ContainsKey('SeriesRole')) {
     $options.SeriesRole = $SeriesRole
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     $root = @{
         Id = 'chart'
         Type = 'Chart'

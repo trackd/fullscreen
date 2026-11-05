@@ -154,9 +154,9 @@ $layout | Export-TuiDefinition -Path ./settings.tui.psd1
 | [ISpyBrowser.ps1](examples/ISpyBrowser.ps1) | Assembly browsing with optional TextMate previews |
 
 The eight chart examples from `ChartCombinations.ps1` through
-`RelationshipCharts.ps1` accept `-Theme`, `-Minimal` and `-DefinitionsOnly`
-(`-DefinitionOnly` is an alias), plus their chart-specific options.
-`-DefinitionsOnly` returns a complete portable layout for `Show-TuiDesigner`,
+`RelationshipCharts.ps1` accept `-Theme`, `-Minimal` and `-DefinitionOnly`,
+plus their chart-specific options.
+`-DefinitionOnly` returns a complete portable layout for `Show-TuiDesigner`,
 `Export-TuiDefinition` or `Invoke-Tui`; `-DataOnly` still returns original sample
 records (separate Nodes/Edges for relationship charts). DataOnly takes precedence
 when both output switches are present. Presentation parameters do not change

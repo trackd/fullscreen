@@ -7,14 +7,14 @@ Return the definition to the designer or run a small form with simulated graph d
 fullscreen theme name or custom palette.
 .PARAMETER Minimal
 Hide surrounding application chrome.
-.PARAMETER DefinitionsOnly
+.PARAMETER DefinitionOnly
 Return the layout without running the application.
 .EXAMPLE
-./DesignerStarter.ps1 -DefinitionsOnly | Show-TuiDesigner
+./DesignerStarter.ps1 -DefinitionOnly | Show-TuiDesigner
 .EXAMPLE
 ./DesignerStarter.ps1
 .OUTPUTS
-The layout with DefinitionsOnly; otherwise the accepted name. DefinitionOnly remains an alias.
+The layout with DefinitionOnly; otherwise the accepted name.
 .NOTES
 Import fullscreen first. Samples are simulated and require no external source.
 #>
@@ -22,8 +22,7 @@ Import fullscreen first. Samples are simulated and require no external source.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly
+    [switch]$DefinitionOnly
 )
 $ErrorActionPreference = 'Stop'
 # Layout contains only data. IDs identify events; Bind names identify state values.
@@ -82,7 +81,7 @@ $layout = New-TuiDefinition -Title 'My first TUI' -State @{
         }
     )
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     return $layout
 }
 # Callbacks run on the UI thread. Keep them short; assign command output to variables.

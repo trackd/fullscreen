@@ -95,8 +95,8 @@ Run a custom TUI created with Fullscreen's designer.
 Edit the layout with Show-TuiDesigner; wire behavior in Handler and OnTick below.
 .PARAMETER Theme
 Fullscreen theme name.
-.PARAMETER DefinitionsOnly
-Return the layout for designer editing without opening a terminal. DefinitionOnly is a compatibility alias.
+.PARAMETER DefinitionOnly
+Return the layout for designer editing without opening a terminal.
 .PARAMETER State
 Runtime state overriding layout defaults. Live objects belong here.
 .PARAMETER Minimal
@@ -106,11 +106,11 @@ Milliseconds between callbacks and binding updates, from 16 to 60000.
 .EXAMPLE
 ./MyTui.ps1
 .EXAMPLE
-./MyTui.ps1 -DefinitionsOnly | Show-TuiDesigner
+./MyTui.ps1 -DefinitionOnly | Show-TuiDesigner
 .EXAMPLE
 ./MyTui.ps1 -Minimal -State @{ message = 'Ready' } -TickInterval 500
 .OUTPUTS
-The definition with DefinitionsOnly; otherwise the accepted handler result.
+The definition with DefinitionOnly; otherwise the accepted handler result.
 .NOTES
 Requires Fullscreen. The layout contains data; callbacks stay in this script.
 #>
@@ -123,8 +123,7 @@ param(
     [switch]$Minimal,
 
     [Parameter()]
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
 
     [Parameter()]
     [hashtable]$State = @{},
@@ -155,7 +154,7 @@ $definition =
 
         script.AppendLine(layoutFile is null ? "$layout = $definition | New-TuiDefinition" : "$layout = $definition");
         script.AppendLine("""
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     return $layout
 }
 """);

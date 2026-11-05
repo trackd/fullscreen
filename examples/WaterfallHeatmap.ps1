@@ -14,8 +14,8 @@ Built-in palette or custom theme.
 Hide surrounding application chrome.
 .PARAMETER DataOnly
 Return generated original rows without opening a terminal.
-.PARAMETER DefinitionsOnly
-Return a complete portable TUI definition without opening a terminal. DefinitionOnly is a compatibility alias.
+.PARAMETER DefinitionOnly
+Return a complete portable TUI definition without opening a terminal.
 .EXAMPLE
 .\WaterfallHeatmap.ps1 -GraphType Waterfall
 .EXAMPLE
@@ -23,9 +23,9 @@ Return a complete portable TUI definition without opening a terminal. Definition
 .EXAMPLE
 .\WaterfallHeatmap.ps1 -DataOnly
 .EXAMPLE
-.\WaterfallHeatmap.ps1 -GraphType Heatmap -DefinitionsOnly | Invoke-Tui -Theme Monokai -Minimal
+.\WaterfallHeatmap.ps1 -GraphType Heatmap -DefinitionOnly | Invoke-Tui -Theme Monokai -Minimal
 .OUTPUTS
-Original rows with DataOnly; a complete TUI definition with DefinitionsOnly; otherwise no output.
+Original rows with DataOnly; a complete TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
 Import fullscreen first. No additional inputs or modules are required.
 #>
@@ -33,8 +33,7 @@ Import fullscreen first. No additional inputs or modules are required.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
     [ValidateSet('Waterfall', 'Heatmap')]
     [string]$GraphType = 'Waterfall',
     [switch]$DataOnly
@@ -94,7 +93,7 @@ if ($PSBoundParameters.ContainsKey('Theme')) {
 if ($PSBoundParameters.ContainsKey('Minimal')) {
     $options.Minimal = $Minimal.IsPresent
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     return New-TuiDefinition -Title 'Waterfall and heatmap' -Root @{
         Id = 'chart'
         Type = 'Chart'

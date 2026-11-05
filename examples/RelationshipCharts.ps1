@@ -9,8 +9,8 @@ Returns one object containing the separate Nodes and Edges arrays without openin
 Built-in palette or custom theme.
 .PARAMETER Minimal
 Hide surrounding application chrome.
-.PARAMETER DefinitionsOnly
-Return a complete portable TUI definition without opening a terminal. DefinitionOnly is a compatibility alias.
+.PARAMETER DefinitionOnly
+Return a complete portable TUI definition without opening a terminal.
 .EXAMPLE
 .\RelationshipCharts.ps1
 .EXAMPLE
@@ -19,18 +19,17 @@ Return a complete portable TUI definition without opening a terminal. Definition
 $graph = .\RelationshipCharts.ps1 -DataOnly
 Out-Chart -Nodes $graph.Nodes -Edges $graph.Edges -GraphType FlowChart
 .EXAMPLE
-.\RelationshipCharts.ps1 -DefinitionsOnly | Invoke-Tui -Theme Monokai -Minimal
+.\RelationshipCharts.ps1 -DefinitionOnly | Invoke-Tui -Theme Monokai -Minimal
 .OUTPUTS
-Separate Nodes/Edges with DataOnly; a complete TUI definition with DefinitionsOnly; otherwise no output.
+Separate Nodes/Edges with DataOnly; a complete TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
-Import fullscreen first. DataOnly takes precedence over DefinitionsOnly.
+Import fullscreen first. DataOnly takes precedence over DefinitionOnly.
 #>
 [CmdletBinding()]
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
     [ValidateSet('FlowChart', 'NetworkDiagram')]
     [string] $GraphType = 'FlowChart',
     [switch] $DataOnly
@@ -198,7 +197,7 @@ if ($PSBoundParameters.ContainsKey('Theme')) {
 if ($PSBoundParameters.ContainsKey('Minimal')) {
     $options.Minimal = $Minimal.IsPresent
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     return New-TuiDefinition -Title $title -Root @{
         Id = 'chart'
         Type = 'Chart'

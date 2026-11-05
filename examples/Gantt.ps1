@@ -14,8 +14,8 @@ Return the original task records without opening a terminal.
 Built-in palette or custom theme.
 .PARAMETER Minimal
 Hide surrounding application chrome.
-.PARAMETER DefinitionsOnly
-Return a complete portable TUI definition without opening a terminal. DefinitionOnly is a compatibility alias.
+.PARAMETER DefinitionOnly
+Return a complete portable TUI definition without opening a terminal.
 .EXAMPLE
 .\Gantt.ps1
 .EXAMPLE
@@ -23,9 +23,9 @@ Return a complete portable TUI definition without opening a terminal. Definition
 .EXAMPLE
 .\Gantt.ps1 -DataOnly | Out-Chart -GraphType Gantt -ProgressProperty Progress -PassThru
 .EXAMPLE
-.\Gantt.ps1 -DefinitionsOnly | Invoke-Tui -Theme Monokai -Minimal
+.\Gantt.ps1 -DefinitionOnly | Invoke-Tui -Theme Monokai -Minimal
 .OUTPUTS
-Original tasks with DataOnly; a complete TUI definition with DefinitionsOnly; otherwise no output.
+Original tasks with DataOnly; a complete TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
 Import fullscreen first. No scheduler or additional modules are required.
 #>
@@ -33,8 +33,7 @@ Import fullscreen first. No scheduler or additional modules are required.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
     [switch]$DataOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -115,7 +114,7 @@ if ($PSBoundParameters.ContainsKey('Theme')) {
 if ($PSBoundParameters.ContainsKey('Minimal')) {
     $options.Minimal = $Minimal.IsPresent
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     $portableTasks = foreach ($task in $tasks) {
         @{
             Task = $task.Task

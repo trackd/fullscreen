@@ -12,9 +12,8 @@ Point inspection returns the original counts, not invented interpolated rows.
 Built-in palette or custom theme.
 .PARAMETER Minimal
 Hide surrounding application chrome.
-.PARAMETER DefinitionsOnly
+.PARAMETER DefinitionOnly
 Return a complete portable TUI definition without opening a terminal.
-DefinitionOnly is a compatibility alias.
 .PARAMETER GraphType
 StackedArea uses counts; PercentStackedArea uses a fixed 0 to 100 percent Y axis.
 .PARAMETER DataOnly
@@ -24,9 +23,9 @@ Return the original outcome records without opening a terminal.
 .EXAMPLE
 .\StackedAreas.ps1 -GraphType PercentStackedArea -Minimal
 .EXAMPLE
-.\StackedAreas.ps1 -GraphType PercentStackedArea -DefinitionsOnly | Invoke-Tui -Theme Monokai
+.\StackedAreas.ps1 -GraphType PercentStackedArea -DefinitionOnly | Invoke-Tui -Theme Monokai
 .OUTPUTS
-Original records with DataOnly; a portable TUI definition with DefinitionsOnly;
+Original records with DataOnly; a portable TUI definition with DefinitionOnly;
 otherwise no output.
 .NOTES
 Import fullscreen first. No dependencies or external data sources.
@@ -35,8 +34,7 @@ Import fullscreen first. No dependencies or external data sources.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
     [ValidateSet('StackedArea', 'PercentStackedArea')]
     [string]$GraphType = 'StackedArea',
     [switch]$DataOnly
@@ -101,7 +99,7 @@ $title = if ($GraphType -eq 'PercentStackedArea') {
 else {
     'Request outcomes (count)'
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     $root = @{
         Id = 'chart'
         Type = 'Chart'

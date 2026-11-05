@@ -16,8 +16,8 @@ Built-in palette or custom theme.
 Hide surrounding application chrome.
 .PARAMETER DataOnly
 Return generated objects without starting the interactive viewer.
-.PARAMETER DefinitionsOnly
-Return a complete portable TUI definition without opening a terminal. DefinitionOnly is a compatibility alias.
+.PARAMETER DefinitionOnly
+Return a complete portable TUI definition without opening a terminal.
 .EXAMPLE
 .\MarketCharts.ps1 -GraphType Marimekko
 .EXAMPLE
@@ -25,9 +25,9 @@ Return a complete portable TUI definition without opening a terminal. Definition
 .EXAMPLE
 .\MarketCharts.ps1 -GraphType Kagi -DataOnly
 .EXAMPLE
-.\MarketCharts.ps1 -DefinitionsOnly | Invoke-Tui -Theme Monokai -Minimal
+.\MarketCharts.ps1 -DefinitionOnly | Invoke-Tui -Theme Monokai -Minimal
 .OUTPUTS
-Original rows with DataOnly; a complete TUI definition with DefinitionsOnly; otherwise no output.
+Original rows with DataOnly; a complete TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
 No external data sources or additional modules are required.
 #>
@@ -35,8 +35,7 @@ No external data sources or additional modules are required.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
     [ValidateSet('Marimekko', 'Kagi')]
     [string]$GraphType = 'Marimekko',
     [ValidateRange(0.000001, [double]::MaxValue)]
@@ -95,7 +94,7 @@ else {
     $options.YProperty = @('Close')
     $options.ReversalAmount = $ReversalAmount
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     $portableRows = if ($GraphType -eq 'Kagi') {
         foreach ($row in $rows) {
             @{

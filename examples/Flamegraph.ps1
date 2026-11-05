@@ -16,8 +16,8 @@ Start roots at the top instead of the bottom.
 Built-in palette or custom theme.
 .PARAMETER Minimal
 Hide surrounding application chrome.
-.PARAMETER DefinitionsOnly
-Return a complete portable TUI definition without opening a terminal. DefinitionOnly is a compatibility alias.
+.PARAMETER DefinitionOnly
+Return a complete portable TUI definition without opening a terminal.
 .PARAMETER DataOnly
 Return the original frame records without opening a terminal.
 .PARAMETER FlameFrameRows
@@ -31,9 +31,9 @@ Terminal rows per depth, from 1 through 8. Default 2; 1 provides a compact view.
 .EXAMPLE
 .\Flamegraph.ps1 -FlameFrameRows 3
 .EXAMPLE
-.\Flamegraph.ps1 -DefinitionsOnly | Invoke-Tui -Theme Monokai -Minimal
+.\Flamegraph.ps1 -DefinitionOnly | Invoke-Tui -Theme Monokai -Minimal
 .OUTPUTS
-Original frames with DataOnly; a complete TUI definition with DefinitionsOnly; otherwise no output.
+Original frames with DataOnly; a complete TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
 Import fullscreen first. No profiler or additional modules are required.
 #>
@@ -41,8 +41,7 @@ Import fullscreen first. No profiler or additional modules are required.
 param(
     [object]$Theme = 'Default',
     [switch]$Minimal,
-    [Alias('DefinitionOnly')]
-    [switch]$DefinitionsOnly,
+    [switch]$DefinitionOnly,
     [switch]$FlameReverse,
     [ValidateRange(1, 8)]
     [int]$FlameFrameRows = 2,
@@ -317,7 +316,7 @@ if ($PSBoundParameters.ContainsKey('Theme')) {
 if ($PSBoundParameters.ContainsKey('Minimal')) {
     $options.Minimal = $Minimal.IsPresent
 }
-if ($DefinitionsOnly.IsPresent) {
+if ($DefinitionOnly.IsPresent) {
     return New-TuiDefinition -Title $options.Title -Root @{
         Id = 'chart'
         Type = 'Chart'
