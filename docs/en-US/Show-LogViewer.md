@@ -44,23 +44,12 @@ fields and ISO timestamp prefixes are recognized; entries without a timestamp us
 their arrival time, and malformed JSON and unknown severities stay visible as
 plain entries.
 
-Filter with /, choose a minimum severity with L, bookmark entries with Space and
-show only bookmarks with B, and press Enter or I for the source and raw line. With
-Follow, new lines are read as they are written, and truncated or replaced files
-are detected. F toggles scrolling to new entries; moving the selection stops it.
-Q closes the viewer.
+Search with / or a column filter, choose minimum severity with L, and inspect
+the source and raw entry with Enter. Space bookmarks entries and B shows only
+bookmarks. F toggles following new entries; Q closes the viewer.
 
-Use **Filter column** or right-click a column heading to enter a case-insensitive
-substring search for that column. Column searches combine with `/` and severity
-filtering; no list of distinct log values is built. An empty column search clears
-that filter. **L Severity** also provides a clickable minimum-level selector.
-Escape clears global and column searches before closing the viewer.
-Inspect shows the source and raw entry as wrapped, vertically scrollable text
-within the overlay width.
-
-Initial reads are limited to the last 8 MiB of each file, and lines longer than
-16 KiB characters are truncated. When old entries are discarded, their bookmarks
-are removed too.
+Supports following growing files and detecting rotation. Reads and retained
+entries are bounded; oversized lines are truncated.
 
 ## EXAMPLES
 

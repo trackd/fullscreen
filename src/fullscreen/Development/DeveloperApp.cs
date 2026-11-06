@@ -91,6 +91,14 @@ public sealed partial class DeveloperApp : IFullscreenApp {
             : Surface;
         Surface.CellAccent = (row, column) => {
             string name = Surface.Model.Columns[column];
+            if (_backend is GitBackend) {
+                if (row.Original is DeveloperItem { State: GitChange change }
+                    && DeveloperStatus.GitChangeColor(change.Index, change.Worktree, Surface.Palette) is { } color
+                    && ((change.Index + change.Worktree).Contains('U') || change.Index + change.Worktree is "AA" or "DD")) {
+                    return color;
+                }
+                return DeveloperStatus.GitCellColor(name, row.Cells[column], Surface.Palette);
+            }
             if (name is not ("Status" or "Conclusion" or "Result" or "State")) {
                 return null;
             }
@@ -98,12 +106,18 @@ public sealed partial class DeveloperApp : IFullscreenApp {
             return DeveloperStatus.Color(row.Cells[column], Surface.Palette);
         };
         Surface.RowAccent = row => {
+            if (_backend is GitBackend && row.Original is DeveloperItem { State: GitChange change }) {
+                return DeveloperStatus.GitChangeColor(change.Index, change.Worktree, Surface.Palette);
+            }
             bool pullRequests = _backend is GitHubBackend && View == 1 || _backend is AzureDevOpsBackend && View == 4;
             bool runs = _backend is GitHubBackend && View == 2 || _backend is AzureDevOpsBackend && View == 5;
             int column = Array.IndexOf(Surface.Model.Columns, pullRequests ? "State" : runs ? "Result" : "");
             return column >= 0 ? DeveloperStatus.Color(row.Cells[column], Surface.Palette) : null;
         };
-        Surface.DocumentAccent = line => DeveloperStatus.LineColor(line, Surface.Palette);
+        Surface.DocumentAccent = line => _backend is GitBackend
+            ? View is 0 or 1 or 2 && Surface.Model.Current?.Original is DeveloperItem { State: not GitChange { Index: "?" } }
+                ? DeveloperStatus.GitLineColor(line, Surface.Palette) : null
+            : DeveloperStatus.LineColor(line, Surface.Palette);
         Surface.InspectRequested += _ => {
             if (_backend is IPipelineBackend pipelines && pipelines.IsPipelineView(View)
                 && Surface.Model.Current?.Original is DeveloperItem run) {

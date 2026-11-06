@@ -9,6 +9,7 @@ namespace fullscreen.Tests;
 [TestClass]
 [DoNotParallelize]
 public sealed class UserViewTests {
+    private const CollectorMetrics Summaries = CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu;
     [TestMethod]
     [DataRow(ProcessSort.Cpu, false, 12)]
     [DataRow(ProcessSort.Cpu, true, 11)]
@@ -319,10 +320,10 @@ public sealed class UserViewTests {
             IdleTime = TimeSpan.FromMinutes(17)
         };
         await using var ui = new DesignerUxTests.UiSession(surface, () => { });
-        Assert.AreEqual(CollectorMetrics.Users, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries | CollectorMetrics.Users, surface.RequiredMetrics);
         Assert.Contains("test-laptop", ui.Output);
         ui.Text("1", () => surface.View == MonitorView.Users);
-        Assert.AreEqual(CollectorMetrics.Users, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries | CollectorMetrics.Users, surface.RequiredMetrics);
         ui.Text("d", () => ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Any());
         Assert.Contains("Last input", ui.Output);
         Assert.Contains("0.00:17:00", ui.Output);
@@ -330,11 +331,11 @@ public sealed class UserViewTests {
         ui.Activate(close, () => !ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Any());
         ui.App.Focus(surface);
         ui.Text("l", () => surface.IncludeUserProcesses);
-        Assert.AreEqual(CollectorMetrics.Users | CollectorMetrics.Processes | CollectorMetrics.Owners, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries | CollectorMetrics.Users | CollectorMetrics.Processes | CollectorMetrics.Owners, surface.RequiredMetrics);
         ui.Text("+", () => surface.Users.IsExpanded("user:HOST\\Ada"));
         ui.Key(TerminalKey.Down, () => surface.Users.Selected?.Process.HasValue == true);
         ui.Text("l", () => !surface.IncludeUserProcesses);
-        Assert.AreEqual(CollectorMetrics.Users, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries | CollectorMetrics.Users, surface.RequiredMetrics);
         Assert.IsNull(surface.Users.Selected!.Process);
     }
     [TestMethod]
@@ -379,14 +380,14 @@ public sealed class UserViewTests {
         var source = new UserSource();
         using var app = new MonitorApp(60, 60000, "", ProcessSort.Cpu, MonitorView.Network, source, minimal: true);
         var surface = (MonitorSurface)app.Root;
-        Assert.IsTrue(SpinWait.SpinUntil(() => source.Requests.Contains(CollectorMetrics.Network), 3000));
+        Assert.IsTrue(SpinWait.SpinUntil(() => source.Requests.Contains(Summaries), 3000));
         Assert.IsFalse(source.Requests.Any(mask => mask.HasFlag(CollectorMetrics.Users)));
         surface.ShowUserSessions();
         Assert.IsTrue(SpinWait.SpinUntil(() => { app.Tick(); return surface.Frame.UserCount == 3; }, 3000));
         Assert.AreEqual("fixture target", surface.Frame.MachineName);
         Assert.AreEqual("HOST\\Ada", surface.Frame.Users[0].UserName);
         surface.View = MonitorView.Network;
-        Assert.IsTrue(SpinWait.SpinUntil(() => { app.Tick(); return source.Requests.Last() == CollectorMetrics.Network && surface.Frame.UserCount == 0; }, 3000));
+        Assert.IsTrue(SpinWait.SpinUntil(() => { app.Tick(); return source.Requests.Last() == Summaries && surface.Frame.UserCount == 0; }, 3000));
     }
     private sealed class UserSource : IMonitorSource {
         public System.Collections.Concurrent.ConcurrentQueue<CollectorMetrics> Requests { get; } = new();
@@ -482,11 +483,11 @@ public sealed class UserViewTests {
     [DataRow(true)]
     public async Task UsersLoadOnlyOnSelectionAndExpandedProcessesReuseConfirmedActions(bool remote) {
         var surface = new MonitorSurface { IsRemote = remote, ActionsEnabled = true, SourceLabel = "fixture", Frame = Frame() };
-        Assert.AreEqual(CollectorMetrics.Processes | CollectorMetrics.Owners | CollectorMetrics.ProcessGpu | CollectorMetrics.ProcessNetwork,
+        Assert.AreEqual(Summaries | CollectorMetrics.Processes | CollectorMetrics.Owners | CollectorMetrics.ProcessGpu | CollectorMetrics.ProcessNetwork,
             new MonitorSurface { Minimal = true }.RequiredMetrics);
         await using var ui = new DesignerUxTests.UiSession(surface, () => { });
         ui.Key(TerminalKey.F8, () => surface.View == MonitorView.Users);
-        Assert.AreEqual(CollectorMetrics.Users | CollectorMetrics.Processes | CollectorMetrics.Owners, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries | CollectorMetrics.Users | CollectorMetrics.Processes | CollectorMetrics.Owners, surface.RequiredMetrics);
         surface.Users.Expand(true);
         ui.Tick();
         ui.Key(TerminalKey.Down, () => surface.Users.Selected?.Process.HasValue == true);

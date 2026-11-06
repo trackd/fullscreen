@@ -38,168 +38,24 @@ Out-Chart -Nodes <psobject[]> -Edges <psobject[]> [-GraphType <GraphKind>]
 
 ## DESCRIPTION
 
-Opens an interactive chart of the original pipeline objects. Choose X/Y fields,
-graph type and Top/Bottom/First/Last filters from the menu. Both axis parameters
-accept property names or calculated properties such as
-@{ Name = 'MB'; Expression = { $_.WorkingSet64 / 1MB } }; Custom… opens the same
-editor in the UI. Sixel is automatic, with terminal-cell fallback.
+Explore pipeline objects or numeric values in an interactive chart. Choose
+fields, graph type, filters and presentation settings from the menus. Charts
+retain their original records for inspection. Graphics rendering falls back to
+terminal cells when unavailable.
 
-Hover over a point for 200 ms to see its series, value and label in a native
-tooltip. Distribution charts show bin counts or box statistics; task, flame and
-relationship charts show their contextual details. Click selects a point;
-Enter or double-click inspects the original record.
-Use `-ShowTooltips:$false` or clear Show tooltips in Graph / Axes and view to
-disable hover without affecting selection or inspection. This option is saved
-with chart configuration.
+Hover for values, click to select, and press Enter or double-click to inspect.
+T opens the data table. Where supported, the mouse wheel zooms, brackets pan
+and Shift-drag selects a range. Space pauses refresh; the graph menu provides
+axis, series, export and configuration options.
 
-`FlowChart` and `NetworkDiagram` instead take **separate** `-Nodes` and `-Edges`
-collections. Nodes have unique ordinal NodeId, optional Name (defaults to NodeId)
-and Shape (Auto, Process, Decision or Terminal). Edges reference SourceId and
-TargetId and optionally contain Label and Boolean Directed (default true).
-FlowChart requires directed edges and uses top-to-bottom ranked layout, with
-cyclic groups in the same rank and return/long connections routed outside node
-columns. NetworkDiagram uses a deterministic bounded spring layout and allows
-mixed directed/undirected edges. Neither uses profiling parent relationships,
-numeric weights, timeline axes or row aggregation.
+Numeric charts support multiple series, distributions and specialized layouts.
+Flamegraphs use frame/parent records with exclusive self weights; Gantt charts
+use task start/end instants. FlowChart and NetworkDiagram use separate node and
+edge collections. See GraphType, the associated input parameters and examples
+for each format.
 
-Cycles, isolated nodes, self-loops and parallel edges retain their identities.
-Click painted nodes, connectors or connection labels; Enter inspects the original
-record. Left/Right/Home/End navigate nodes followed by edges. Empty space does
-not select nearest data. PassThru returns the original node records followed by
-edge records on acceptance. The graph menu switches between compatible diagram
-kinds and supports existing export/configuration actions. Settings contain
-presentation, not the node/edge data: supply both collections again when loading.
-ReGIS uses cell fallback; SVG is static and PNG is plot-only. Diagrams fit the
-viewport, with clipped labels in constrained sizes; numeric zoom/pan/overlays,
-pipeline InputObject, refresh and row filters are not supported. Maximum size is
-256 nodes and 4096 edges; this is not a replacement for Graphviz's advanced
-crossing-minimization or interactive diagram editing.
-
-Sixel contains graphics pixels only. Diagram labels remain ordinary terminal
-text in reserved cells: the presenter omits those pixels and uses transparent
-Sixel background mode (P2=1). This is not protocol-native text or a portable
-text-over-image layer. Use `-ChartRenderer Native` if a terminal does not preserve
-these cells reliably. SVG can layer real text independently; PNG contains only
-the plot geometry.
-
-Multiple Y properties produce multiple lines (`Line`), overlaid areas (`Area`)
-or grouped columns (`Bars`). `ColumnLine` combines columns for the first selected
-Y property and lines for the remaining properties, all on one shared Y axis.
-Use comparable units. `-SeriesRole` or Graph / Series styles overrides individual
-roles. The shared legend wraps above the plot and toggles series on click;
-`-ShowLegend:$false` hides it. Narrow/short layouts summarize overflow rather
-than covering the plot.
-Multi-series is selected by the data (`-YProperty Actual, Target, Forecast`),
-not a separate MultiLine/MultiArea graph type. Line, Area and Bars already
-supported multiple series; this batch adds mixed roles, shared responsive legends
-and aligned grouped columns for differing series lengths.
-
-StackedBars, Marimekko and stacked areas use a theme-based categorical color
-cycle that separates the first adjacent components instead of pairing primary
-cyan with success-green. Subdued palettes can use the error hue before purple
-for stronger separation. Legend and band colors share this selection, and
-explicit series style colors still take precedence. Hiding a series
-does not renumber its original color identity.
-
-`StackedArea` instead adds nonnegative components from zero.
-`PercentStackedArea` normalizes visible components at each sample to a fixed
-0-100 percent Y axis. Both require equal-length series with identical finite,
-strictly increasing X coordinates. Missing components gap the whole stack and
-adjacent interpolated intervals; they are never converted to zero. A zero-total
-sample is blank in percent mode because no proportions are defined.
-Hiding a series recomputes composition for the remaining visible series.
-Numeric X zoom/pan clips crossing intervals without discarding their endpoints;
-percent mode does not allow Y limits or vertical zoom/pan. Y must be linear and
-X cannot be logarithmic. Clicks return the nearest endpoint of a painted interval
-with the original source row and raw component value, not an invented interpolated
-record; empty space is not selectable. Ordinary `Area` and signed `StackedBars`
-retain their existing behavior.
-
-`Waterfall` uses one Y property as ordered signed increments from zero.
-Bars float between cumulative endpoints; connectors show the running total.
-Missing rows leave a gap without adding zero, and zero remains a flat selectable
-bar. No total/subtotal rows are generated. `Heatmap` is the existing matrix mode:
-Y properties are matrix rows and input categories are columns. Unequal lengths
-leave missing tails. Its five-step shared color scale supports signed values;
-Minimum/Maximum set color bounds, with endpoint colors for out-of-range values.
-Blank cells are missing, not zero. Numeric category coordinates must be strictly
-increasing and aligned between series; labels can repeat when using input order.
-Click only painted bars/cells to inspect the original row; empty space does not
-select nearest data.
-
-`Marimekko` uses nonnegative Y properties as stacked components. Category widths
-encode observed totals; segment heights encode each component's percentage of
-its category, from 0 to 100. Missing segments contribute no observed amount;
-zero-total categories have no area. Negative values are rejected.
-`Kagi` uses one positive closing-price series in strictly increasing time/input
-order. `-ReversalAmount` is a fixed amount in price units, default 1; equality
-triggers reversal, smaller retracements are omitted. A new event column appears
-only on reversal, not every time interval. Thick green yang changes to thin red
-yin below the previous waist; yin changes to yang above the previous shoulder.
-Missing prices break the path. Click a painted segment for the original price
-row that caused it, not an interpolated price. Percentage/ATR reversals and OHLC
-high/low processing are not implemented. Both modes use intrinsic horizontal
-spacing, disable viewport navigation/coordinate overlays, and fall back to cells
-for ReGIS. Marimekko does not accept numeric bounds; Kagi bounds apply to prices.
-
-`Flamegraph` takes frame records, not stack strings or ordinary numeric series.
-FrameId is unique; ParentId is null/empty for roots and otherwise references
-another row. IDs are compared ordinally after invariant string conversion.
-One Y property supplies finite nonnegative **exclusive self weight** (default
-Weight); inclusive width is the node's self weight plus all descendants.
-Do not supply inclusive profiling weights, which would double-count descendants.
-Optional FrameNameProperty supplies function names; otherwise IDs are displayed.
-Equal sibling names and their matching descendant prefixes are aggregated.
-Click selects the first original record contributing to the frame; details show
-self/inclusive weights and the contributing row count. The original records are
-retained. Zero-only trees have no painted frames; invalid parents, duplicate IDs,
-cycles, missing/negative/nonfinite weights and overflowing totals are rejected.
-Input order need not be parent-first. Limits are 1,000,000 rows and 1,024 depths.
-Roots appear at the bottom; `-FlameReverse` puts roots at the top.
-Each depth occupies `FlameFrameRows` terminal rows (default 2, range 1-8),
-converted to the actual cell pixel height in raster output. Graph / Flamegraph
-frame rows changes it live; use 1 for compact deep profiles or 3-4 for larger
-frames. Shallow profiles leave empty space rather than stretching to fill height.
-Clipped deeper levels remain accessible through subtree focus.
-Call paths are sorted alphabetically: horizontal position is stack population,
-not time. Warm theme colors distinguish frames; colors do not encode duration.
-Click zooms into a frame's subtree horizontally and hover shows source details.
-F also focuses a selected frame, U moves to its parent, 0 returns to all roots,
-and R reverses depth direction. Focus makes deeper clipped levels accessible.
-Press / to search function names by case-insensitive substring; matches are
-highlighted and the legend reports whole-profile sample percentage, counting
-nested matching frames only once. Apply an empty search to clear highlighting.
-Blank self-weight space does not select a nearest frame. Numeric axis bounds,
-grouping, partial row filters and coordinate overlays are unsupported.
-ReGIS falls back to cells. SVG/Sixel/cells include labels when frames are wide
-enough; plot-only PNG preserves frame geometry/colors without text labels.
-Exclusive self samples precede child paths, matching sorted folded-stack prefix
-ordering. Raster/SVG corners round by at most two pixels; narrow tips reflect
-their true inclusive weights and discrete pixel resolution, not smoothed widths.
-
-Click a point to select it; double-click or press D/Enter for its properties.
-`Gantt` uses separate task rows with absolute Start/End instants and printable
-Task labels. Override fields with StartProperty, EndProperty and TaskNameProperty;
-do not supply XProperty/YProperty. DateTimeOffset, UTC DateTime and ISO 8601 text
-with Z/explicit offset are accepted; timezone-free dates and numeric durations
-are rejected. All displayed time is UTC. Input order defines independent lanes,
-so overlapping tasks remain distinct. End must not precede Start; equality is a
-selectable `*` milestone. Optional ProgressProperty holds a fraction from 0 to 1:
-the green portion is completed, null is unknown, and zero is known no progress.
-Each task has a label row and an interval row. Up/Down/PageUp/PageDown scroll
-lanes, wheel/+/- zoom time, brackets pan, and 0 resets. Click only an interval
-to select its original object; empty space and labels do not pick nearest data.
-Shift-drag/PassThru includes every task intersecting the selected time interval.
-Grouping, dependencies, resource scheduling, Y bounds and coordinate overlays
-are not implemented. ReGIS falls back to cells; PNG is plot-only.
-
-T opens the filtered data table. Wheel zooms, brackets pan, Shift-drag selects
-a range; Space pauses refresh. Chart settings include axes, series and export.
-The bottom footer shows the current GraphType and follows graph-menu changes,
-including in Minimal mode.
-
-With -PassThru, Q/F10 returns the current filtered objects in view order;
-Escape cancels. Without -PassThru, the viewer produces no pipeline output.
+With PassThru, Q or F10 accepts the current filtered objects; Escape cancels.
+Otherwise the viewer produces no pipeline output.
 
 ## EXAMPLES
 

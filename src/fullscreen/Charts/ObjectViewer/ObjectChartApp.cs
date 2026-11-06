@@ -83,7 +83,6 @@ internal sealed partial class ObjectChartApp : IFullscreenApp {
         FrameNameProperty = fields.Name;
         _automaticY = yProperties is null;
         Data = new(objects, token);
-        _sourceSnapshot = SourceSnapshot.Capture(objects);
         var specifications = new List<object>();
         if (xProperty is not null) {
             specifications.Add(xProperty);

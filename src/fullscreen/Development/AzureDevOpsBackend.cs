@@ -579,7 +579,7 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
             actions.AddRange(_backlogTypes.Select(type => Create("Create " + type, type, null)));
         }
         else if (view == 1 && (_boardTypes.Length > 0 || _workItemType is not null)) {
-            actions.AddRange((_boardTypes.Length > 0 ? _boardTypes : new[] { _workItemType! })
+            actions.AddRange((_boardTypes.Length > 0 ? _boardTypes : [_workItemType!])
                 .Select(type => Create("Create " + type, type, null)));
         }
         else {

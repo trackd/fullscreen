@@ -31,33 +31,17 @@ fdesign
 
 ## DESCRIPTION
 
-Opens a visual designer for building custom TUI layouts. Pick controls from the
-palette on the right and click or drag them onto the canvas. Drop on a container
-to add a child, or on another control to insert before or after it; drag existing
-controls to move them. The preview updates as you edit but never runs PowerShell
-handlers. Edits support undo and redo.
+Build custom TUI layouts visually by adding controls to the canvas and editing
+their properties. Preview changes without running PowerShell handlers; undo and
+redo are supported.
 
-The property panel along the bottom groups the selected control's settings into
-Content, Layout, Appearance and Behavior; Document holds the app title. Errors
-appear beside the field. Use View to keep properties always visible, on demand
-(F3) or hidden; the choice and panel height are remembered.
+Right-click or press F7 for control actions. F2 focuses the palette, F3 shows
+properties, F5 rebuilds the preview and F10 closes the designer.
 
-Right-click a canvas item or press F7 for actions such as select parent,
-duplicate, wrap in a row, column or border, move and delete. F2 focuses the
-palette, F4 expands the canvas, F5 rebuilds the preview and F10 closes the
-designer. Hover the header icons for their names and shortcuts.
-
-Save layouts as PSD1 or JSON; new layouts default to .tui.psd1. Saving also creates
-a same-stem .ps1 scaffold if missing, with help and event/update stubs to edit in
-your code editor. Existing scripts are never overwritten. Export app accepts
-.ps1, .psd1 or .json; its linked option keeps a .ps1 export's layout in a sibling
-.tui.psd1 so later exports update only layout data. Turn off that option for a
-new, single portable script. Data paths always get linked companions. Replacing
-layouts and closing with unsaved changes ask for confirmation.
-
-120 columns by 40 rows is recommended; smaller windows remain usable. Use
-PassThru to return the definition when the designer closes, then run it with
-Invoke-Tui. Press F12 to toggle the diagnostic overlay.
+Save layouts as PSD1 or JSON, or export a runnable script. A companion script
+provides a starting point for application behavior and is never overwritten.
+Linked layouts allow later design changes without replacing custom code.
+Unsaved changes require confirmation before closing.
 
 ## EXAMPLES
 

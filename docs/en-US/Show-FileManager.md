@@ -37,19 +37,13 @@ binary files, and copy, move, rename or create folders. File operations are
 confirmed and never overwrite existing destinations. Previewed files are read,
 never executed, and paths are treated literally, including wildcard characters.
 
-Common keys (letters are case-sensitive): Space marks an item and a toggles marks;
-y and x set the copy and move buffers and p pastes; F2 renames and n creates a
-folder; / filters, . shows hidden files, s chooses the sort and r reverses it;
-[ and ] move through history, ~ goes home and g opens a path; t opens a tab,
-{ and } switch tabs and w closes one; b opens bookmarks and B bookmarks the
-current folder; Tab or Enter focuses the preview and Escape returns; F5
-refreshes; Q quits. Right-click an item for its actions, and press ? inside the
-app for the full key reference.
+Space marks items, / filters and Q quits. Right-click for available actions or
+press ? for the full key reference.
 
 With PassThru, the selected paths are returned when you accept them. Syntax
 highlighting uses the optional TextMate module (L chooses the language), and
 image previews use the optional Sixel module in a Sixel-capable terminal; a
-notice is shown otherwise. Minimal mode hides the parent and preview panes.
+notice is shown otherwise.
 
 ## EXAMPLES
 

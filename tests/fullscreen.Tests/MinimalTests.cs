@@ -12,6 +12,7 @@ namespace fullscreen.Tests;
 
 [TestClass]
 public sealed class MinimalTests {
+    private const CollectorMetrics Summaries = CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu;
     [TestMethod]
     public void CollectorClearsUnrequestedDataAndSkipsProcessEnumeration() {
         using var collector = new PerformanceCollector();
@@ -44,24 +45,24 @@ public sealed class MinimalTests {
     public void DemandTracksVisibleViewsColumnsAndHiddenSortDependencies() {
         var surface = new MonitorSurface { Minimal = true, View = MonitorView.Network };
         VisualSnapshotRenderer.Render(surface, 140, 35);
-        Assert.AreEqual(CollectorMetrics.Network, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries, surface.RequiredMetrics);
         surface.View = MonitorView.Gpu;
-        Assert.AreEqual(CollectorMetrics.Gpu, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries, surface.RequiredMetrics);
         surface.View = MonitorView.Dashboard;
         Assert.AreEqual(CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu, surface.RequiredMetrics);
         surface.View = MonitorView.Processes;
         surface.ColumnSettings.Configure([ProcessColumn.Name, ProcessColumn.Cpu], null, false);
-        Assert.AreEqual(CollectorMetrics.Processes, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries | CollectorMetrics.Processes, surface.RequiredMetrics);
         surface.Model.Sort = ProcessSort.Gpu;
-        Assert.AreEqual(CollectorMetrics.Processes | CollectorMetrics.ProcessGpu, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries | CollectorMetrics.Processes | CollectorMetrics.ProcessGpu, surface.RequiredMetrics);
         surface.Model.Sort = ProcessSort.Cpu;
         surface.Model.Filter = "alice";
-        Assert.AreEqual(CollectorMetrics.Processes | CollectorMetrics.Owners, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries | CollectorMetrics.Processes | CollectorMetrics.Owners, surface.RequiredMetrics);
         surface.Model.Filter = "";
         surface.Minimal = false;
         Assert.AreEqual(CollectorMetrics.Processes | CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu, surface.RequiredMetrics);
         VisualSnapshotRenderer.Render(surface, 30, 10);
-        Assert.AreEqual(CollectorMetrics.None, surface.RequiredMetrics);
+        Assert.AreEqual(Summaries, surface.RequiredMetrics);
     }
 
     [TestMethod]
@@ -69,11 +70,12 @@ public sealed class MinimalTests {
         var source = new RecordingSource();
         using (var app = new MonitorApp(60, 60000, "", ProcessSort.Cpu, MonitorView.Network, source, minimal: true)) {
             var surface = (MonitorSurface)app.Root;
-            Assert.IsTrue(SpinWait.SpinUntil(() => source.Requests.Contains(CollectorMetrics.Network), 3000));
-            surface.View = MonitorView.Gpu;
-            surface.Dirty = true;
-            Assert.IsTrue(SpinWait.SpinUntil(() => { app.Tick(); return source.Requests.Contains(CollectorMetrics.Gpu); }, 3000));
+            Assert.IsTrue(SpinWait.SpinUntil(() => source.Requests.Contains(Summaries), 3000));
             Assert.IsFalse(source.Requests.Any(mask => mask.HasFlag(CollectorMetrics.Processes)));
+            surface.ColumnSettings.Configure([ProcessColumn.Name, ProcessColumn.Cpu], null, false);
+            surface.View = MonitorView.Processes;
+            surface.Dirty = true;
+            Assert.IsTrue(SpinWait.SpinUntil(() => { app.Tick(); return source.Requests.Contains(Summaries | CollectorMetrics.Processes); }, 3000));
         }
         Assert.IsTrue(source.Disposed);
     }
@@ -106,7 +108,7 @@ public sealed class MinimalTests {
             Assert.HasCount(count, source.Requests);
             backend.PushEvent(new TerminalTextEvent { Text = "p" });
             Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return source.Requests.Count > count; }, 5000));
-            Assert.AreEqual(CollectorMetrics.Network, source.Requests.Last());
+            Assert.AreEqual(Summaries, source.Requests.Last());
         }
         finally { typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null); }
     }

@@ -96,15 +96,17 @@ public sealed class RefreshEfficiencyTests {
     }
 
     [TestMethod]
-    public void RefreshSource_UnchangedNotePropertiesRetainDataAndInPlaceChangesRefresh() {
+    public void RefreshSource_AlwaysRebuildsAndPreservesCurrentSourceObjects() {
         var source = new PSObject();
         source.Properties.Add(new PSNoteProperty("Value", 10d));
         using var app = new ObjectChartApp([source], yProperties: ["Value"]);
         var data = app.Data;
         long version = app.Surface.Plot.DataVersion;
         app.ReplaceObjects([source]);
-        Assert.AreSame(data, app.Data);
-        Assert.AreEqual(version, app.Surface.Plot.DataVersion);
+        Assert.AreNotSame(data, app.Data);
+        Assert.IsGreaterThan(version, app.Surface.Plot.DataVersion);
+        Assert.AreSame(source, app.Data.Objects[0]);
+        data = app.Data;
         source.Properties["Value"].Value = 20d;
         app.ReplaceObjects([source]);
         Assert.AreNotSame(data, app.Data);

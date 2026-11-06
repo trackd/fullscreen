@@ -128,45 +128,7 @@ internal sealed partial class ObjectChartApp {
         Replot();
     }
 
-    private sealed record SourceSnapshot(PSObject[] Rows, (string Name, object? Value)[] Fields) {
-        internal static SourceSnapshot? Capture(IReadOnlyList<PSObject> rows) {
-            var fields = new List<(string, object?)>();
-            foreach (var row in rows) {
-                if (row.BaseObject is not PSCustomObject) {
-                    return null;
-                }
-                foreach (var property in row.Properties) {
-                    // Adapted/script getters and nested mutable values have no reliable
-                    // change token. Keep their existing refresh behavior.
-                    if (property is not PSNoteProperty) {
-                        return null;
-                    }
-                    var value = property.Value;
-                    if (value is not (null or string or bool or char or byte or sbyte or short or ushort
-                        or int or uint or long or ulong or float or double or decimal or DateTime
-                        or DateTimeOffset or TimeSpan or Guid or Enum)) {
-                        return null;
-                    }
-                    fields.Add((property.Name, value));
-                }
-                fields.Add(("", null));
-            }
-            return new([.. rows], [.. fields]);
-        }
-
-        internal bool Matches(SourceSnapshot other) =>
-            Rows.Length == other.Rows.Length
-            && Rows.Zip(other.Rows).All(pair => ReferenceEquals(pair.First, pair.Second))
-            && Fields.AsSpan().SequenceEqual(other.Fields);
-    }
-
-    private SourceSnapshot? _sourceSnapshot;
-
     internal void ReplaceObjects(IReadOnlyList<PSObject> objects) {
-        var snapshot = SourceSnapshot.Capture(objects);
-        if (Data.Calculated.Count == 0 && snapshot is not null && _sourceSnapshot?.Matches(snapshot) == true) {
-            return;
-        }
         var next = new ObjectChartData(objects, _token);
         foreach (var column in Data.Calculated) {
             next.Store(next.Calculate(column.Definition, column.Key, _token));
@@ -184,7 +146,6 @@ internal sealed partial class ObjectChartApp {
             RowSubset = null;
             Replot();
             Surface.ReplaceSource(next);
-            _sourceSnapshot = snapshot;
         }
         catch {
             Data = previous;

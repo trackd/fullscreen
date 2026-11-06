@@ -10,6 +10,66 @@ namespace fullscreen.Tests;
 [TestClass]
 public sealed class DeveloperStatusTests {
     [TestMethod]
+    [DataRow("A", " ", "Success")]
+    [DataRow("?", "?", "Success")]
+    [DataRow("M", " ", "Warning")]
+    [DataRow(" ", "D", "Error")]
+    [DataRow("R", " ", "Purple")]
+    [DataRow("U", "U", "Error")]
+    [DataRow("A", "A", "Error")]
+    [DataRow("D", "D", "Error")]
+    public void GitPorcelainStatesUseSemanticColors(string index, string worktree, string expected) {
+        var palette = ThemePalette.Default;
+        var color = expected switch {
+            "Success" => palette.Success,
+            "Warning" => palette.Warning,
+            "Purple" => palette.Purple,
+            _ => palette.Error
+        };
+        Assert.AreEqual(color, DeveloperStatus.GitChangeColor(index, worktree, palette));
+    }
+
+    [TestMethod]
+    public void GitDiffAndTrackingColorsDoNotInterpretOrdinaryTextAsStatus() {
+        var palette = ThemePalette.Default;
+        Assert.AreEqual(palette.Success, DeveloperStatus.GitLineColor("+added", palette));
+        Assert.AreEqual(palette.Error, DeveloperStatus.GitLineColor("-removed", palette));
+        Assert.AreEqual(palette.Purple, DeveloperStatus.GitLineColor("+++ b/file", palette));
+        Assert.AreEqual(palette.Accent, DeveloperStatus.GitLineColor("@@ -1 +1 @@", palette));
+        Assert.IsNull(DeveloperStatus.GitLineColor(" context", palette));
+        Assert.AreEqual(palette.Warning, DeveloperStatus.GitCellColor("Ahead / behind", "[ahead 2, behind 1]", palette));
+        Assert.AreEqual(palette.Error, DeveloperStatus.GitCellColor("Ahead / behind", "[gone]", palette));
+        Assert.AreEqual(palette.Success, DeveloperStatus.GitCellColor("Current", "*", palette));
+        Assert.IsNull(DeveloperStatus.GitCellColor("Path", "M", palette));
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void GitDiffColorsReachNativePreviewAndExpandedDocument() {
+        var palette = ThemePalette.Default;
+        var model = new TableModel(["Path"]);
+        model.Rows.Add(new(0, "file", ["file"], ["file"]));
+        model.Rebuild();
+        var surface = new TableSurface(model, "Git") {
+            DocumentAccent = line => DeveloperStatus.GitLineColor(line, palette)
+        };
+        const string diff = "diff --git a/file b/file\n@@ -1 +1 @@\n-removed\n+added";
+        surface.SetPreview("Diff", diff);
+        Check();
+        surface.SetDocument(diff);
+        Check();
+        void Check() {
+            var svg = XDocument.Parse(CellBufferSvgExporter.Export(VisualSnapshotRenderer.Render(surface, 120, 25)));
+            foreach (var (text, color) in new[] { ("-removed", palette.Error), ("+added", palette.Success) }) {
+                var rgb = color.ToRgb();
+                Assert.IsTrue(svg.Descendants().Any(element => element.Name.LocalName == "text"
+                    && element.Value.Contains(text, StringComparison.Ordinal)
+                    && (string?)element.Attribute("fill") == $"rgb({rgb.R},{rgb.G},{rgb.B})"), text);
+            }
+        }
+    }
+
+    [TestMethod]
     [DataRow("success", "Success")]
     [DataRow("succeeded", "Success")]
     [DataRow("failure", "Error")]
