@@ -52,7 +52,7 @@ public sealed class NumericChartTests {
         var extremes = new Chart([-double.MaxValue, double.MaxValue]) { GraphKind = GraphKind.BoxPlot };
         extremes.DrawPixels(plot, 101, 101);
         Assert.IsTrue(plot.Pixels.ToArray().Any(pixel => pixel > 1));
-        Assert.AreEqual(0d, SixelPlot.Summarize([-double.MaxValue, double.MaxValue]).Median);
+        Assert.AreEqual(0d, ChartStatistics.Summarize([-double.MaxValue, double.MaxValue]).Median);
     }
     [TestMethod]
     public async Task NumericListChangesRepaintAndMouseRaisesSelectionEvents() {
@@ -124,10 +124,15 @@ public sealed class NumericChartTests {
     }
     [TestMethod]
     public void CustomTuiNumericBindingsRefreshWithoutCreatingTimeHistory() {
-        var document = TuiDocument.FromJson("""{"Root":{"Id":"plot","Type":"Chart","Text":"Numeric values","Bind":"samples","Minimum":-10,"Maximum":10}}""");
+        var document = TuiDocument.FromJson("""{"Root":{"Id":"plot","Type":"Chart","Text":"Numeric values","Bind":"samples","Minimum":-10,"Maximum":10,"GraphKind":"ColumnLine","ShowLegend":true}}""");
         using var app = new CustomTuiApp(document, new Hashtable { ["samples"] = new object?[] { -2d, null, PSObject.AsPSObject(7d) } });
         var chart = Assert.IsInstanceOfType<Chart>(app.Controls["plot"]);
         Assert.IsFalse(chart is BuiltInTrend);
+        Assert.AreEqual(GraphKind.ColumnLine, chart.GraphKind);
+        Assert.IsTrue(chart.ShowLegend);
+        var saved = TuiDocument.FromJson(document.ToJson());
+        Assert.IsTrue(saved.Root.ShowLegend);
+        Assert.AreEqual("ColumnLine", saved.Root.GraphKind);
         CollectionAssert.AreEqual(new[] { -2d, double.NaN, 7d }, chart.Values.ToArray());
         app.State["samples"] = new[] { 9d, -8d };
         app.Tick();

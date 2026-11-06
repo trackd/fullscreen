@@ -42,16 +42,12 @@ internal sealed class FullscreenChrome : Visual {
     protected override void OnAttachedToApp(TerminalApp app) {
         base.OnAttachedToApp(app);
         _layer = Parent;
-        if (_layer is not null) {
-            _layer.PointerPressedRouted += OnLayerPointerPressed;
-        }
+        _layer?.PointerPressedRouted += OnLayerPointerPressed;
     }
 
     protected override void OnDetachedFromApp(TerminalApp app) {
-        if (_layer is not null) {
-            _layer.PointerPressedRouted -= OnLayerPointerPressed;
-            _layer = null;
-        }
+        _layer?.PointerPressedRouted -= OnLayerPointerPressed;
+        _layer = null;
         base.OnDetachedFromApp(app);
     }
 

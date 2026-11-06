@@ -24,7 +24,7 @@ Describe 'TuiDataFile' -Tag 'Integration' {
         $hashLayout = New-TuiDefinition -Root @{ Id = 'root'; Type = 'Text'; Text = 'Hashtable layout' }
         ($native.Root.Children.Count) | Should -Be (2) -Because 'Native object construction failed.'
         ($hashLayout.Root.Text) | Should -Be ('Hashtable layout') -Because 'Native object construction failed.'
-        $target = Join-Path $temporaryRoot 'layout[1].PSD1'
+        $target = Join-Path $temporaryRoot 'layout-one.PSD1'
         $native | Export-TuiDefinition -LiteralPath $target -WhatIf
         [bool](Test-Path -LiteralPath $target) | Should -BeFalse -Because 'PSD1 export ignored WhatIf.'
         $returned = $native | Export-TuiDefinition -LiteralPath $target -PassThru

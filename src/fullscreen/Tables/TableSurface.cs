@@ -39,10 +39,10 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
             _toolbarCommands = value;
             _toolbar.Children.Clear();
             foreach (var command in value) {
-                var captured = command;
-                var button = new Button(captured.Label) { MinHeight = 1, MaxHeight = 1 }.Click(() => {
+                var (Label, Execute) = command;
+                var button = new Button(Label) { MinHeight = 1, MaxHeight = 1 }.Click(() => {
                     App?.Focus(this);
-                    captured.Execute();
+                    Execute();
                 });
                 button.SetStyle(Palette.CompactActionButton);
                 _toolbar.Add(button);

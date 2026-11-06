@@ -454,14 +454,14 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
         if (item.State is WorkflowRunState run) {
             operations.Add(new("Open run in browser", "Open the selected workflow run in your browser.", (_, _) => Task.FromResult(OpenUrl(run.Url)), ReadOnly: true));
             if (_workflowLinks.TryGetValue(run.Id, out var links)) {
-                foreach (var job in links.Jobs) {
-                    string jobUrl = job.Url;
-                    operations.Add(new("Open job · " + job.Name, "Open this workflow job in your browser.", (_, _) => Task.FromResult(OpenUrl(jobUrl)), ReadOnly: true));
+                foreach (var (Name, Url) in links.Jobs) {
+                    string jobUrl = Url;
+                    operations.Add(new("Open job · " + Name, "Open this workflow job in your browser.", (_, _) => Task.FromResult(OpenUrl(jobUrl)), ReadOnly: true));
                 }
 
-                foreach (var artifact in links.Artifacts) {
-                    string artifactUrl = artifact.Url;
-                    operations.Add(new("Open artifact · " + artifact.Name, "Open or download this workflow artifact.", (_, _) => Task.FromResult(OpenUrl(artifactUrl)), ReadOnly: true));
+                foreach (var (Name, Url) in links.Artifacts) {
+                    string artifactUrl = Url;
+                    operations.Add(new("Open artifact · " + Name, "Open or download this workflow artifact.", (_, _) => Task.FromResult(OpenUrl(artifactUrl)), ReadOnly: true));
                 }
             }
             operations.Add(new(
@@ -539,9 +539,9 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
 
         if (view == 3) {
             if (_recentWorkflowRuns.TryGetValue(item.Key, out var recentRuns)) {
-                foreach (var recentRun in recentRuns) {
-                    string runUrl = recentRun.Url;
-                    operations.Add(new("Open recent run · " + recentRun.Name, "Open this recent workflow run in your browser.", (_, _) => Task.FromResult(OpenUrl(runUrl)), ReadOnly: true));
+                foreach (var (Name, Url) in recentRuns) {
+                    string runUrl = Url;
+                    operations.Add(new("Open recent run · " + Name, "Open this recent workflow run in your browser.", (_, _) => Task.FromResult(OpenUrl(runUrl)), ReadOnly: true));
                 }
             }
 

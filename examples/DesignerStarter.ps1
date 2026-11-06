@@ -114,8 +114,18 @@ $onTick = {
     $state.phase += 0.1
     $state.load = 50 + 35 * [Math]::Sin($state.phase)
 }
-$result = $layout |
-    Invoke-Tui -Theme $Theme -Minimal:$Minimal.IsPresent -OnEvent $onEvent -OnTick $onTick -TickInterval 250
+$options = @{
+    OnEvent = $onEvent
+    OnTick = $onTick
+    TickInterval = 250
+}
+if ($PSBoundParameters.ContainsKey('Theme')) {
+    $options.Theme = $Theme
+}
+if ($PSBoundParameters.ContainsKey('Minimal')) {
+    $options.Minimal = $Minimal.IsPresent
+}
+$result = $layout | Invoke-Tui @options
 if (-not $result.Cancelled) {
     $result.Value
 }

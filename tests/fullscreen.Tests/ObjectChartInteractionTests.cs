@@ -43,17 +43,23 @@ public sealed class ObjectChartInteractionTests {
     [DataRow(false, 120, 40)]
     [DataRow(true, 120, 40)]
     [DataRow(false, 60, 20)]
-    public void CanvasUsesOneHeaderAndAtMostTwoFooterRows(bool minimal, int width, int height) {
+    public void CanvasReservesOneHeaderAndSharedLegendWithAtMostTwoFooterRows(bool minimal, int width, int height) {
         using var chart = new ObjectChartApp([Item(1, -2, "original"), Item(2, 8, "next")], "X", ["Y"]);
         chart.Surface.Minimal = minimal;
         chart.Surface.MinHeight = chart.Surface.MaxHeight = height;
         var lines = VisualSnapshotRenderer.Render(chart.Root, width, height).ToMarkupLines();
-        Assert.AreEqual(1, chart.Surface.Plot.PlotBounds.Y);
-        Assert.AreEqual(height - (minimal ? 3 : 4), chart.Surface.Plot.PlotBounds.Height);
+        Assert.AreEqual(2, chart.Surface.Plot.PlotBounds.Y);
+        Assert.AreEqual(height - (minimal ? 4 : 5), chart.Surface.Plot.PlotBounds.Height);
+        Assert.Contains("Y", lines[1], "The common series legend belongs above the plot, not in the menu header.");
         Assert.AreEqual(3, chart.Surface.Plot.PlotBounds.X, "A short numeric axis needs only three columns.");
         Assert.AreEqual(width, chart.Surface.Plot.PlotBounds.Right);
         Assert.Contains("Object #1", lines[height - (minimal ? 1 : 2)]);
+        Assert.Contains("Line", lines[^1], "The current graph kind belongs in the bottom footer in both chrome modes.");
         if (!minimal) { Assert.Contains("Double-click/D", lines[^1]); }
+        chart.Configure("X", ["Y"], GraphKind.Bars);
+        var changed = VisualSnapshotRenderer.Render(chart.Root, width, height).ToMarkupLines();
+        Assert.Contains("Bars", changed[^1], "Changing graph kinds must update the bottom footer.");
+        Assert.DoesNotContain("Line", changed[^1]);
     }
     [TestMethod]
     public async Task MouseChartMenuAnchorsBelowChartAndChangesTheGraph() {
@@ -105,7 +111,7 @@ public sealed class ObjectChartInteractionTests {
         using var session = Terminal.Open(backend, options, force: true);
         using var chart = new ObjectChartApp([Item(0, -10, "low"), Item(10, 10, "high")], "X", ["Y"]);
         TerminalProbeTests.Observe(session.Instance, "\x1b[6;12;4t\x1b[?65;4c");
-        using var presenter = Assert.IsInstanceOfType<SixelChartPresenter>(ChartPresenters.Create(session.Instance, ChartRenderer.Sixel, metrics));
+        using var presenter = Assert.IsInstanceOfType<SixelChartPresenter>(ChartPresenters.Create(session.Instance, ChartRenderer.Sixel, metrics, TestContext.CancellationToken));
         var root = new fullscreen.Hosting.FullscreenChrome(chart, fullscreen.Themes.ThemePalette.Default);
         await using var terminal = new TerminalApp(root, session.Instance, new TerminalAppOptions {
             HostKind = TerminalHostKind.Fullscreen,
@@ -158,7 +164,7 @@ public sealed class ObjectChartInteractionTests {
             Assert.Contains("Overlay", overlayFrame);
             int start = overlayFrame.IndexOf("\x1bP", StringComparison.Ordinal), end = overlayFrame.IndexOf("\x1b\\", start, StringComparison.Ordinal) + 2;
             var raster = SixelTests.Decode(overlayFrame[start..end]);
-            var covered = SixelChartPresenter.Intersect(chart.Surface.Plot.PlotBounds, popup.Content!.Bounds);
+            var covered = ChartClipping.Intersect(chart.Surface.Plot.PlotBounds, popup.Content!.Bounds);
             Assert.IsGreaterThan(0, covered.Width);
             for (int y = (covered.Y - chart.Surface.Plot.PlotBounds.Y) * metrics.CellPixelHeight; y < (covered.Bottom - chart.Surface.Plot.PlotBounds.Y) * metrics.CellPixelHeight; y++) {
                 for (int x = (covered.X - chart.Surface.Plot.PlotBounds.X) * metrics.CellPixelWidth; x < (covered.Right - chart.Surface.Plot.PlotBounds.X) * metrics.CellPixelWidth; x++) {
@@ -182,7 +188,7 @@ public sealed class ObjectChartInteractionTests {
             Assert.IsGreaterThanOrEqualTo(0, debugStart);
             int debugEnd = debugFrame.IndexOf("\x1b\\", debugStart, StringComparison.Ordinal) + 2;
             var debugRaster = SixelTests.Decode(debugFrame[debugStart..debugEnd]);
-            var debugCovered = SixelChartPresenter.Intersect(chart.Surface.Plot.PlotBounds, TerminalOverlayBounds.Debug(terminal));
+            var debugCovered = ChartClipping.Intersect(chart.Surface.Plot.PlotBounds, TerminalOverlayBounds.Debug(terminal));
             Assert.IsGreaterThan(0, debugCovered.Height);
             for (int y = (debugCovered.Y - chart.Surface.Plot.PlotBounds.Y) * metrics.CellPixelHeight; y < (debugCovered.Bottom - chart.Surface.Plot.PlotBounds.Y) * metrics.CellPixelHeight; y++) {
                 int x = (debugCovered.X - chart.Surface.Plot.PlotBounds.X) * metrics.CellPixelWidth;
@@ -194,4 +200,6 @@ public sealed class ObjectChartInteractionTests {
         }
         finally { typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null); }
     }
+
+    public TestContext TestContext { get; set; }
 }

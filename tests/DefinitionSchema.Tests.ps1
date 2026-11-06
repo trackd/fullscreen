@@ -56,7 +56,7 @@ Describe 'Definition schema contracts' {
     }
 
     It 'Round-trips <GraphKind> through native chart definitions' -ForEach @(
-        'Line','Area','Bars','Step','Scatter','Stem','Histogram','BoxPlot' | ForEach-Object { @{ GraphKind = $_ } }
+        'Line','Area','Bars','Step','Scatter','Stem','Histogram','BoxPlot','Pie','Gauge','RadialBars','Radar','Heatmap','Waterfall' | ForEach-Object { @{ GraphKind = $_ } }
     ) {
         $chart = New-TuiControl Chart -Id plot -Property @{ GraphKind = $GraphKind }
         $definition = New-TuiDefinition -Root $chart
@@ -65,6 +65,6 @@ Describe 'Definition schema contracts' {
     }
 
     It 'Rejects unsupported chart styles' {
-        { '{"Root":{"Id":"plot","Type":"Chart","GraphKind":"Pie"}}' | New-TuiDefinition -ErrorAction Stop } | Should -Throw -ErrorId 'FullscreenTuiDefinitionFailed*'
+        { '{"Root":{"Id":"plot","Type":"Chart","GraphKind":"NotAChart"}}' | New-TuiDefinition -ErrorAction Stop } | Should -Throw -ErrorId 'FullscreenTuiDefinitionFailed*'
     }
 }

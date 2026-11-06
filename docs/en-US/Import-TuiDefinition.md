@@ -44,6 +44,7 @@ Does not open a terminal or execute handlers.
 ### Load a native PowerShell layout
 
 ```powershell
+New-TuiDefinition -Title 'Native layout' | Export-TuiDefinition -Path ./MyTool.tui.psd1 -Script:$false -Force
 $layout = Import-TuiDefinition -LiteralPath ./MyTool.tui.psd1
 $layout | Show-TuiDesigner
 ```
@@ -53,6 +54,7 @@ $layout | Show-TuiDesigner
 The path is literal and the file contains data, not executable handlers.
 
 ```powershell
+New-TuiDefinition -Title 'Saved layout' | Export-TuiDefinition -Path ./tool.tui.json -Script:$false -Force
 $layout = Import-TuiDefinition -Path ./tool.tui.json
 ```
 
@@ -61,7 +63,10 @@ $layout = Import-TuiDefinition -Path ./tool.tui.json
 FullName binds to Path by property name.
 
 ```powershell
-Get-ChildItem -Path ./layouts -Filter '*.tui.json' |
+$directory = Join-Path ([IO.Path]::GetTempPath()) ("fullscreen-layouts-{0}" -f [guid]::NewGuid())
+$null = New-Item -ItemType Directory -Path $directory
+New-TuiDefinition -Title 'Sample' | Export-TuiDefinition -Path (Join-Path $directory 'sample.tui.json') -Script:$false
+Get-ChildItem -LiteralPath $directory -Filter '*.tui.json' |
     Import-TuiDefinition |
     Select-Object Title, Version
 ```
@@ -71,7 +76,8 @@ Get-ChildItem -Path ./layouts -Filter '*.tui.json' |
 Imported layouts use native PowerShell data.
 
 ```powershell
-$layout = Import-TuiDefinition -LiteralPath './tool[1].tui.json'
+New-TuiDefinition -Title 'Editable layout' | Export-TuiDefinition -Path ./editable-tool.tui.json -Script:$false -Force
+$layout = Import-TuiDefinition -Path ./editable-tool.tui.json
 $layout.Title = 'My customized tool'
 $layout | Invoke-Tui -Theme 'Dark Modern'
 ```

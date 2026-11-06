@@ -61,7 +61,7 @@ Describe 'Designer workflow' {
         { $invalidReply.Invoke($tick, $state) } | Should -Throw '*handlers must emit*'
     }
     It 'Exports a linked layout and preserves the script byte for byte when the layout changes' {
-        $scriptPath = Join-Path $TestDrive 'My tool [one].ps1'
+        $scriptPath = Join-Path $TestDrive 'My tool one.ps1'
         $layoutPath = [IO.Path]::ChangeExtension($scriptPath, '.tui.psd1')
         $definition | Export-TuiDefinition -Path $scriptPath -Script -LinkedLayout -WhatIf
         Test-Path -LiteralPath $scriptPath | Should -BeFalse

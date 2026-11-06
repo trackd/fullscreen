@@ -258,8 +258,8 @@ public sealed class AzureDevOpsTests {
             ["System.WorkItemType"] = type,
             ["System.State"] = state
         };
-        foreach (var estimate in estimates) {
-            fields[estimate.Field] = estimate.Value;
+        foreach (var (Field, Value) in estimates) {
+            fields[Field] = Value;
         }
         return JsonSerializer.SerializeToElement(new { id, rev = 3, fields });
     }

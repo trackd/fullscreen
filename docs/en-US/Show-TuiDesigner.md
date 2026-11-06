@@ -74,7 +74,8 @@ Show-TuiDesigner -Path ./tool.tui.json
 F5 rebuilds the live preview.
 
 ```powershell
-Show-TuiDesigner -LiteralPath './tool[1].tui.json' -Theme 'Light Modern'
+New-TuiDefinition -Title 'Editable tool' | Export-TuiDefinition -Path ./editable-tool.tui.json -Script:$false -Force
+Show-TuiDesigner -Path ./editable-tool.tui.json -Theme 'Light Modern'
 ```
 
 ### Example 3: Edit native PowerShell data

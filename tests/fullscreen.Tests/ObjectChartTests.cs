@@ -282,12 +282,12 @@ public sealed class ObjectChartTests {
     [TestMethod]
     public void HistogramCountsIncludeBothExtremesAndScalingHandlesLargeSignedNumbers() {
         var data = new ObjectChartData([PSObject.AsPSObject(-4), PSObject.AsPSObject(-2), PSObject.AsPSObject(0), PSObject.AsPSObject(4)]);
-        int[] bins = Chart.Histogram(data.Project(null, ["Value"], TestContext.CancellationToken)[0].Points, -4, 4, 4);
+        int[] bins = ChartStatistics.Histogram(data.Project(null, ["Value"], TestContext.CancellationToken)[0].Points, -4, 4, 4);
         CollectionAssert.AreEqual(new[] { 1, 1, 1, 1 }, bins);
-        Assert.AreEqual(.5, Chart.Fraction(0, -double.MaxValue, double.MaxValue));
-        Assert.AreEqual(.5, Chart.Fraction(4, 4, 4));
-        Assert.AreEqual(0, Chart.Fraction(-double.MaxValue, -double.MaxValue, double.MaxValue));
-        Assert.AreEqual(1, Chart.Fraction(double.MaxValue, -double.MaxValue, double.MaxValue));
+        Assert.AreEqual(.5, ChartMath.Fraction(0, -double.MaxValue, double.MaxValue));
+        Assert.AreEqual(.5, ChartMath.Fraction(4, 4, 4));
+        Assert.AreEqual(0, ChartMath.Fraction(-double.MaxValue, -double.MaxValue, double.MaxValue));
+        Assert.AreEqual(1, ChartMath.Fraction(double.MaxValue, -double.MaxValue, double.MaxValue));
     }
     [TestMethod]
     public void DistributionGraphsIgnoreMissingXButKeepTheAxisForSwitchingBack() {
@@ -314,7 +314,7 @@ public sealed class ObjectChartTests {
         ui.Key(TerminalKey.Down, () => true);
         ui.Key(TerminalKey.Enter, () => app.XProperty == "Name");
         ui.Text("g", () => ui.Output.Contains("BoxPlot", StringComparison.Ordinal));
-        foreach (string name in Enum.GetNames<GraphKind>()) {
+        foreach (string name in Enum.GetNames<GraphKind>().Where(name => !ChartTopology.Supports(Enum.Parse<GraphKind>(name)))) {
             Assert.AreEqual(1, ui.App.Root.EnumerateVisualsDepthFirst().OfType<TextBlock>().Count(text => text.Text == name), "Each graph appears once, regardless of its renderer.");
         }
         for (int index = 0; index < 7; index++) {

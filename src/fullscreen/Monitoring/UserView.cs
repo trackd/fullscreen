@@ -179,12 +179,12 @@ public sealed class UserView {
             return comparison == 0 ? comparer.Compare(left.Row.UserName, right.Row.UserName) : comparison;
         });
         var rows = new List<UserViewRow>();
-        foreach (var group in groups) {
-            var header = group.Row;
+        foreach (var (Row, Owned, Matches, Total) in groups) {
+            var header = Row;
             string key = header.Key, account = header.UserName;
             var logins = header.Logins;
-            var owned = group.Owned;
-            bool matches = group.Matches;
+            var owned = Owned;
+            bool matches = Matches;
             rows.Add(header);
             if (_expanded.Contains(key) || !matches) {
                 if (!_processViews.TryGetValue(account, out var view)) {

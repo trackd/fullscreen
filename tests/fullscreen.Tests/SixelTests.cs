@@ -17,6 +17,49 @@ namespace fullscreen.Tests;
 [TestClass]
 public sealed partial class SixelTests {
     [TestMethod]
+    [DataRow(GraphKind.Bars)]
+    [DataRow(GraphKind.Area)]
+    [DataRow(GraphKind.Heatmap)]
+    [DataRow(GraphKind.StackedArea)]
+    [DoNotParallelize]
+    public async Task PresenterKeepsIndependentOwnedPayloadsWhenOneOfTwoChartsChanges(GraphKind kind) {
+        var metrics = new TerminalPixelMetrics(80, 120, 4, 12, 20, 10);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(20, 10));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var app = new TerminalApp(new XenoAtom.Terminal.UI.Controls.TextBlock(""), session.Instance);
+        var firstChart = new Chart([10, 50, 25]) { GraphKind = kind };
+        var secondChart = new Chart([70, 20, 30]) { GraphKind = GraphKind.Pie };
+        var firstBounds = new Rectangle(0, 0, 6, 2);
+        var secondBounds = new Rectangle(0, 3, 6, 2);
+        var commands = new GraphicsCommandBuffer {
+            new GraphicsCommand(1, firstBounds, firstBounds, TerminalGraphicContent.FromObject(firstChart), ImageScaleMode.Stretch, false, 0, true, null),
+            new GraphicsCommand(2, secondBounds, secondBounds, TerminalGraphicContent.FromObject(secondChart), ImageScaleMode.Stretch, false, 0, true, null)
+        };
+        var context = (TerminalGraphicsPresentContext)Activator.CreateInstance(typeof(TerminalGraphicsPresentContext), BindingFlags.Instance | BindingFlags.NonPublic,
+            null, [app, session.Instance, TerminalHostKind.Fullscreen, new Rectangle(0, 0, 20, 10), 0, new Rectangle(0, 0, 20, 10), TerminalGraphicsTextFrameKind.Full], null)!;
+        using var presenter = new SixelChartPresenter(TerminalGraphicsCapabilities.None, metrics);
+        using var output = new StringWriter();
+        var writer = new AnsiWriter(output);
+        await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+        string[] original = [.. SixelPayloadPattern().Matches(output.ToString()).Select(match => match.Value)];
+        Assert.HasCount(2, original);
+        Assert.AreNotEqual(original[0], original[1]);
+        output.GetStringBuilder().Clear();
+        firstChart.Values[1] = 20;
+        await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+        string[] changed = [.. SixelPayloadPattern().Matches(output.ToString()).Select(match => match.Value)];
+        Assert.HasCount(2, changed);
+        Assert.AreNotEqual(original[0], changed[0]);
+        Assert.AreEqual(original[1], changed[1], "Encoding the changed first chart must not corrupt the cached second chart.");
+        Assert.AreEqual(1, presenter.GetDiagnosticsSnapshot().LastEncodedFrameCount);
+        output.GetStringBuilder().Clear();
+        await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+        string[] replay = [.. SixelPayloadPattern().Matches(output.ToString()).Select(match => match.Value)];
+        CollectionAssert.AreEqual(changed, replay);
+        Assert.AreEqual(0, presenter.GetDiagnosticsSnapshot().LastEncodedFrameCount);
+    }
+
+    [TestMethod]
     [DoNotParallelize]
     public async Task PresenterDiagnosticsTrackEncodingCacheRepaintAndReset() {
         var metrics = new TerminalPixelMetrics(80, 120, 4, 12, 20, 10);
@@ -81,6 +124,152 @@ public sealed partial class SixelTests {
         Assert.AreEqual(first.PayloadByteCount * 2, reset.PayloadByteCount);
         Assert.AreEqual(0L, reset.DroppedFrameCount);
     }
+
+    [TestMethod]
+    [DoNotParallelize]
+    [DataRow(GraphKind.Flamegraph, 80, 40, 8, 16, 1)]
+    [DataRow(GraphKind.Flamegraph, 80, 40, 8, 16, 2)]
+    [DataRow(GraphKind.Flamegraph, 80, 40, 8, 16, 4)]
+    [DataRow(GraphKind.Flamegraph, 144, 40, 10, 23, 1)]
+    [DataRow(GraphKind.Flamegraph, 144, 40, 10, 23, 2)]
+    [DataRow(GraphKind.Flamegraph, 144, 40, 10, 23, 4)]
+    [DataRow(GraphKind.Flamegraph, 73, 28, 9, 17, 1)]
+    [DataRow(GraphKind.Flamegraph, 73, 28, 9, 17, 2)]
+    [DataRow(GraphKind.Flamegraph, 73, 28, 9, 17, 4)]
+    [DataRow(GraphKind.Gantt, 80, 40, 8, 16, 2)]
+    [DataRow(GraphKind.Gantt, 144, 40, 10, 23, 2)]
+    [DataRow(GraphKind.Gantt, 73, 28, 9, 17, 2)]
+    public async Task FixedRowPresenterUsesCellHeightAndLeavesUnusedSpace(GraphKind kind, int columns, int rows, int cellWidth, int cellHeight, int frameRows) {
+        System.Management.Automation.PSObject[] objects = kind == GraphKind.Flamegraph ? [
+            System.Management.Automation.PSObject.AsPSObject(new { FrameId = "root", ParentId = "", Name = "main", Weight = 2 }),
+            System.Management.Automation.PSObject.AsPSObject(new { FrameId = "a", ParentId = "root", Name = "alpha", Weight = 3 }),
+            System.Management.Automation.PSObject.AsPSObject(new { FrameId = "b", ParentId = "a", Name = "beta", Weight = 5 })
+        ] : [
+            System.Management.Automation.PSObject.AsPSObject(new { Task = "Build", Start = DateTimeOffset.UnixEpoch, End = DateTimeOffset.UnixEpoch.AddHours(4) }),
+            System.Management.Automation.PSObject.AsPSObject(new { Task = "Test", Start = DateTimeOffset.UnixEpoch.AddHours(2), End = DateTimeOffset.UnixEpoch.AddHours(6) }),
+            System.Management.Automation.PSObject.AsPSObject(new { Task = "Ship", Start = DateTimeOffset.UnixEpoch.AddHours(6), End = DateTimeOffset.UnixEpoch.AddHours(6) })
+        ];
+        using var viewer = new ObjectChartApp(objects, null, kind == GraphKind.Flamegraph ? ["Weight"] : null, kind, "Fixed rows",
+            new("FrameId", "ParentId", "Name"), CancellationToken.None);
+        viewer.Surface.Plot.FlameFrameRows = frameRows;
+        _ = XenoAtom.Terminal.UI.Rendering.VisualSnapshotRenderer.Render(viewer.Root, columns, rows);
+        var chart = viewer.Surface.Plot;
+        var bounds = chart.PlotBounds;
+        var metrics = new TerminalPixelMetrics(columns * cellWidth, rows * cellHeight, cellWidth, cellHeight, columns, rows);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(columns, rows));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var app = new TerminalApp(viewer.Root, session.Instance);
+        var commands = new GraphicsCommandBuffer {
+            new GraphicsCommand(1, bounds, chart.Bounds, TerminalGraphicContent.FromObject(chart), ImageScaleMode.Stretch, false, 0, true, null)
+        };
+        var context = (TerminalGraphicsPresentContext)Activator.CreateInstance(typeof(TerminalGraphicsPresentContext), BindingFlags.Instance | BindingFlags.NonPublic,
+            null, [app, session.Instance, TerminalHostKind.Fullscreen, new Rectangle(0, 0, columns, rows), 0, bounds, TerminalGraphicsTextFrameKind.Full], null)!;
+        using var presenter = new SixelChartPresenter(TerminalGraphicsCapabilities.None, metrics);
+        using var output = new StringWriter();
+        await presenter.PresentAsync(commands, context, new AnsiWriter(output), CancellationToken.None);
+        string text = output.ToString();
+        int start = text.IndexOf("\x1bP", StringComparison.Ordinal), end = text.IndexOf("\x1b\\", StringComparison.Ordinal) + 2;
+        var decoded = Decode(text[start..end]);
+        var plot = new SixelPlot();
+        chart.DrawPixels(plot, bounds.Width * cellWidth, bounds.Height * cellHeight);
+        var expected = plot.Pixels.ToArray();
+        int paintedHeight = (kind == GraphKind.Flamegraph ? 3 * frameRows : 6) * cellHeight;
+        int emptyRows = bounds.Height * cellHeight - paintedHeight;
+        int emptyStart = kind == GraphKind.Flamegraph ? 0 : paintedHeight;
+        Assert.IsLessThan(0, expected.AsSpan(emptyStart * plot.Width, emptyRows * plot.Width).IndexOfAnyExcept((byte)0),
+            "Fixed frame/task rows must leave unused viewport height in actual terminal-pixel metrics.");
+        foreach (var label in chart.AnnotationBounds) {
+            for (int row = (label.Y - bounds.Y) * cellHeight; row < (label.Bottom - bounds.Y) * cellHeight; row++) {
+                expected.AsSpan(row * plot.Width + (label.X - bounds.X) * cellWidth, label.Width * cellWidth).Clear();
+            }
+        }
+        CollectionAssert.AreEqual(expected, decoded.Pixels, "The real presenter keeps fixed frame rows and excludes only clipped label cells.");
+        int barRow = kind == GraphKind.Flamegraph ? emptyRows : cellHeight;
+        Assert.IsGreaterThanOrEqualTo(0, plot.Pixels.Slice(barRow * plot.Width, plot.Width * cellHeight).IndexOfAnyExcept((byte)0));
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    [DataRow(GraphKind.FlowChart, 8, 16)]
+    [DataRow(GraphKind.FlowChart, 10, 23)]
+    [DataRow(GraphKind.FlowChart, 9, 17)]
+    [DataRow(GraphKind.NetworkDiagram, 8, 16)]
+    [DataRow(GraphKind.NetworkDiagram, 10, 23)]
+    [DataRow(GraphKind.NetworkDiagram, 9, 17)]
+    public async Task DiagramPresenterUsesRetainedTopologyAndBoundedLabels(GraphKind kind, int cellWidth, int cellHeight) {
+        const int columns = 100, rows = 32;
+        var chart = ChartDiagramTests.Example(kind);
+        _ = XenoAtom.Terminal.UI.Rendering.VisualSnapshotRenderer.Render(chart, columns, rows);
+        var bounds = chart.PlotBounds;
+        var metrics = new TerminalPixelMetrics(columns * cellWidth, rows * cellHeight, cellWidth, cellHeight, columns, rows);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(columns, rows));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var app = new TerminalApp(chart, session.Instance);
+        var commands = new GraphicsCommandBuffer {
+            new GraphicsCommand(1, bounds, chart.Bounds, TerminalGraphicContent.FromObject(chart), ImageScaleMode.Stretch, false, 0, true, null)
+        };
+        var context = (TerminalGraphicsPresentContext)Activator.CreateInstance(typeof(TerminalGraphicsPresentContext), BindingFlags.Instance | BindingFlags.NonPublic,
+            null, [app, session.Instance, TerminalHostKind.Fullscreen, new Rectangle(0, 0, columns, rows), 0, bounds, TerminalGraphicsTextFrameKind.Full], null)!;
+        using var presenter = new SixelChartPresenter(TerminalGraphicsCapabilities.None, metrics);
+        using var output = new StringWriter();
+        await presenter.PresentAsync(commands, context, new AnsiWriter(output), CancellationToken.None);
+        string text = output.ToString();
+        int start = text.IndexOf("\x1bP", StringComparison.Ordinal), end = text.IndexOf("\x1b\\", StringComparison.Ordinal) + 2;
+        Assert.IsGreaterThanOrEqualTo(0, start);
+        Assert.StartsWith("\x1bP0;1q", text[start..end], "Diagram graphics preserve reserved text pixels using P2=1.");
+        var decoded = Decode(text[start..end]);
+        var plot = new SixelPlot();
+        chart.DrawPixels(plot, bounds.Width * cellWidth, bounds.Height * cellHeight);
+        var expected = plot.Pixels.ToArray();
+        foreach (var label in chart.AnnotationBounds) {
+            Assert.IsTrue(bounds.Contains(label.X, label.Y));
+            Assert.IsLessThanOrEqualTo(bounds.Right, label.Right);
+            for (int y = (label.Y - bounds.Y) * cellHeight; y < (label.Bottom - bounds.Y) * cellHeight; y++) {
+                expected.AsSpan(y * plot.Width + (label.X - bounds.X) * cellWidth, label.Width * cellWidth).Clear();
+            }
+        }
+        CollectionAssert.AreEqual(expected, decoded.Pixels, "Actual Sixel output keeps topology geometry and bounded text exclusions.");
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    [DataRow(80, 40, 8, 16)]
+    [DataRow(144, 40, 10, 23)]
+    [DataRow(73, 28, 9, 17)]
+    public async Task ObjectPiePresenterPreservesFittedBoundaryBetweenLegendAndFooter(int columns, int rows, int cellWidth, int cellHeight) {
+        System.Management.Automation.PSObject[] objects = [
+            System.Management.Automation.PSObject.AsPSObject(new { Category = "CPU", Load = 25 }),
+            System.Management.Automation.PSObject.AsPSObject(new { Category = "Memory", Load = 50 }),
+            System.Management.Automation.PSObject.AsPSObject(new { Category = "Disk", Load = 75 }),
+            System.Management.Automation.PSObject.AsPSObject(new { Category = "Network", Load = 100 })
+        ];
+        using var viewer = new ObjectChartApp(objects, "Category", ["Load"], GraphKind.Pie, "Resource load", CancellationToken.None);
+        _ = XenoAtom.Terminal.UI.Rendering.VisualSnapshotRenderer.Render(viewer.Root, columns, rows);
+        var chart = viewer.Surface.Plot;
+        var bounds = chart.PlotBounds;
+        Assert.IsGreaterThan(chart.Bounds.Y, bounds.Y, "The row legend must be outside the graphics viewport.");
+        Assert.IsLessThan(chart.Bounds.Bottom, bounds.Bottom, "The radial scale footer must be outside the graphics viewport.");
+        var metrics = new TerminalPixelMetrics(columns * cellWidth, rows * cellHeight, cellWidth, cellHeight, columns, rows);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(columns, rows));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var app = new TerminalApp(new XenoAtom.Terminal.UI.Controls.TextBlock(""), session.Instance);
+        var commands = new GraphicsCommandBuffer {
+            new GraphicsCommand(1, bounds, chart.Bounds, TerminalGraphicContent.FromObject(chart), ImageScaleMode.Stretch, false, 0, true, null)
+        };
+        var context = (TerminalGraphicsPresentContext)Activator.CreateInstance(typeof(TerminalGraphicsPresentContext), BindingFlags.Instance | BindingFlags.NonPublic,
+            null, [app, session.Instance, TerminalHostKind.Fullscreen, new Rectangle(0, 0, columns, rows), 0, bounds, TerminalGraphicsTextFrameKind.Full], null)!;
+        using var presenter = new SixelChartPresenter(TerminalGraphicsCapabilities.None, metrics);
+        using var output = new StringWriter();
+        await presenter.PresentAsync(commands, context, new AnsiWriter(output), CancellationToken.None);
+        string text = output.ToString();
+        int start = text.IndexOf("\x1bP", StringComparison.Ordinal), end = text.IndexOf("\x1b\\", StringComparison.Ordinal) + 2;
+        var decoded = Decode(text[start..end]);
+        var expected = new SixelPlot();
+        chart.DrawPixels(expected, bounds.Width * cellWidth, bounds.Height * cellHeight);
+        CollectionAssert.AreEqual(expected.Pixels.ToArray(), decoded.Pixels, "Legend/footer placement must not crop either radial edge.");
+        Assert.IsLessThanOrEqualTo(2, decoded.Pixels.Take(expected.Width).Count(pixel => pixel != 0));
+        Assert.IsLessThanOrEqualTo(2, decoded.Pixels.Skip((expected.Height - 1) * expected.Width).Count(pixel => pixel != 0));
+    }
     [TestMethod]
     public void NetworkLanesHaveIndependentScalesAndTransmitRetainsItsVariation() {
         var surface = new MonitorSurface { View = MonitorView.Dashboard, MinHeight = 40, MaxHeight = 40 };
@@ -130,6 +319,37 @@ public sealed partial class SixelTests {
     public void RuntimeChartsUseRequestedGraphStyle() {
         foreach (var kind in Enum.GetValues<GraphKind>()) {
             var document = new TuiDocument { Root = new() { Id = "plot", Type = "Chart", GraphKind = kind.ToString() } };
+            if (ChartTopology.Supports(kind)) {
+                document.Root.Bind = "nodes";
+                document.Root.EdgeBind = "edges";
+                using var diagramApp = new CustomTuiApp(TuiDocument.FromJson(document.ToJson()), new System.Collections.Hashtable {
+                    ["nodes"] = new[] { new { NodeId = "a", Name = "A" } }, ["edges"] = Array.Empty<object>()
+                });
+                Assert.AreEqual(kind, ((Chart)diagramApp.Controls["plot"]).GraphKind);
+                continue;
+            }
+            if (kind == GraphKind.Gantt) {
+                document.Root.Bind = "tasks";
+                using var taskApp = new CustomTuiApp(TuiDocument.FromJson(document.ToJson()), new System.Collections.Hashtable {
+                    ["tasks"] = new[] { new { Task = "Build", Start = DateTimeOffset.UnixEpoch, End = DateTimeOffset.UnixEpoch.AddHours(1) } }
+                });
+                Assert.AreEqual(kind, ((Chart)taskApp.Controls["plot"]).GraphKind);
+                continue;
+            }
+            if (kind == GraphKind.Flamegraph) {
+                document.Root.Bind = "frames";
+                using var frameApp = new CustomTuiApp(TuiDocument.FromJson(document.ToJson()), new System.Collections.Hashtable {
+                    ["frames"] = new[] { new { FrameId = "root", ParentId = "", Weight = 1d } }
+                });
+                Assert.AreEqual(kind, ((Chart)frameApp.Controls["plot"]).GraphKind);
+                continue;
+            }
+            if (ChartMarket.Supports(kind) || ChartStackedArea.Supports(kind)) {
+                document.Root.Bind = "prices";
+                using var numericApp = new CustomTuiApp(TuiDocument.FromJson(document.ToJson()), new System.Collections.Hashtable { ["prices"] = new[] { 100d, 110d, 105d } });
+                Assert.AreEqual(kind, ((Chart)numericApp.Controls["plot"]).GraphKind);
+                continue;
+            }
             using var app = new CustomTuiApp(TuiDocument.FromJson(document.ToJson()));
             Assert.AreEqual(kind, ((HistoryChart)app.Controls["plot"]).GraphKind);
         }
@@ -253,8 +473,8 @@ public sealed partial class SixelTests {
         var plot = new SixelPlot();
         plot.Draw(history, history.Latest, 4, 64, 61, Color.Rgb(88, 213, 230), Color.Rgb(13, 20, 32), GraphKind.Histogram);
         CollectionAssert.AreEqual(expected, plot.HistogramCounts.ToArray(), "The histogram must count observations, not interpolated pixels.");
-        Assert.AreEqual(new BoxSummary(3, 5, 7, 1, 8), SixelPlot.Summarize([1, 2, 3, 4, 5, 6, 7, 8, 100]));
-        Assert.AreEqual(new BoxSummary(5, 5, 5, 5, 5), SixelPlot.Summarize([5]));
+        Assert.AreEqual(new BoxSummary(3, 5, 7, 1, 8), ChartStatistics.Summarize([1, 2, 3, 4, 5, 6, 7, 8, 100]));
+        Assert.AreEqual(new BoxSummary(5, 5, 5, 5, 5), ChartStatistics.Summarize([5]));
     }
     [TestMethod]
     public void EveryGraphRoundTripsForEmptyConstantAndTinyRasters() {
@@ -268,8 +488,31 @@ public sealed partial class SixelTests {
                     if (populated) {
                         history.Add(50, DateTimeOffset.UnixEpoch);
                         history.Add(50, DateTimeOffset.UnixEpoch.AddSeconds(1));
+                        if (kind == GraphKind.Radar) {
+                            history.Add(50, DateTimeOffset.UnixEpoch.AddSeconds(2));
+                        }
                     }
-                    plot.Draw(history, history.Latest, 100, size.Item1, size.Item2, Color.Rgb(88, 213, 230), Color.Rgb(13, 20, 32), kind);
+                    if (ChartTopology.Supports(kind) || kind is GraphKind.Flamegraph or GraphKind.Gantt) {
+                        var chart = new Chart { GraphKind = kind };
+                        if (populated) {
+                            if (ChartTopology.Supports(kind)) {
+                                chart.Nodes.AddRange([new("a", "A"), new("b", "B")]);
+                                chart.Edges.Add(new("a", "b"));
+                            }
+                            else if (kind == GraphKind.Gantt) {
+                                chart.Tasks.Add(new("Build", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddHours(1), .5));
+                                chart.Tasks.Add(new("Ship", DateTimeOffset.UnixEpoch.AddHours(1), DateTimeOffset.UnixEpoch.AddHours(1)));
+                            }
+                            else {
+                                chart.Frames.Add(new("root", null, "root", 50));
+                                chart.Frames.Add(new("child", "root", "child", 50));
+                            }
+                        }
+                        chart.DrawPixels(plot, size.Item1, size.Item2);
+                    }
+                    else {
+                        plot.Draw(history, history.Latest, 100, size.Item1, size.Item2, Color.Rgb(88, 213, 230), Color.Rgb(13, 20, 32), kind);
+                    }
                     var decoded = Decode(encoder.EncodeFrame(plot.Pixels, plot.Width, plot.Height, plot.Palette));
                     CollectionAssert.AreEqual(plot.Pixels.ToArray(), decoded.Pixels, $"{kind}: {size}, populated={populated}");
                     var direct = Decode(encoder.EncodePlot(plot));
@@ -279,6 +522,40 @@ public sealed partial class SixelTests {
         }
     }
     [TestMethod]
+    public void BulkRectangleFillsMatchPerPixelOverpaintingAcrossBandsAndResizes() {
+        var actual = new SixelPlot();
+        var reference = new SixelPlot();
+        var chart = new Chart { GraphKind = GraphKind.Heatmap };
+        var encoder = new SixelEncoder();
+        var fill = typeof(SixelPlot).GetMethod("FillRectangle", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, int, int, byte>>(actual);
+        var pixel = typeof(SixelPlot).GetMethod("SetPixel", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, byte>>(reference);
+        var random = new Random(7284);
+        foreach (var (width, height) in new[] { (63, 31), (1, 1), (11, 13), (2, 7), (63, 31) }) {
+            chart.DrawPixels(actual, width, height);
+            chart.DrawPixels(reference, width, height);
+            for (int index = 0; index < 120; index++) {
+                int left = random.Next(width), right = random.Next(left, width);
+                int top = random.Next(height), bottom = random.Next(top, height);
+                byte color = (byte)random.Next(1, SixelPlot.InkColors + 1);
+                fill(left, top, right, bottom, color);
+                for (int y = top; y <= bottom; y++) {
+                    for (int x = left; x <= right; x++) {
+                        pixel(x, y, color);
+                    }
+                }
+
+                CollectionAssert.AreEqual(reference.Pixels.ToArray(), actual.Pixels.ToArray());
+                Assert.AreEqual(encoder.EncodePlot(reference), encoder.EncodePlot(actual),
+                    "Boundary metadata and retained planes must encode exactly like per-pixel replacement.");
+            }
+
+            CollectionAssert.AreEqual(actual.Pixels.ToArray(), Decode(encoder.EncodePlot(actual)).Pixels);
+        }
+    }
+
+    [TestMethod]
     public void DirectPlanesPreserveOverpaintedShadesInspectionAndThemeChanges() {
         var history = new TimeSeries();
         var plot = new SixelPlot();
@@ -287,13 +564,14 @@ public sealed partial class SixelTests {
             history.Add(i % 17 == 0 ? null : 50 + 45 * Math.Sin(i / 3d), DateTimeOffset.UnixEpoch.AddSeconds(i));
         }
 
-        foreach (var kind in Enum.GetValues<GraphKind>()) {
+        foreach (var kind in Enum.GetValues<GraphKind>().Where(kind => !ChartTopology.Supports(kind) && kind is not (GraphKind.Flamegraph or GraphKind.Gantt))) {
             foreach (var size in new[] { (63, 31), (11, 13), (63, 31) }) {
                 var ink = kind == GraphKind.Line ? Color.Rgb(255, 0, 0) : Color.Rgb(0, 128, 255);
                 plot.Draw(history, history.Latest, 100, size.Item1, size.Item2, ink, Color.Rgb(13, 20, 32), kind, 5);
                 var actual = Decode(encoder.EncodePlot(plot));
                 CollectionAssert.AreEqual(plot.Pixels.ToArray(), actual.Pixels, $"{kind}: {size}");
-                Assert.AreEqual(((ink.ToRgb().R * 100 + 127) / 255, (ink.ToRgb().G * 100 + 127) / 255, (ink.ToRgb().B * 100 + 127) / 255), actual.Colors[6]);
+                var expectedColor = (ChartRadial.IsRadial(kind) || kind == GraphKind.Waterfall ? plot.Palette[6] : ink).ToRgb();
+                Assert.AreEqual(((expectedColor.R * 100 + 127) / 255, (expectedColor.G * 100 + 127) / 255, (expectedColor.B * 100 + 127) / 255), actual.Colors[6]);
             }
         }
     }
@@ -301,13 +579,13 @@ public sealed partial class SixelTests {
     public void WarmRastersReuseBuffersAcrossSizesAndPlotTypes() {
         var history = new TimeSeries();
         for (int i = 0; i < 120; i++) {
-            history.Add(i % 100, DateTimeOffset.UnixEpoch.AddSeconds(i));
+            history.Add(1 + i % 100, DateTimeOffset.UnixEpoch.AddSeconds(i));
         }
 
         var plot = new SixelPlot();
         var ink = Color.Rgb(88, 213, 230);
         var background = Color.Rgb(13, 20, 32);
-        var kinds = Enum.GetValues<GraphKind>();
+        var kinds = Enum.GetValues<GraphKind>().Where(kind => !ChartTopology.Supports(kind) && kind is not (GraphKind.Flamegraph or GraphKind.Gantt)).ToArray();
         foreach (var kind in kinds) {
             plot.Draw(history, history.Latest, 100, 800, 180, ink, background, kind);
         }
@@ -319,6 +597,38 @@ public sealed partial class SixelTests {
         }
         Assert.AreEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "Warm rasterization must not reallocate buffers as panel sizes alternate.");
     }
+
+    [TestMethod]
+    public void BulkColumnsMatchStrongerShadePaintingWithClippingAndExistingStrokes() {
+        var actual = new SixelPlot();
+        var reference = new SixelPlot();
+        var chart = new Chart([10, 80, 30, 90, 0]) { GraphKind = GraphKind.Line };
+        var encoder = new SixelEncoder();
+        var fill = typeof(SixelPlot).GetMethod("FillColumn", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, int, byte>>(actual);
+        var paint = typeof(SixelPlot).GetMethod("Paint", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, byte>>(reference);
+        var random = new Random(312);
+        foreach (var (width, height) in new[] { (63, 31), (1, 1), (11, 13), (2, 7), (63, 31) }) {
+            chart.DrawPixels(actual, width, height);
+            chart.DrawPixels(reference, width, height);
+            for (int index = 0; index < 160; index++) {
+                int x = random.Next(-2, width + 2);
+                int top = random.Next(-6, height + 6), bottom = random.Next(-6, height + 6);
+                byte color = (byte)random.Next(1, SixelPlot.InkColors + 1);
+                fill(x, top, bottom, color);
+                for (int y = top; y <= bottom; y++) {
+                    paint(x, y, color);
+                }
+
+                CollectionAssert.AreEqual(reference.Pixels.ToArray(), actual.Pixels.ToArray());
+                Assert.AreEqual(encoder.EncodePlot(reference), encoder.EncodePlot(actual));
+            }
+
+            CollectionAssert.AreEqual(actual.Pixels.ToArray(), Decode(encoder.EncodePlot(actual)).Pixels);
+        }
+    }
+
     [TestMethod]
     public void WarmEncoderOnlyAllocatesItsReturnedPayload() {
         var history = new TimeSeries();
@@ -356,6 +666,70 @@ public sealed partial class SixelTests {
         encodedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
         GC.KeepAlive(payload);
         Assert.AreEqual(stringBytes, encodedBytes, "Direct plane encoding should allocate only its output string.");
+    }
+
+    [TestMethod]
+    public void MaskedFrameErasingDoesNotBoxWindowEnumeratorsPerCell() {
+        using var output = new StringWriter(new System.Text.StringBuilder(65536));
+        var writer = new AnsiWriter(output);
+        var bounds = new Rectangle(0, 0, 160, 40);
+        var windows = new List<Rectangle> { new(60, 10, 40, 15), new(155, 0, 5, 40) };
+        for (int index = 0; index < 5; index++) {
+            output.GetStringBuilder().Clear();
+            ChartClipping.Erase(writer, bounds, windows, bounds);
+        }
+
+        output.GetStringBuilder().Clear();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ChartClipping.Erase(writer, bounds, windows, bounds);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.AreEqual(0L, allocated, "Window checks and erase commands must reuse the span writer without allocations.");
+        var erased = Enumerable.Range(0, 40).SelectMany(y => Enumerable.Range(0, y is >= 10 and < 25 ? 2 : 1)
+            .Select(run => y is >= 10 and < 25
+                ? $"\x1b[{y + 1};{(run == 0 ? 1 : 101)}H\x1b[{(run == 0 ? 60 : 55)}X"
+                : $"\x1b[{y + 1};1H\x1b[155X"));
+        Assert.AreEqual(string.Concat(erased), output.ToString(), "Popup and label cells must never be erased.");
+    }
+
+    [TestMethod]
+    public void OwnedSpanPayloadsPreserveProtocolAndDoNotBorrowEncoderScratch() {
+        var chart = new Chart([10, 50, 25, 80]) { GraphKind = GraphKind.Area };
+        var plot = new SixelPlot();
+        chart.DrawPixels(plot, 240, 120);
+        var encoder = new SixelEncoder();
+        var first = new SixelPayload();
+        var second = new SixelPayload();
+        string direct = encoder.EncodePlot(plot);
+        encoder.EncodePlot(plot, first);
+        Assert.IsTrue(first.Span.SequenceEqual(direct));
+        string frame = encoder.EncodeFrame(plot.Pixels, plot.Width, plot.Height, plot.Palette);
+        encoder.EncodeFrame(plot.Pixels, plot.Width, plot.Height, plot.Palette, second);
+        Assert.IsTrue(second.Span.SequenceEqual(frame));
+        Assert.IsTrue(first.Span.SequenceEqual(direct), "Encoding another placement must not overwrite the first payload.");
+        using var output = new StringWriter();
+        var writer = new AnsiWriter(output);
+        for (int index = 0; index < 10; index++) {
+            encoder.EncodePlot(plot, first);
+            encoder.EncodeFrame(plot.Pixels, plot.Width, plot.Height, plot.Palette, second);
+            output.GetStringBuilder().Clear();
+            writer.Write(first.Span);
+            writer.Write(second.Span);
+        }
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < 100; index++) {
+            encoder.EncodePlot(plot, first);
+            encoder.EncodeFrame(plot.Pixels, plot.Width, plot.Height, plot.Palette, second);
+            output.GetStringBuilder().Clear();
+            writer.Write(first.Span);
+            writer.Write(second.Span);
+        }
+        Assert.AreEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "Owned span encoding should reuse planes, headers, builders and payload buffers.");
+        CollectionAssert.AreEqual(plot.Pixels.ToArray(), Decode(new string(first.Span)).Pixels);
+        chart.Values.Clear();
+        chart.DrawPixels(plot, 20, 10);
+        encoder.EncodePlot(plot, first);
+        Assert.IsTrue(second.Span.SequenceEqual(frame), "A shorter replacement must not expose stale characters or another placement's data.");
+        CollectionAssert.AreEqual(plot.Pixels.ToArray(), Decode(new string(first.Span)).Pixels);
     }
     [TestMethod]
     [DoNotParallelize]
@@ -564,4 +938,6 @@ public sealed partial class SixelTests {
     private static partial Regex PaletteEntryOneDefinitionPattern();
     [GeneratedRegex("#2;2;")]
     private static partial Regex PaletteEntryTwoDefinitionPattern();
+    [GeneratedRegex("\x1bP.*?\x1b\\\\", RegexOptions.Singleline)]
+    private static partial Regex SixelPayloadPattern();
 }

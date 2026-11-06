@@ -62,10 +62,13 @@ public sealed class MonitorFollowupTests {
         string Layout() => string.Join("\n", ((Array)typeof(MonitorSurface).GetField("_columns", Private)!.GetValue(surface)!).Cast<object>());
         await using var ui = new DesignerUxTests.UiSession(surface, () => { }, 80, 30);
         string original = Layout();
-        surface.SetFrame(new CollectorFrame { ProcessCount = 1, Processes = [
+        surface.SetFrame(new CollectorFrame {
+            ProcessCount = 1,
+            Processes = [
             new(9999999, new string('n', 200), 99, 900L << 30, 1000, UserName: new string('u', 100),
                 NetworkBytesPerSecond: 1000000000)
-        ] });
+        ]
+        });
         surface.Model.Update(surface.Frame.Processes.AsSpan(0, 1));
         ui.Tick();
         Assert.AreEqual(original, Layout(), "Refresh must not change column widths or hide missing counters.");

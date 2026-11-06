@@ -14,6 +14,33 @@ namespace fullscreen.Tests;
 [DoNotParallelize]
 public sealed class ChartFeatureTests {
     [TestMethod]
+    public void LegendsMeasureWrapAndTruncateUnicodeLabelsInCells() {
+        const string wide = "\u4e2d\u6587";
+        var chart = new Chart { ShowLegend = true };
+        chart.Series.Add(new(wide, [1, 2]));
+        chart.Series.Add(new("Next", [2, 1]));
+        var lines = VisualSnapshotRenderer.Render(chart, 13, 12).ToMarkupLines();
+        Assert.Contains(wide, lines[0]);
+        Assert.Contains("Next", lines[1], "Six cells plus spacing cannot share a thirteen-cell row with the second six-cell label.");
+        Assert.AreEqual(2, chart.PlotBounds.Y);
+        lines = VisualSnapshotRenderer.Render(chart, 5, 12).ToMarkupLines();
+        Assert.Contains("\u4e2d\u2026", lines[0]);
+        Assert.DoesNotContain(wide, lines[0]);
+        Assert.AreEqual(4, ChartText.Width(wide));
+        Assert.AreEqual(2, ChartText.Width("\U0001f600"));
+        Assert.AreEqual(1, ChartText.Width("e\u0301"));
+        Assert.AreEqual("e\u0301", ChartText.Fit("e\u0301x", 1));
+        Assert.AreEqual("", ChartText.Fit("\U0001f600", 1));
+        Assert.AreEqual("\U0001f600", ChartText.Fit("\U0001f600x", 2));
+        const string family = "\U0001f469\u200d\U0001f469\u200d\U0001f467\u200d\U0001f466";
+        Assert.AreEqual(2, ChartText.Width(family));
+        Assert.AreEqual(family, ChartText.Fit(family + "x", 2));
+        Assert.AreEqual("", ChartText.Fit(family, 1));
+        Assert.AreEqual(2, ChartText.Width("\u2764\ufe0f"));
+        Assert.AreEqual("\u2764\ufe0f", ChartText.Fit("\u2764\ufe0fx", 2));
+    }
+
+    [TestMethod]
     [DataRow((ChartRenderer)2)]
     [DataRow((ChartRenderer)3)]
     public void DisabledDrcsRendererValuesAreRejected(ChartRenderer renderer) {
@@ -30,7 +57,7 @@ public sealed class ChartFeatureTests {
             }
         });
         using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
-        var error = Assert.Throws<ArgumentOutOfRangeException>(() => ChartPresenters.Create(session.Instance, renderer));
+        var error = Assert.Throws<ArgumentOutOfRangeException>(() => ChartPresenters.Create(session.Instance, renderer, cancellationToken: TestContext.CancellationToken));
         Assert.AreEqual("renderer", error.ParamName);
     }
     private sealed class UnrelatedPresenter : ITerminalGraphicsPresenter {
@@ -50,8 +77,8 @@ public sealed class ChartFeatureTests {
         var options = new TerminalOptions { ImplicitStartInput = true };
         options.Graphics.DisableGraphics = true;
         using var session = Terminal.Open(backend, options, force: true);
-        Assert.IsNull(ChartPresenters.Create(session.Instance, ChartRenderer.Native));
-        Assert.IsNull(ChartPresenters.Create(session.Instance, ChartRenderer.Auto));
+        Assert.IsNull(ChartPresenters.Create(session.Instance, ChartRenderer.Native, cancellationToken: TestContext.CancellationToken));
+        Assert.IsNull(ChartPresenters.Create(session.Instance, ChartRenderer.Auto, cancellationToken: TestContext.CancellationToken));
         using var presenter = new UnrelatedPresenter();
         var chart = new Chart([1, 4, 2]);
         await using var app = new TerminalApp(chart, session.Instance, new TerminalAppOptions { GraphicsPresenter = presenter });
@@ -126,6 +153,33 @@ public sealed class ChartFeatureTests {
         ui.Mouse(TerminalMouseKind.Up, TerminalMouseButton.Left, 20, 4, () => true);
         ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, 20, 15, () => selected?.SeriesIndex == 0);
         Assert.AreEqual(10d, selected!.Y);
+    }
+
+    [TestMethod]
+    [DataRow(GraphKind.HorizontalBars)]
+    [DataRow(GraphKind.Heatmap)]
+    [DataRow(GraphKind.ErrorBars)]
+    public async Task SharedGeometryStylesKeepClickedSourceInformation(GraphKind kind) {
+        object first = new(), last = new();
+        var chart = new Chart { GraphKind = kind };
+        var series = new ChartSeries("Values", [2, 8]);
+        series.Sources.AddRange([first, last]);
+        series.LowerValues.AddRange([1, 7]);
+        series.UpperValues.AddRange([3, 9]);
+        chart.Series.Add(series);
+        ChartSelection? selected = null, invoked = null;
+        chart.SelectionChanged += value => selected = value;
+        chart.PointInvoked += value => invoked = value;
+        await using var ui = new DesignerUxTests.UiSession(chart, () => { }, 40, 20);
+        int x = kind == GraphKind.ErrorBars ? 39 : 35;
+        int y = kind == GraphKind.HorizontalBars ? 15 : kind == GraphKind.Heatmap ? 10 : 2;
+        ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, x, y, () => selected is not null);
+        Assert.AreEqual(1, selected!.PointIndex);
+        Assert.AreEqual(8d, selected.Y);
+        Assert.AreSame(last, selected.Source);
+        ui.Mouse(TerminalMouseKind.Up, TerminalMouseButton.Left, x, y, () => true);
+        ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, x, y, () => invoked is not null);
+        Assert.AreSame(last, invoked!.Source);
     }
     [TestMethod]
     public void CategoryRowsUseEveryAvailableLabelAndHeatmapLabelsDoNotRepeat() {
@@ -387,4 +441,6 @@ public sealed class ChartFeatureTests {
         };
         Assert.ThrowsExactly<ArgumentException>(() => heat.GetRenderData(100));
     }
+
+    public TestContext TestContext { get; set; }
 }

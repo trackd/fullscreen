@@ -267,6 +267,67 @@ public sealed partial class TuiDocument {
                 throw new ArgumentException("GraphKind must be " + string.Join(", ", Enum.GetNames<Charts.GraphKind>()) +
                     ".");
             }
+            if (node.Type == "Chart") {
+                Charts.ChartStackedArea.ValidateOptions(graphKind, node.Minimum, node.Maximum, Charts.ChartScale.Linear, Charts.ChartScale.Linear);
+                if (node.XProperty is null || node.XProperty.Length > 128 || node.YProperty is null
+                    || node.YProperty.Length > 64 || node.YProperty.Any(property => string.IsNullOrWhiteSpace(property) || property.Length > 128)
+                    || node.YProperty.Distinct(StringComparer.OrdinalIgnoreCase).Count() != node.YProperty.Length) {
+                    throw new ArgumentException("Chart XProperty and unique YProperty selectors must contain at most 128 characters; use at most 64 series.");
+                }
+                if (node.SeriesRole is null || node.SeriesRole.Length > 0 && node.SeriesRole.Length != node.YProperty.Length
+                    || node.SeriesRole.Any(role => !Enum.TryParse<Charts.ChartSeriesRole>(role, true, out var parsed) || !Enum.IsDefined(parsed))) {
+                    throw new ArgumentException("Chart SeriesRole must contain one Auto/Column/Line role per YProperty.");
+                }
+                if (node.LowerProperty is null || node.UpperProperty is null
+                    || node.LowerProperty.Length > 128 || node.UpperProperty.Length > 128
+                    || node.LowerProperty.Length > 0 && string.IsNullOrWhiteSpace(node.LowerProperty)
+                    || node.UpperProperty.Length > 0 && string.IsNullOrWhiteSpace(node.UpperProperty)
+                    || (node.LowerProperty.Length > 0 || node.UpperProperty.Length > 0)
+                    && (graphKind != Charts.GraphKind.ErrorBars || node.YProperty.Length == 0)) {
+                    throw new ArgumentException("LowerProperty and UpperProperty require object-bound ErrorBars and field names of 1-128 characters.");
+                }
+                if (node.YProperty.Length > 0 && (string.IsNullOrWhiteSpace(node.Bind)
+                    || Charts.ChartTopology.Supports(graphKind) || graphKind is Charts.GraphKind.Flamegraph or Charts.GraphKind.Gantt)) {
+                    throw new ArgumentException("Chart YProperty requires Bind for numeric object rows, not frames, tasks or topology.");
+                }
+                if (node.XProperty.Length > 0 && node.YProperty.Length == 0) {
+                    throw new ArgumentException("Chart XProperty requires YProperty object-series selectors.");
+                }
+                if (Charts.ChartTopology.Supports(graphKind)) {
+                    if (string.IsNullOrWhiteSpace(node.Bind) || string.IsNullOrWhiteSpace(node.EdgeBind) || node.EdgeBind.Length > 128) {
+                        throw new ArgumentException("Relationship Chart requires Bind for nodes and EdgeBind for a separate edge collection.");
+                    }
+                    Charts.ChartTopology.ValidateOptions(node.Minimum, node.Maximum, null, null,
+                        Charts.ChartScale.Linear, Charts.ChartScale.Linear, 0, 0, null);
+                }
+                if (graphKind == Charts.GraphKind.Gantt) {
+                    Charts.ChartSchedule.ValidateOptions(node.Minimum, node.Maximum, Charts.ChartScale.Time, Charts.ChartScale.Linear, 0, 0, 0);
+                }
+                Charts.ChartMarket.ValidateOptions(graphKind, node.ReversalAmount, node.Minimum, node.Maximum,
+                    null, null, Charts.ChartScale.Linear, Charts.ChartScale.Linear, 0, 0);
+                if (node.FlameFrameRows is < 1 or > 8) {
+                    throw new ArgumentException("FlameFrameRows must be between 1 and 8.");
+                }
+                if (graphKind == Charts.GraphKind.Flamegraph && (node.Minimum is not null || node.Maximum is not null)) {
+                    throw new ArgumentException("Flamegraph uses inclusive widths and depth rows, not numeric bounds.");
+                }
+                foreach (string property in new[] { node.FrameIdProperty, node.ParentIdProperty, node.WeightProperty }) {
+                    if (string.IsNullOrWhiteSpace(property) || property.Length > 128) {
+                        throw new ArgumentException("Flamegraph field selectors must contain 1-128 characters.");
+                    }
+                }
+                if (!string.IsNullOrEmpty(node.FrameNameProperty) && (string.IsNullOrWhiteSpace(node.FrameNameProperty) || node.FrameNameProperty.Length > 128)) {
+                    throw new ArgumentException("FrameNameProperty must contain 1-128 characters when specified.");
+                }
+                foreach (string property in new[] { node.StartProperty, node.EndProperty, node.TaskNameProperty }) {
+                    if (string.IsNullOrWhiteSpace(property) || property.Length > 128) {
+                        throw new ArgumentException("Gantt field selectors must contain 1-128 characters.");
+                    }
+                }
+                if (!string.IsNullOrEmpty(node.ProgressProperty) && (string.IsNullOrWhiteSpace(node.ProgressProperty) || node.ProgressProperty.Length > 128)) {
+                    throw new ArgumentException("ProgressProperty must contain 1-128 characters when specified.");
+                }
+            }
 
             if (node.Type == "PerformanceMonitor" && !Monitoring.MonitorSurface.TimeGraphTypes.Contains(graphKind)) {
                 throw new ArgumentException("PerformanceMonitor requires a time-based GraphKind.");
@@ -281,8 +342,8 @@ public sealed partial class TuiDocument {
             if (node.SelectionBind is null || node.SelectionBind.Length > 128
                 || node.SelectionBind.Length > 0 && !NativeTuiControls.Contains(node.Type)
                 && node.Type is not ("FTable" or "FLogView" or "FileBrowser" or "UserList" or "FileCommander"
-                or "ObjectExplorer")) {
-                throw new ArgumentException("SelectionBind is supported by Table, LogView, FileBrowser, FileCommander, ObjectExplorer and UserList and allows at most 128 characters.");
+                or "ObjectExplorer" or "Chart")) {
+                throw new ArgumentException("SelectionBind is supported by Table, LogView, FileBrowser, FileCommander, ObjectExplorer, UserList and Chart and allows at most 128 characters.");
             }
 
             if (node.SelectionBind.Length > 0
@@ -505,8 +566,46 @@ public sealed class TuiNode {
     public double? Minimum { get; set; }
     /// <summary>Gets or sets the upper chart scale limit.</summary>
     public double? Maximum { get; set; }
+    /// <summary>Gets or sets the positive fixed Kagi reversal in price units; default 1.</summary>
+    public double ReversalAmount { get; set; } = 1;
+    /// <summary>Gets or sets the flamegraph frame-ID field, default FrameId.</summary>
+    public string FrameIdProperty { get; set; } = "FrameId";
+    /// <summary>Gets or sets the flamegraph parent-ID field, default ParentId.</summary>
+    public string ParentIdProperty { get; set; } = "ParentId";
+    /// <summary>Gets or sets the flamegraph label field; empty uses frame IDs.</summary>
+    public string FrameNameProperty { get; set; } = "";
+    /// <summary>Gets or sets the flamegraph exclusive self-weight field, default Weight.</summary>
+    public string WeightProperty { get; set; } = "Weight";
+    /// <summary>Gets or sets whether flamegraph roots appear at the top.</summary>
+    public bool FlameReverse { get; set; }
+    /// <summary>Gets or sets terminal rows per flamegraph depth; default 2, range 1-8.</summary>
+    public int FlameFrameRows { get; set; } = 2;
+    /// <summary>Gets or sets the Gantt absolute start-instant field.</summary>
+    public string StartProperty { get; set; } = "Start";
+    /// <summary>Gets or sets the Gantt absolute end-instant field.</summary>
+    public string EndProperty { get; set; } = "End";
+    /// <summary>Gets or sets the Gantt task-label field.</summary>
+    public string TaskNameProperty { get; set; } = "Task";
+    /// <summary>Gets or sets the optional Gantt completed-fraction field; empty means unknown.</summary>
+    public string ProgressProperty { get; set; } = "";
+    /// <summary>Gets or sets the separate relationship-edge collection state key; Bind supplies nodes.</summary>
+    public string EdgeBind { get; set; } = "";
+    /// <summary>Gets or sets the optional numeric object-series category/coordinate field.</summary>
+    public string XProperty { get; set; } = "";
+    /// <summary>Gets or sets up to 64 named numeric fields projected from Bind's original object rows.</summary>
+    public string[] YProperty { get; set; } = [];
+    /// <summary>Gets or sets the optional lower-bound field for object-bound ErrorBars.</summary>
+    public string LowerProperty { get; set; } = "";
+    /// <summary>Gets or sets the optional upper-bound field for object-bound ErrorBars.</summary>
+    public string UpperProperty { get; set; } = "";
+    /// <summary>Gets or sets optional Auto/Column/Line roles in YProperty order.</summary>
+    public string[] SeriesRole { get; set; } = [];
     /// <summary>Gets or sets the visual representation used to draw the data.</summary>
     public string GraphKind { get; set; } = "Area";
+    /// <summary>Gets or sets whether a chart shows its wrapping, clickable series legend.</summary>
+    public bool ShowLegend { get; set; }
+    /// <summary>Gets or sets whether a chart shows supported coordinate axes. Defaults to false.</summary>
+    public bool ShowAxes { get; set; }
     /// <summary>Gets or sets whether the checkable control is selected.</summary>
     public bool Checked { get; set; }
     /// <summary>Gets or sets whether the callback requests closing the application.</summary>

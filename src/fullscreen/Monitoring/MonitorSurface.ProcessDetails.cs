@@ -21,7 +21,7 @@ public sealed partial class MonitorSurface {
 
     internal void ShowProcessDetails(ProcessRow process) {
         long request = ++_processDetailRequest;
-        string Number(double? value) => value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "Unavailable";
+        static string Number(double? value) => value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "Unavailable";
         string details = $"Name · {process.Name}\nPID · {process.Id}\nParent PID · {process.ParentId}\n" +
             $"User · {process.UserName ?? "Unavailable"}\nState · {process.Status ?? "Unavailable"}\n" +
             $"CPU · {Number(process.CpuPercent)}%\nRSS · {process.WorkingSet:N0} bytes\n" +
