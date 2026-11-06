@@ -48,7 +48,8 @@ Describe 'ObjectTable' -Tag 'Integration' {
         $optionsType = $assembly.GetType('fullscreen.Objects.ObjectTableOptions')
         $viewType = $assembly.GetType('fullscreen.Objects.ObjectView')
         $formattedView = [Enum]::Parse($viewType, 'Formatted')
-        $propertiesView = [Enum]::Parse($viewType, 'Properties')
+        $inspectView = [Enum]::Parse($viewType, 'Inspect')
+        [Enum]::GetNames($viewType) | Should -Be @('Formatted', 'Inspect', 'Json')
         $jsonView = [Enum]::Parse($viewType, 'Json')
         $global:fullscreenFormatHits = 0
         $global:fullscreenHiddenHits = 0
@@ -76,15 +77,16 @@ Describe 'ObjectTable' -Tag 'Integration' {
                 ($app.Surface.Model.Rows[0].Cells[1]) | Should -Be ((20).ToString('N2')) -Because 'Script display entry, formatting or raw sort value failed.'
                 ($global:fullscreenFormatHits) | Should -Be (2) -Because 'Unopened views did work.'
                 ($global:fullscreenHiddenHits) | Should -Be (0) -Because 'Unopened views did work.'
-                [bool]($app.IsLoaded($propertiesView)) | Should -BeFalse -Because 'Unopened views did work.'
+                [bool]($app.IsLoaded($inspectView)) | Should -BeFalse -Because 'Unopened views did work.'
                 [bool]($app.IsLoaded($jsonView)) | Should -BeFalse -Because 'Unopened views did work.'
                 $app.Surface.Model.Select(1, 20)
                 $app.Surface.Model.Marked.Add(0) | Out-Null
-                $app.SwitchView($propertiesView)
-                ($global:fullscreenHiddenHits) | Should -Be (2) -Because 'Lazy properties, selection or shared marks failed.'
-                ($app.Surface.Model.Current.Id) | Should -Be (1) -Because 'Lazy properties, selection or shared marks failed.'
-                [bool]($app.Surface.Model.Marked.Contains(0)) | Should -BeTrue -Because 'Lazy properties, selection or shared marks failed.'
+                $app.SwitchView($inspectView)
+                ($global:fullscreenHiddenHits) | Should -Be (1) -Because 'Inspect reads only the selected object.'
+                ($app.Surface.Model.Rows | Where-Object { $_.Cells[2] -eq 'Name' }).Values[3] | Should -Be 'item 2'
                 $app.SwitchView($formattedView)
+                ($app.Surface.Model.Current.Id) | Should -Be 1
+                [bool]($app.Surface.Model.Marked.Contains(0)) | Should -BeTrue
                 ($global:fullscreenFormatHits) | Should -Be (2) -Because 'Reopening a cached format tab did extra work.'
                 $app.SwitchView($jsonView)
                 [bool]($app.IsLoaded($jsonView)) | Should -BeTrue -Because 'JSON was not serialized lazily for the selected object.'
@@ -95,13 +97,13 @@ Describe 'ObjectTable' -Tag 'Integration' {
             }
             finally { $app.Dispose() }
             $global:fullscreenFormatHits = 0; $global:fullscreenHiddenHits = 0
-            $options = [Activator]::CreateInstance($optionsType); $options.View = $propertiesView
+            $options = [Activator]::CreateInstance($optionsType); $options.View = $inspectView
             $app = [Activator]::CreateInstance($appType, @($lazyItems, $options))
             try {
-                [bool]($app.IsLoaded($formattedView)) | Should -BeFalse -Because 'Opening Properties eagerly constructed another tab.'
-                [bool]($app.IsLoaded($jsonView)) | Should -BeFalse -Because 'Opening Properties eagerly constructed another tab.'
-                ($global:fullscreenFormatHits) | Should -Be (0) -Because 'Opening Properties eagerly constructed another tab.'
-                ($global:fullscreenHiddenHits) | Should -Be (2) -Because 'Opening Properties eagerly constructed another tab.'
+                [bool]($app.IsLoaded($formattedView)) | Should -BeFalse -Because 'Opening Inspect eagerly constructed another tab.'
+                [bool]($app.IsLoaded($jsonView)) | Should -BeFalse -Because 'Opening Inspect eagerly constructed another tab.'
+                ($global:fullscreenFormatHits) | Should -Be (0) -Because 'Opening Inspect eagerly constructed another tab.'
+                ($global:fullscreenHiddenHits) | Should -Be (1) -Because 'Inspect reads only the selected object.'
             }
             finally { $app.Dispose() }
             $global:fullscreenFormatHits = 0; $global:fullscreenHiddenHits = 0
@@ -109,7 +111,7 @@ Describe 'ObjectTable' -Tag 'Integration' {
             $app = [Activator]::CreateInstance($appType, @($lazyItems, $options))
             try {
                 [bool]($app.IsLoaded($formattedView)) | Should -BeFalse -Because 'Opening JSON eagerly constructed another tab.'
-                [bool]($app.IsLoaded($propertiesView)) | Should -BeFalse -Because 'Opening JSON eagerly constructed another tab.'
+                [bool]($app.IsLoaded($inspectView)) | Should -BeFalse -Because 'Opening JSON eagerly constructed another tab.'
                 ($global:fullscreenFormatHits) | Should -Be (0) -Because 'Opening JSON eagerly constructed another tab.'
                 ($app.CachedJsonCount) | Should -Be (1) -Because 'Opening JSON eagerly constructed another tab.'
             }

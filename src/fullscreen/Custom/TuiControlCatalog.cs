@@ -204,6 +204,7 @@ public static class TuiControlCatalog {
                 "GraphKind",
                 "ShowLegend",
                 "ShowTooltips",
+                "EnableZoom",
                 "ShowAxes",
                 "ReversalAmount",
                 "FrameIdProperty",

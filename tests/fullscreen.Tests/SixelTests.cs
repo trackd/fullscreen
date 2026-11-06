@@ -17,6 +17,63 @@ namespace fullscreen.Tests;
 [TestClass]
 public sealed partial class SixelTests {
     [TestMethod]
+    [DoNotParallelize]
+    public async Task ChartsInsideDialogsRemainVisibleWhileLaterDialogsMaskTheirPixels() {
+        var metrics = new TerminalPixelMetrics(400, 288, 4, 12, 100, 24);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(100, 24));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var app = new TerminalApp(new XenoAtom.Terminal.UI.Controls.TextBlock("Background"), session.Instance,
+            new TerminalAppOptions { HostKind = TerminalHostKind.Fullscreen });
+        typeof(TerminalApp).GetMethod("BeginRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(app, null);
+        long time = Stopwatch.GetTimestamp();
+        void Tick() {
+            time += Stopwatch.Frequency / 10;
+            typeof(TerminalApp).GetMethod("Tick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(app, [time]);
+        }
+        try {
+            Tick();
+            var chart = new Chart([10, 30, 20]) { GraphKind = GraphKind.Bars };
+            var dialog = new XenoAtom.Terminal.UI.Controls.Dialog(chart) { Width = 90, Height = 20 };
+            dialog.Show();
+            Tick();
+            Tick();
+            var bounds = chart.PlotBounds;
+            var commands = new GraphicsCommandBuffer {
+                new GraphicsCommand(1, bounds, bounds, TerminalGraphicContent.FromObject(chart), ImageScaleMode.Stretch, false, 0, true, null)
+            };
+            var context = (TerminalGraphicsPresentContext)Activator.CreateInstance(typeof(TerminalGraphicsPresentContext), BindingFlags.Instance | BindingFlags.NonPublic,
+                null, [app, session.Instance, TerminalHostKind.Fullscreen, new Rectangle(0, 0, 100, 24), 0, default(Rectangle), TerminalGraphicsTextFrameKind.None], null)!;
+            using var presenter = new SixelChartPresenter(TerminalGraphicsCapabilities.None, metrics);
+            using var output = new StringWriter();
+            var writer = new AnsiWriter(output);
+            await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+            byte[] Pixels() {
+                string text = output.ToString();
+                int start = text.IndexOf("\x1bP", StringComparison.Ordinal), end = text.IndexOf("\x1b\\", start, StringComparison.Ordinal) + 2;
+                return Decode(text[start..end]).Pixels;
+            }
+            Assert.IsTrue(Pixels().Any(pixel => pixel > 0), "A chart's containing dialog must not mask its own raster.");
+            var cover = new XenoAtom.Terminal.UI.Controls.Dialog(new XenoAtom.Terminal.UI.Controls.TextBlock("Cover")) { Width = 100, Height = 24 };
+            cover.Show();
+            Tick();
+            Tick();
+            Assert.IsTrue(presenter.HasPendingOutput(commands, context));
+            output.GetStringBuilder().Clear();
+            await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+            Assert.IsTrue(Pixels().All(pixel => pixel == 0), "A later dialog must still mask the underlying chart.");
+            cover.Close();
+            Tick();
+            output.GetStringBuilder().Clear();
+            await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+            Assert.IsTrue(Pixels().Any(pixel => pixel > 0));
+            dialog.Close();
+        }
+        finally {
+            typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(app, null);
+        }
+    }
+
+    [TestMethod]
     [DataRow(GraphKind.Bars)]
     [DataRow(GraphKind.Area)]
     [DataRow(GraphKind.Heatmap)]

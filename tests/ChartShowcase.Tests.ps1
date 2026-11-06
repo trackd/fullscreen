@@ -95,6 +95,18 @@ Describe 'Chart showcase' {
         foreach ($page in $pages.Children) {
             $page.Children[2].SelectionBind | Should -Be 'selectedPoint'
         }
+        foreach ($kind in 'Gauge', 'RadialBars') {
+            $chart = ($pages.Children | Where-Object { $_.Children[2].GraphKind -eq $kind }).Children[2]
+            $values = @($layout.State[$chart.Bind])
+            $values.Count | Should -Be 4
+            $expected = if ($kind -eq 'Gauge') { '68,82,91,97' } else { '88,72,95,83' }
+            ($values.Load -join ',') | Should -Be $expected
+            foreach ($value in $values) {
+                $value.Load | Should -BeLessThan $chart.Maximum
+                $value.Load | Should -BeGreaterThan ($chart.Maximum / 2)
+            }
+        }
+        ($layout.State.resources.Load -join ',') | Should -Be '35,72,48,90'
         (Get-Command $example).Parameters['DefinitionOnly'].Aliases.Count | Should -Be 0
         foreach ($extension in 'json', 'psd1') {
             $path = Join-Path $TestDrive "showcase.$extension"

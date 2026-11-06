@@ -22,6 +22,10 @@ public partial class Chart {
     [Bindable]
     public partial bool ShowLegend { get; set; }
 
+    /// <summary>Gets or sets whether wheel and keyboard viewport navigation is enabled. Defaults to false.</summary>
+    [Bindable]
+    public partial bool EnableZoom { get; set; }
+
     /// <summary>Gets or sets the lower X-coordinate limit, or null for automatic bounds.</summary>
     [Bindable]
     public partial double? MinimumX { get; set; }
@@ -578,10 +582,13 @@ public partial class Chart {
 
     /// <inheritdoc/>
     protected override void OnPointerWheel(PointerEventArgs e) {
-        if (!Interactive || e.RoutingPhase == RoutingPhase.Preview || ChartTopology.Supports(GraphKind) || ChartRadial.IsRadial(GraphKind) || ChartMarket.Supports(GraphKind) || GraphKind == GraphKind.Flamegraph) {
+        if (!Interactive || !EnableZoom || e.WheelDelta == 0 || e.RoutingPhase == RoutingPhase.Preview || !PlotBounds.Contains(e.UiX, e.UiY)
+            || ChartTopology.Supports(GraphKind) || ChartRadial.IsRadial(GraphKind) || ChartMarket.Supports(GraphKind) || GraphKind == GraphKind.Flamegraph
+            || GraphKind == GraphKind.PercentStackedArea && (e.Modifiers & TerminalModifiers.Ctrl) != 0) {
             return;
         }
 
+        ClearInspection();
         Zoom(e.WheelDelta > 0 ? 1.25 : .8, GraphKind != GraphKind.Gantt && (e.Modifiers & TerminalModifiers.Ctrl) != 0);
         e.Handled = true;
     }
@@ -621,6 +628,9 @@ public partial class Chart {
             return;
         }
         if ((ChartRadial.IsRadial(GraphKind) || ChartMarket.Supports(GraphKind)) && e.Text != " ") {
+            return;
+        }
+        if ((!EnableZoom || ChartTopology.Supports(GraphKind)) && e.Text is "+" or "=" or "-" or "[" or "]") {
             return;
         }
 
@@ -778,6 +788,8 @@ public partial class Chart {
 
     private void RenderFeatures(CellBuffer buffer, ChartDataSeries[] data) {
         var plotBounds = PlotBounds;
+        var labelStyle = Palette.Body.WithForeground(Palette.ChartLabel);
+        var axisStyle = Palette.Body.WithForeground(Palette.ChartAxis);
         if (plotBounds.Width <= 0 || plotBounds.Height <= 0) {
             return;
         }
@@ -822,7 +834,7 @@ public partial class Chart {
                 string label = FormatTick(XAxis, range.MinX * (1 - fraction) + range.MaxX * fraction, data, true);
                 int width = Math.Max(1, plotBounds.Width / XAxis.TickCount);
                 int column = plotBounds.X + (int)Math.Round(fraction * Math.Max(0, plotBounds.Width - width));
-                WriteFeature(buffer, column, row, label, Palette.Muted, width);
+                WriteFeature(buffer, column, row, label, labelStyle, width);
             }
         }
         if (ShowAxes && !ChartTopology.Supports(GraphKind) && GraphKind is not (GraphKind.Flamegraph or GraphKind.Gantt)) {
@@ -835,15 +847,15 @@ public partial class Chart {
                     int index = yTicks <= 1 ? 0 : (int)Math.Round(tick * (categories - 1d) / (yTicks - 1));
                     int center = GraphKind == GraphKind.Heatmap ? (int)((index + .5) * plotBounds.Height / Math.Max(1, categories)) : BarCenter(index, 0, Math.Max(0, categories - 1), plotBounds.Height, categories);
                     string label = GraphKind == GraphKind.Heatmap ? data[index].Property : data[0].Points[index].Label;
-                    WriteFeature(buffer, Bounds.X, plotBounds.Y + center, label, Palette.Muted, _axisWidth - 1);
-                    WriteFeature(buffer, plotBounds.X - 1, plotBounds.Y + center, "┤", Palette.Muted, 1);
+                    WriteFeature(buffer, Bounds.X, plotBounds.Y + center, label, labelStyle, _axisWidth - 1);
+                    WriteFeature(buffer, plotBounds.X - 1, plotBounds.Y + center, "┤", axisStyle, 1);
                     continue;
                 }
 
                 double fraction = tick / (double)(YAxis.TickCount - 1), value = YAxis.Inverse(range.MaxY * (1 - fraction) + range.MinY * fraction);
                 int y = plotBounds.Y + (int)Math.Round(fraction * (plotBounds.Height - 1));
-                WriteFeature(buffer, Bounds.X, y, FormatTick(YAxis, value, data, false), Palette.Muted, _axisWidth - 1);
-                WriteFeature(buffer, plotBounds.X - 1, y, "┤", Palette.Muted, 1);
+                WriteFeature(buffer, Bounds.X, y, FormatTick(YAxis, value, data, false), labelStyle, _axisWidth - 1);
+                WriteFeature(buffer, plotBounds.X - 1, y, "┤", axisStyle, 1);
             }
 
             int row = plotBounds.Bottom;
@@ -852,7 +864,7 @@ public partial class Chart {
                 plotBounds.X - 1,
                 row,
                 "└" + new string('─', plotBounds.Width),
-                Palette.Muted,
+                axisStyle,
                 plotBounds.Width + 1
             );
             if (ChartGrid.Supports(GraphKind)) {
@@ -875,7 +887,7 @@ public partial class Chart {
                     }
                     if (slot % stride == 0) {
                         int column = plotBounds.X + (int)((long)slot * plotBounds.Width / Math.Max(1, visibleCount));
-                        WriteFeature(buffer, column, row, point.Label, Palette.Muted, Math.Max(1, (int)((long)stride * plotBounds.Width / Math.Max(1, visibleCount))));
+                        WriteFeature(buffer, column, row, point.Label, labelStyle, Math.Max(1, (int)((long)stride * plotBounds.Width / Math.Max(1, visibleCount))));
                     }
                     slot++;
                 }
@@ -887,11 +899,11 @@ public partial class Chart {
                 double fraction = tick / (double)(XAxis.TickCount - 1), value = XAxis.Inverse(range.MinX * (1 - fraction) + range.MaxX * fraction);
                 string label = FormatTick(XAxis, value, data, true);
                 int width = Math.Max(1, plotBounds.Width / XAxis.TickCount), column = plotBounds.X + (int)Math.Round(fraction * Math.Max(0, plotBounds.Width - width));
-                WriteFeature(buffer, column, row, label, Palette.Muted, width);
+                WriteFeature(buffer, column, row, label, labelStyle, width);
             }
 
             if (YAxis.Title.Length > 0) {
-                WriteFeature(buffer, Bounds.X, plotBounds.Y, YAxis.Title, Palette.AccentStyle, _axisWidth - 1);
+                WriteFeature(buffer, Bounds.X, plotBounds.Y, YAxis.Title, labelStyle, _axisWidth - 1);
             }
 
             if (XAxis.Title.Length > 0) {
@@ -900,7 +912,7 @@ public partial class Chart {
                     plotBounds.X + plotBounds.Width / 3,
                     row,
                     XAxis.Title,
-                    Palette.AccentStyle,
+                    labelStyle,
                     plotBounds.Width / 3
                 );
             }

@@ -15,9 +15,8 @@ public sealed class ShowObjectTableCommand : FullscreenCommand {
     [AllowNull]
     public PSObject[]? InputObject { get; set; }
 
-    /// <summary>Literal property names to display in both table tabs, in order. Overrides automatic display
-    /// metadata. Missing properties produce empty cells. Without Property, Formatted uses display metadata
-    /// and Expanded uses the union of up to 256 readable properties.</summary>
+    /// <summary>Literal property names for the Formatted table, in order. Overrides automatic display
+    /// metadata. Missing properties produce empty cells.</summary>
     [Parameter]
     [ArgumentCompleter(typeof(ObjectPropertyArgumentCompleter))]
     [ValidateNotNullOrEmpty]
@@ -42,9 +41,8 @@ public sealed class ShowObjectTableCommand : FullscreenCommand {
     [ValidateNotNull]
     public string Filter { get; set; } = "";
 
-    /// <summary>Initial displayed column label for typed sorting. In Formatted this can be a custom label
-    /// such as CPU(s); in Expanded it is a literal property name. With Property, both use the supplied
-    /// names. Raw numeric and timestamp values sort by type.</summary>
+    /// <summary>Initial displayed column label for typed sorting in Formatted, such as CPU(s).
+    /// With Property, use the supplied names. Raw numeric and timestamp values sort by type.</summary>
     [Parameter]
     [ArgumentCompleter(typeof(ObjectPropertyArgumentCompleter))]
     [ValidateNotNullOrEmpty]
@@ -61,14 +59,14 @@ public sealed class ShowObjectTableCommand : FullscreenCommand {
     [Parameter]
     public SwitchParameter Descending { get; set; }
 
-    /// <summary>Return original marked objects, or the current object, when Enter accepts at a root table
-    /// or the JSON tab. Enter inside a nested property inspection does not accept. Q or Escape cancels with
+    /// <summary>Return original marked objects, or the current object, when Enter accepts in the root
+    /// Formatted table. Enter inside Inspect or JSON does not accept. Q or Escape cancels with
     /// no output.</summary>
     [Parameter]
     public SwitchParameter PassThru { get; set; }
 
-    /// <summary>Initial lazy tab: Formatted (default), Expanded or Json. Properties is accepted as another
-    /// name for Expanded. Unopened tabs perform no metadata lookup, getter evaluation or
+    /// <summary>Initial lazy tab: Formatted (default), Inspect or Json.
+    /// Unopened tabs perform no metadata lookup, getter evaluation or
     /// serialization.</summary>
     [Parameter]
     public ObjectView View { get; set; }

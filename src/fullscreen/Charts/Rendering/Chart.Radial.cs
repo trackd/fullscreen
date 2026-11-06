@@ -59,7 +59,7 @@ public partial class Chart {
 
     private void RenderRadialLabels(CellBuffer buffer, ChartDataSeries[] data, ChartRange range) {
         foreach (var label in GetRadialLabels(data)) {
-            WriteFeature(buffer, label.Bounds.X, label.Bounds.Y, label.Text, Palette.Muted, label.Bounds.Width);
+            WriteFeature(buffer, label.Bounds.X, label.Bounds.Y, label.Text, Palette.Body.WithForeground(Palette.ChartLabel), label.Bounds.Width);
         }
         if (!ShowAxes) {
             return;
@@ -71,12 +71,12 @@ public partial class Chart {
             _radialLabelKey = key;
         }
         var bounds = PlotBounds;
-        WriteFeature(buffer, bounds.X, bounds.Bottom, _radialRangeLabel, Palette.Muted, bounds.Width);
+        WriteFeature(buffer, bounds.X, bounds.Bottom, _radialRangeLabel, Palette.Body.WithForeground(Palette.ChartLabel), bounds.Width);
     }
 
     private Color RadialColor(int index) =>
-        GraphKind == GraphKind.Gauge && index >= 2 ? Color.Mix(Palette.Success, Palette.Error, (index - 2) / 4f)
-        : index == 1 ? Color.Mix(PixelBackground, PixelInk, .2f) : DefaultSeriesColor(index - 2);
+        GraphKind == GraphKind.Gauge && index >= 2 ? Palette.GaugeColor(index - 2)
+        : index == 1 ? Palette.ChartGridColor : DefaultSeriesColor(index - 2);
 
     private void DrawRadialCells(CellBuffer buffer, ChartDataSeries[] data) {
         var bounds = PlotBounds;
@@ -159,22 +159,17 @@ internal sealed partial class SixelPlot {
     private readonly ChartRadial _radial = new();
     private void DrawRadial(ChartDataSeries[] data, ChartRange range, GraphKind kind, Themes.ThemePalette? theme, int selected) {
         _radial.Build(data, range, kind);
-        Palette[1] = Color.Mix(_background, _ink, .2f);
-        for (int color = 2; color <= 6; color++) {
+        var palette = theme ?? Themes.ThemePalette.Default;
+        Palette[1] = palette.ChartGridColor;
+        for (int color = 2; color <= ColorCount; color++) {
             Palette[color] = kind == GraphKind.Gauge
-                ? Color.Mix(theme?.Success ?? Color.Rgb(0, 200, 0), theme?.Error ?? Color.Rgb(255, 40, 0), (color - 2) / 4f)
-                : color switch {
-                    2 => theme?.Accent ?? _ink,
-                    3 => theme?.Success ?? Color.Rgb(0, 200, 0),
-                    4 => theme?.Warning ?? Color.Rgb(240, 180, 0),
-                    5 => theme?.Purple ?? Color.Rgb(160, 60, 230),
-                    _ => theme?.Error ?? Color.Rgb(255, 40, 0)
-                };
+                ? palette.GaugeColor(color - 2)
+                : Chart.AutomaticSeriesColor(palette, _ink, kind, color - 2);
         }
         if (kind == GraphKind.Radar) {
-            for (int index = 0; index < Math.Min(5, data.Length); index++) {
+            for (int index = 0; index < Math.Min(Themes.ThemePalette.SeriesColorCount, data.Length); index++) {
                 if (data[index].Color is { } color) {
-                    Palette[2 + (data[index].SourceIndex < 0 ? index : data[index].SourceIndex) % 5] = color;
+                    Palette[2 + (data[index].SourceIndex < 0 ? index : data[index].SourceIndex) % Themes.ThemePalette.SeriesColorCount] = color;
                 }
             }
         }

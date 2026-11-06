@@ -267,6 +267,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

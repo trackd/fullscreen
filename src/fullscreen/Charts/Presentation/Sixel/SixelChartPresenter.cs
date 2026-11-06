@@ -42,6 +42,7 @@ internal sealed class SixelChartPresenter(
     private readonly SixelEncoder _encoder = new();
     private byte[] _cropped = [];
     private readonly List<Rectangle> _windows = [];
+    private readonly List<(Visual? Owner, Rectangle Bounds)> _overlays = [];
     public TerminalGraphicsCapabilities Capabilities => capabilities;
 
     public bool CanPresent(TerminalGraphicsCapabilities detected) =>
@@ -51,23 +52,45 @@ internal sealed class SixelChartPresenter(
         && !detected.IsMultiplexer
         && detected.SupportedProtocols.Contains(TerminalGraphicsProtocol.Sixel);
     private void RefreshWindows(TerminalGraphicsPresentContext context) {
-        _windows.Clear();
+        _overlays.Clear();
         var debug = TerminalOverlayBounds.Debug(context.App);
         if (debug.Width > 0 && debug.Height > 0) {
-            _windows.Add(debug);
+            _overlays.Add((null, debug));
         }
 
         foreach (var visual in context.App.Root.EnumerateVisualsDepthFirst()) {
             if (visual is Hosting.FullscreenChrome chrome) {
-                _windows.Add(chrome.CloseBounds);
+                _overlays.Add((null, chrome.CloseBounds));
             }
 
             if (visual is Chart chart && visual.IsVisible) {
-                _windows.AddRange(chart.AnnotationBounds);
+                foreach (var bounds in chart.AnnotationBounds) {
+                    _overlays.Add((null, bounds));
+                }
             }
 
             if (visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)) {
-                _windows.Add(TerminalOverlayBounds.Window(visual));
+                _overlays.Add((visual, TerminalOverlayBounds.Window(visual)));
+            }
+        }
+        SelectWindows(null);
+    }
+
+    private void SelectWindows(Visual? source) {
+        _windows.Clear();
+        foreach (var (owner, bounds) in _overlays) {
+            bool containsSource = false;
+            if (owner is not null) {
+                for (var ancestor = source; ancestor is not null; ancestor = ancestor.Parent) {
+                    if (ReferenceEquals(ancestor, owner)) {
+                        containsSource = true;
+                        break;
+                    }
+                }
+            }
+            // A dialog masks charts behind it, not charts hosted in its own content.
+            if (!containsSource) {
+                _windows.Add(bounds);
             }
         }
     }
@@ -100,6 +123,7 @@ internal sealed class SixelChartPresenter(
             if (chart is null && image is null) {
                 continue;
             }
+            SelectWindows(command.Content.Source as Visual);
 
             var clip = Intersect(
                 Intersect(command.CellBounds, command.ClipBounds),
@@ -186,6 +210,7 @@ internal sealed class SixelChartPresenter(
             if (chart is null && image is null) {
                 continue;
             }
+            SelectWindows(command.Content.Source as Visual);
 
             var key = chart?.PixelKey ?? default;
             var bounds = command.CellBounds;
@@ -282,6 +307,7 @@ internal sealed class SixelChartPresenter(
             next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, null, payload, [.. _windows], key.Background);
         }
 
+        SelectWindows(null);
         writer.SaveCursor();
         try {
             bool cleared = false;

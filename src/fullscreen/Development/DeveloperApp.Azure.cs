@@ -133,17 +133,8 @@ public sealed partial class DeveloperApp {
             Surface.Refresh();
             return;
         }
-        var chart = new Charts.Chart(counts.Select(count => (double)count.Count)) {
-            Title = "Pipeline runs by result",
-            GraphKind = Charts.GraphKind.HorizontalBars,
-            MinHeight = Math.Clamp(counts.Length * 3 + 4, 10, 25),
-            MaxHeight = 25,
-            Minimum = 0
-        };
-        foreach (var (Label, Count) in counts) {
-            chart.Labels.Add(Label);
-        }
-        Surface.Palette.Apply(chart);
+        var chart = SummaryChart("Pipeline runs by result", counts.Select(count => (count.Label, (double)count.Count)),
+            Math.Clamp(counts.Length * 3 + 4, 10, 25));
         Dialog? dialog = null;
         void Close() {
             dialog!.Close();

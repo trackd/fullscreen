@@ -30,8 +30,41 @@ public sealed class ChartRadialTests {
     }
 
     [TestMethod]
+    public void GaugeUsesSixteenPrecomputedThemeStepsWithoutChangingRadialBars() {
+        var chart = new Chart([100]) { GraphKind = GraphKind.Gauge };
+        var data = chart.GetRenderData(80);
+        var radial = new ChartRadial();
+        radial.Build(data, chart.RenderRange(data), GraphKind.Gauge);
+        var plot = new SixelPlot();
+        foreach (string name in new[] { "Monokai", "Light+" }) {
+            var palette = ThemeCatalog.Load(name);
+            palette.Apply(chart);
+            chart.DrawPixels(plot, 320, 160);
+            Assert.AreEqual(17, plot.ColorCount);
+            for (int step = 0; step < ThemePalette.GaugeColorCount; step++) {
+                double angle = -Math.PI + Math.PI * (step + .5) / ThemePalette.GaugeColorCount;
+                int shade = radial.Sample(Math.Cos(angle) * .7, Math.Sin(angle) * .7, out _, out _);
+                Assert.AreEqual(step + 2, shade);
+                Assert.AreEqual(palette.GaugeColor(step), plot.Palette[shade]);
+                Assert.Contains((byte)shade, plot.Pixels.ToArray());
+            }
+            Assert.AreEqual(palette.ChartPositive, plot.Palette[2]);
+            Assert.AreEqual(palette.ChartNegative, plot.Palette[17]);
+            string svg = CellBufferSvgExporter.Export(VisualSnapshotRenderer.Render(chart, 100, 30));
+            for (int step = 0; step < ThemePalette.GaugeColorCount; step++) {
+                var color = palette.GaugeColor(step);
+                Assert.Contains($"rgb({color.R},{color.G},{color.B})", svg);
+            }
+        }
+        chart.GraphKind = GraphKind.RadialBars;
+        chart.DrawPixels(plot, 320, 160);
+        Assert.AreEqual(9, plot.ColorCount);
+        Assert.AreEqual(chart.Palette.ChartBlue, plot.Palette[2]);
+    }
+
+    [TestMethod]
     [DataRow(GraphKind.Pie, "68EBBEFADF674785200F60A5A039ADE566149DA18C9336B233AF7CDD7DF970A6")]
-    [DataRow(GraphKind.Gauge, "4E980039FE6716CB6E20EA028E2128CD65ADB96B762FBC875D160660AF1C33DF")]
+    [DataRow(GraphKind.Gauge, "25978E4C4A8E6AA248D6806659D60810FCE314829A84FCD8F28EFCAEEE6794FE")]
     [DataRow(GraphKind.RadialBars, "01F78EAA0C9963FE624DA1738B10558E8F9F1FFF5981E6FF8EA47E6AC12B832E")]
     [DataRow(GraphKind.Radar, "A466BF46A8CE55ECD9BCFF707E5DA67CFD970145E9961849DEFFFA29A649B70F")]
     public void RadialOutputsExportAndWarmPathsReuseBuffers(GraphKind kind, string expectedPixels) {
@@ -165,14 +198,14 @@ public sealed class ChartRadialTests {
         int color = radial.Sample(Math.Cos(angle) * .72, Math.Sin(angle) * .72, out var hit, out bool overflow);
         Assert.AreEqual(new RadialHit(0, 1), hit);
         Assert.IsTrue(overflow);
-        Assert.AreEqual(6, color);
+        Assert.AreEqual(kind == GraphKind.Gauge ? ThemePalette.GaugeColorCount + 1 : 6, color);
         string cells = string.Join('\n', VisualSnapshotRenderer.Render(chart, 60, 24).ToMarkupLines());
         Assert.Contains("over: 150 !", cells);
         var plot = new SixelPlot();
         chart.DrawPixels(plot, 240, 120);
         if (kind == GraphKind.Gauge) {
-            Assert.AreEqual(ThemePalette.Default.Success, plot.Palette[2]);
-            Assert.AreEqual(ThemePalette.Default.Error, plot.Palette[6]);
+            Assert.AreEqual(ThemePalette.Default.ChartPositive, plot.Palette[2]);
+            Assert.AreEqual(ThemePalette.Default.ChartNegative, plot.Palette[ThemePalette.GaugeColorCount + 1]);
         }
         chart.Maximum = 200;
         Assert.AreEqual(200d, chart.RenderRange(chart.GetRenderData(60)).MaxY);

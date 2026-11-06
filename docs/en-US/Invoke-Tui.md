@@ -47,6 +47,11 @@ lists, grids and charts publish selections through SelectionBind. Replace bound
 collections to refresh their contents. Get-TuiControl describes each control's
 properties, options and events.
 
+Charts prefer Sixel when supported and otherwise render terminal cells. Wheel zoom
+and keyboard zoom/pan are disabled by default; set `EnableZoom = $true` on a Chart
+to opt in, including scalar-bound history charts. Embedded charts otherwise leave
+the wheel to their surrounding scroll viewer.
+
 Handlers run on the UI thread and can update State or request that the app close.
 Keep callbacks short, avoid host output, and use background jobs for long work.
 When the app closes, the command returns State, Value, Cancelled and LastEvent.
@@ -292,6 +297,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

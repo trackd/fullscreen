@@ -149,7 +149,7 @@ internal sealed class ChartRadial {
                 double? value = point < series.Count ? series.Points[point].Y : null;
                 _vertices[_vertexCount++] = Vertex(point, count,
                     value is { } number ? ChartMath.Fraction(number, range.MinY, range.MaxY) : double.NaN,
-                    seriesIndex, point, 2 + (series.SourceIndex < 0 ? seriesIndex : series.SourceIndex) % 5,
+                    seriesIndex, point, 2 + (series.SourceIndex < 0 ? seriesIndex : series.SourceIndex) % Themes.ThemePalette.SeriesColorCount,
                     value < range.MinY || value > range.MaxY);
                 Empty &= value is null;
             }
@@ -202,7 +202,7 @@ internal sealed class ChartRadial {
                 }
             }
             hit = _slices[low];
-            return 2 + hit.Point % 5;
+            return 2 + hit.Point % Themes.ThemePalette.SeriesColorCount;
         }
         if (_kind is GraphKind.Gauge or GraphKind.RadialBars) {
             int lane = (int)((1 - radius) * _laneCount / .8);
@@ -223,9 +223,11 @@ internal sealed class ChartRadial {
             overflow = (load > 1 || load < 0) && (_kind == GraphKind.Gauge ? load > 1 && fraction > .96 || load < 0 && fraction < .04
                 : fraction > .94 || fraction < .02);
             if (overflow) {
-                return 6;
+                return _kind == GraphKind.Gauge ? Themes.ThemePalette.GaugeColorCount + 1 : 6;
             }
-            return fraction <= Math.Clamp(load, 0, 1) ? _kind == GraphKind.Gauge ? 2 + Math.Min(4, (int)(fraction * 5)) : 2 + lane % 5 : 1;
+            return fraction <= Math.Clamp(load, 0, 1) ? _kind == GraphKind.Gauge
+                ? 2 + Math.Min(Themes.ThemePalette.GaugeColorCount - 1, (int)(fraction * Themes.ThemePalette.GaugeColorCount))
+                : 2 + lane % Themes.ThemePalette.SeriesColorCount : 1;
         }
         return 0;
     }

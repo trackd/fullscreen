@@ -38,6 +38,7 @@ public partial class Chart {
             ShowAxes = ShowAxes,
             ShowLegend = ShowLegend,
             ShowTooltips = ShowTooltips,
+            EnableZoom = EnableZoom,
             XAxis = XAxis,
             YAxis = YAxis,
             Thresholds = [.. Thresholds],
@@ -148,6 +149,7 @@ public partial class Chart {
         ShowAxes = settings.ShowAxes;
         ShowLegend = settings.ShowLegend;
         ShowTooltips = settings.ShowTooltips;
+        EnableZoom = settings.EnableZoom;
         Thresholds.Clear();
         foreach (var threshold in settings.Thresholds) {
             Thresholds.Add(threshold);

@@ -280,6 +280,7 @@ internal sealed partial class ObjectChartApp {
         TextBox xformat = new(chart.XAxis.Format), yformat = new(chart.YAxis.Format);
         CheckBox axes = new("Show axes", chart.ShowAxes), legend = new("Show legend", chart.ShowLegend);
         CheckBox tooltips = new("Show tooltips", chart.ShowTooltips);
+        CheckBox zoom = new("Enable zoom and pan", chart.EnableZoom);
         Editor("Axes and view", [
             Field("X minimum", xmin),
             Field("X maximum", xmax),
@@ -296,7 +297,8 @@ internal sealed partial class ObjectChartApp {
             Field("Y format", yformat),
             axes,
             legend,
-            tooltips
+            tooltips,
+            zoom
         ], () => {
             var settings = chart.CaptureSettings() with {
                 MinimumX = Number(xmin),
@@ -318,7 +320,8 @@ internal sealed partial class ObjectChartApp {
                 },
                 ShowAxes = axes.IsChecked,
                 ShowLegend = legend.IsChecked,
-                ShowTooltips = tooltips.IsChecked
+                ShowTooltips = tooltips.IsChecked,
+                EnableZoom = zoom.IsChecked
             };
             var validation = new Chart();
             validation.SetData(Surface.Series);

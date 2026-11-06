@@ -120,6 +120,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
     /// <summary>Sets or clears the document representation displayed by the surface.</summary>
     /// <param name="text">The source text to parse or display.</param>
     public void SetDocument(string? text) {
+        ResetDocumentSelection();
         _document = text?.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         _filtering = false;
         _documentOffset = 0;
@@ -130,6 +131,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
     }
 
     internal void UpdateLiveDocument(string text, bool follow) {
+        ResetDocumentSelection();
         _document = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         _documentOffset = follow ? Math.Max(0, _document.Length - DocumentRows)
             : Math.Min(_documentOffset, Math.Max(0, _document.Length - DocumentRows));
@@ -285,6 +287,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                 if (DocumentTitle == "JSON") {
                     RenderJsonTokens(buffer, line, DocumentTop + i - _documentOffset);
                 }
+                RenderDocumentSelection(buffer, i, DocumentTop + i - _documentOffset);
             }
 
             if (!Minimal) {
@@ -303,7 +306,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                     buffer,
                     1,
                     Bounds.Height - 1,
-                    DocumentHelp ?? "1 Formatted  2 Properties  3 JSON · Tab next · ↑↓ scroll · ←→ pan · " + (EnterAccepts ? "Enter accept · " : "") +
+                    DocumentHelp ?? "Tab next · ↑↓ scroll · ←→ pan · drag/Shift+arrows select · Ctrl+A all · Ctrl+C copy · " + (EnterAccepts ? "Enter accept · " : "") +
                     "Q close",
                     Accent,
                     Bounds.Width - 2
@@ -520,11 +523,11 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
     private Color ValueColor(TableRow row, int column) {
         if (Model.PropertyRows && column == 0) {
-            return Palette.Accent;
+            return Palette.Property;
         }
 
-        if (Model.PropertyRows && column == 2 && Muted.TryGetForeground(out var muted)) {
-            return muted;
+        if (Model.PropertyRows && column == 2) {
+            return Palette.Type;
         }
 
         if (row.Cells[column] is "<property error>" or "<display error>") {
@@ -537,19 +540,19 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         }
 
         if (value is null or bool or Enum) {
-            return Palette.Warning;
+            return Palette.Keyword;
         }
 
         if (value is string or char) {
-            return Palette.Success;
+            return Palette.StringLiteral;
         }
 
         if (Type.GetTypeCode(value.GetType()) is >= TypeCode.SByte and <= TypeCode.Decimal
             || value is Half or Int128 or UInt128) {
-            return Palette.Purple;
+            return Palette.Number;
         }
 
-        return Palette.Accent;
+        return Palette.Type;
     }
 
     private void Write(CellBuffer buffer, int x, int y, ReadOnlySpan<char> text, Style style, int width) {
@@ -662,6 +665,8 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
             Refresh();
             return;
         }
+
+        if (_document is not null && HandleDocumentSelectionKey(e)) { return; }
 
         if (e.Key == TerminalKey.F5) {
             Shortcut?.Invoke("refresh");
@@ -1102,6 +1107,21 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         }
 
         if (_document is not null) {
+            if (e.Button == TerminalMouseButton.Left && e.LocalY >= DocumentTop
+                && e.LocalY < DocumentTop + DocumentRows) {
+                App?.Focus(this);
+                _documentCaret = DocumentPoint(e.LocalX, e.LocalY);
+                if ((e.Modifiers & TerminalModifiers.Shift) == 0) { _documentAnchor = _documentCaret; }
+                _selectingDocument = true;
+                Refresh();
+                e.Handled = true;
+            }
+            else if (e.Button == TerminalMouseButton.Right) {
+                ContextMenuService.Show(this, [
+                    new("Copy selection", CopyDocumentSelection)
+                ], e.UiX, e.UiY);
+                e.Handled = true;
+            }
             return;
         }
 
@@ -1153,6 +1173,10 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
     /// <inheritdoc/>
     protected override void OnPointerMoved(PointerEventArgs e) {
+        if (e.RoutingPhase != RoutingPhase.Preview && _selectingDocument) {
+            ExtendDocumentSelection(e);
+            return;
+        }
         if (e.RoutingPhase == RoutingPhase.Preview || !_resizingSplit) {
             return;
         }
@@ -1163,6 +1187,11 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
     /// <inheritdoc/>
     protected override void OnPointerReleased(PointerEventArgs e) {
+        if (e.RoutingPhase != RoutingPhase.Preview && _selectingDocument && e.Button == TerminalMouseButton.Left) {
+            ExtendDocumentSelection(e);
+            _selectingDocument = false;
+            return;
+        }
         if (e.RoutingPhase == RoutingPhase.Preview || !_resizingSplit) {
             return;
         }

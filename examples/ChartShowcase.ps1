@@ -115,6 +115,22 @@ $resources = @(
         Target = 85
     }
 )
+$gaugeResources = @(
+    for ($index = 0; $index -lt $resources.Count; $index++) {
+        [pscustomobject]@{
+            Resource = $resources[$index].Resource
+            Load = @(68, 82, 91, 97)[$index]
+        }
+    }
+)
+$radialResources = @(
+    for ($index = 0; $index -lt $resources.Count; $index++) {
+        [pscustomobject]@{
+            Resource = $resources[$index].Resource
+            Load = @(88, 72, 95, 83)[$index]
+        }
+    }
+)
 $changes = @(
     [pscustomobject]@{
         Stage = 'Opening'
@@ -394,6 +410,10 @@ $pages = foreach ($kind in $chartKinds) {
             if ($kind -eq 'Radar') {
                 $chart.YProperty = @('Load', 'Target')
             }
+            if ($kind -in 'Gauge', 'RadialBars') {
+                $chart.Bind = if ($kind -eq 'Gauge') { 'gaugeResources' } else { 'radialResources' }
+                $description = 'Resource load - active to near capacity (%)'
+            }
             if ($kind -eq 'Pie') {
                 $description = 'Relative resource weights (not percentages of a shared capacity)'
             }
@@ -527,6 +547,8 @@ $layout = New-TuiDefinition -Title 'Chart showcase' -Root @{
     signal = @($signal)
     outcomes = $outcomes
     resources = $resources
+    gaugeResources = $gaugeResources
+    radialResources = $radialResources
     changes = $changes
     markets = $markets
     prices = @($prices)

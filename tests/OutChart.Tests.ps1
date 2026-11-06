@@ -169,6 +169,7 @@ Describe 'Out-Chart pipeline contract' {
         }
         $command.Parameters['SeriesRole'].ParameterType.FullName | Should -Be 'fullscreen.Charts.ChartSeriesRole[]'
         $command.Parameters['ShowLegend'].ParameterType | Should -Be ([System.Management.Automation.SwitchParameter])
+        $command.Parameters['EnableZoom'].ParameterType | Should -Be ([System.Management.Automation.SwitchParameter])
         $items = @(
             [pscustomobject]@{ Sample = 'one'; Actual = 8; Target = 6 }
             [pscustomobject]@{ Sample = 'two'; Actual = -2; Target = 5 }
@@ -178,6 +179,9 @@ Describe 'Out-Chart pipeline contract' {
         $node = New-TuiControl Chart -Id combination -Bind samples -Property @{ GraphKind = 'ColumnLine'; ShowLegend = $true }
         $node.GraphKind | Should -Be 'ColumnLine'
         $node.ShowLegend | Should -BeTrue
+        $node.EnableZoom | Should -BeFalse
+        $zoomed = New-TuiControl Chart -Id zoomed -Bind samples -Property @{ EnableZoom = $true }
+        $zoomed.EnableZoom | Should -BeTrue
         $example = Join-Path $PSScriptRoot '..\examples\ChartCombinations.ps1'
         $data = & $example -DataOnly
         $data.Count | Should -Be 12

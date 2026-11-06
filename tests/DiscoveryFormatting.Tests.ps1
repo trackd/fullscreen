@@ -34,13 +34,14 @@ Describe 'Discovery formatting' {
     It 'Keeps formatted and JSON views scoped to the current inspected node' {
         $assembly = (Get-Command Show-ObjectTable).ImplementingType.Assembly
         $options = [Activator]::CreateInstance($assembly.GetType('fullscreen.Objects.ObjectTableOptions'))
-        $options.View = [Enum]::Parse($assembly.GetType('fullscreen.Objects.ObjectView'), 'Expanded')
+        $options.View = [Enum]::Parse($assembly.GetType('fullscreen.Objects.ObjectView'), 'Inspect')
         $rows = [Collections.Generic.List[psobject]]::new()
         $rows.Add([pscustomobject]@{ RootOnly = 'outer'; Child = [pscustomobject]@{ Name = 'inner'; Count = 42 } })
         $app = [Activator]::CreateInstance($assembly.GetType('fullscreen.Objects.ObjectTableApp'), @($rows, $options))
         try {
-            $app.InspectSelected($app.Surface.Model.Current)
-            $app.Surface.Model.Select(1, 20)
+            $childRow = $app.Surface.Model.Visible | Where-Object { $_.Cells[2] -eq 'Child' }
+            $childIndex = $app.Surface.Model.Visible.IndexOf($childRow)
+            $app.Surface.Model.Select($childIndex, 20)
             $app.InspectSelected($app.Surface.Model.Current)
             $path = $app.NodePath
             $app.SwitchView([Enum]::Parse($options.View.GetType(), 'Formatted'))
@@ -50,9 +51,7 @@ Describe 'Discovery formatting' {
             $app.SwitchView([Enum]::Parse($options.View.GetType(), 'Json'))
             $app.NodePath | Should -Be $path
             $app.Surface.DocumentHint | Should -Be $path
-            $app.NavigationDepth | Should -Be 2
-            $app.GoBack() | Should -BeTrue
-            $app.NodePath | Should -Be '$[0]'
+            $app.NavigationDepth | Should -Be 1
             $app.GoBack() | Should -BeTrue
             $app.NodePath | Should -Be '$'
         }

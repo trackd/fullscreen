@@ -219,7 +219,7 @@ public sealed class AzureDevOpsTests {
 
     [TestMethod]
     public async Task BoardsLandingDashboardRendersNativeBarsAndDoesNotRequireAnalytics() {
-        var client = new FixtureClient();
+        var client = new FixtureClient { ItemFixtures = [ReviewItem(42, "User Story", "Active"), ReviewItem(9, "User Story", "Done")] };
         using var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"));
         await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 110, 45);
         Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
@@ -227,7 +227,12 @@ public sealed class AzureDevOpsTests {
         Assert.Contains("Current sprint by state", ui.Output);
         Assert.Contains("█", ui.Output);
         Assert.HasCount(0, client.AnalyticsQueries);
-        Assert.IsTrue(app.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Charts.Chart>().Single().PreferTerminalCells);
+        var chart = app.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Charts.Chart>().Single();
+        Assert.IsFalse(chart.PreferTerminalCells, "Use pixel rendering when the terminal supports it.");
+        Assert.IsFalse(chart.EnableZoom);
+        Assert.IsTrue(chart.ShowLegend);
+        Assert.AreEqual(2, chart.Series.Count);
+        Assert.IsTrue(chart.Series.All(series => series.Values.Count == 1 && series.Name.Length > 0));
     }
 
     [TestMethod]
@@ -250,7 +255,7 @@ public sealed class AzureDevOpsTests {
     }
 
     [TestMethod]
-    public async Task CumulativeFlowRendersCellsAndLabelsInsideTheAnalyticsDialog() {
+    public async Task CumulativeFlowUsesSharedRendererAndScrollsInsideTheAnalyticsDialog() {
         string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         var client = new FixtureClient {
             Analytics = query => query.Contains("StateCategory", StringComparison.Ordinal) ? """{"value":[]}""" :
@@ -260,7 +265,7 @@ public sealed class AzureDevOpsTests {
                 } })
         };
         using var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"));
-        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 110, 45);
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 110, 24);
         Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
         int before = ui.Output.Length;
         app.Surface.ToolbarCommands.Single(command => command.Label == "Y Boards analytics").Execute();
@@ -272,6 +277,12 @@ public sealed class AzureDevOpsTests {
         var chart = ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Single().EnumerateVisualsDepthFirst().OfType<fullscreen.Charts.Chart>().Single();
         Assert.IsTrue(chart.ShowLegend);
         Assert.AreEqual(2, chart.Series.Count);
+        Assert.IsFalse(chart.PreferTerminalCells);
+        Assert.IsFalse(chart.EnableZoom);
+        var scroll = ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Single().EnumerateVisualsDepthFirst().OfType<ScrollViewer>().Single();
+        ui.Wheel(chart.PlotBounds.X + 2, chart.PlotBounds.Y + 2, -1, () => scroll.VerticalOffset > 0);
+        Assert.IsNull(chart.MinimumX);
+        Assert.IsNull(chart.MaximumX);
     }
 
     [TestMethod]
@@ -844,7 +855,9 @@ public sealed class AzureDevOpsTests {
 
     [TestMethod]
     public async Task OverviewToolbarSupportsNativeMousePreviewToggleAndSprintReview() {
-        using var app = new DeveloperApp(new AzureDevOpsBackend(new FixtureClient(), "Project"), initialView: 2);
+        using var app = new DeveloperApp(new AzureDevOpsBackend(new FixtureClient {
+            ItemFixtures = [ReviewItem(42, "User Story", "Active"), ReviewItem(9, "User Story", "Done")]
+        }, "Project"), initialView: 2);
         await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 140, 45);
         Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy && app.Surface.Model.Rows.Count > 0; }, 5000));
         var preview = app.Root.EnumerateVisualsDepthFirst().OfType<Button>().Single(button => button.Content is TextBlock text && text.Text == "V Preview ☐");
@@ -860,6 +873,9 @@ public sealed class AzureDevOpsTests {
         Assert.IsGreaterThan(60, chart.Bounds.Width);
         Assert.IsGreaterThanOrEqualTo(10, chart.Bounds.Height);
         Assert.IsGreaterThan(0, chart.PlotBounds.Height);
+        Assert.IsFalse(chart.EnableZoom);
+        Assert.IsTrue(chart.ShowLegend);
+        Assert.AreEqual(2, chart.Series.Count);
         Assert.Contains("█", ui.Output, "Analytics must draw bars, not only attach a chart to the dialog.");
     }
 

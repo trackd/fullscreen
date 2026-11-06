@@ -279,6 +279,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                         GraphKind = Enum.Parse<Charts.GraphKind>(node.GraphKind, true),
                         ShowLegend = node.ShowLegend,
                         ShowTooltips = node.ShowTooltips,
+                        EnableZoom = node.EnableZoom,
                         ShowAxes = node.ShowAxes,
                         MinHeight = node.Height ?? 8
                     };
@@ -311,6 +312,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                         GraphKind = Enum.Parse<Charts.GraphKind>(node.GraphKind, true),
                         ShowLegend = node.ShowLegend,
                         ShowTooltips = node.ShowTooltips,
+                        EnableZoom = node.EnableZoom,
                         ShowAxes = node.ShowAxes,
                         MinHeight = node.Height ?? 8
                     };

@@ -21,7 +21,7 @@ Charts pipeline objects interactively and lets you change fields and graph types
 
 ```
 Out-Chart [[-InputObject] <psobject[]>] [-XProperty <Object>] [-YProperty <Object[]>]
- [-GraphType <GraphKind>] [-SeriesRole <ChartSeriesRole[]>] [-ShowLegend] [-ShowTooltips] [-Minimum <double>] [-Maximum <double>] [-ReversalAmount <double>] [-ChartRenderer <ChartRenderer>] [-Title <string>] [-MaximumCount <int>] [-PassThru] [-Theme <Object>]
+ [-GraphType <GraphKind>] [-SeriesRole <ChartSeriesRole[]>] [-ShowLegend] [-ShowTooltips] [-EnableZoom] [-Minimum <double>] [-Maximum <double>] [-ReversalAmount <double>] [-ChartRenderer <ChartRenderer>] [-Title <string>] [-MaximumCount <int>] [-PassThru] [-Theme <Object>]
  [-FrameIdProperty <string>] [-ParentIdProperty <string>] [-FrameNameProperty <string>] [-FlameReverse] [-FlameFrameRows <int>]
  [-StartProperty <string>] [-EndProperty <string>] [-TaskNameProperty <string>] [-ProgressProperty <string>]
  [-GroupBy <Object>] [-Aggregate <ChartAggregate>] [-LowerProperty <Object>] [-UpperProperty <Object>]
@@ -32,7 +32,7 @@ Out-Chart [[-InputObject] <psobject[]>] [-XProperty <Object>] [-YProperty <Objec
 
 ```
 Out-Chart -Nodes <psobject[]> -Edges <psobject[]> [-GraphType <GraphKind>]
- [-ChartRenderer <ChartRenderer>] [-Title <string>] [-ShowLegend] [-ShowTooltips] [-PassThru]
+ [-ChartRenderer <ChartRenderer>] [-Title <string>] [-ShowLegend] [-ShowTooltips] [-EnableZoom] [-PassThru]
  [-Configuration <string>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
 ```
 
@@ -44,8 +44,9 @@ retain their original records for inspection. Graphics rendering falls back to
 terminal cells when unavailable.
 
 Hover for values, click to select, and press Enter or double-click to inspect.
-T opens the data table. Where supported, the mouse wheel zooms, brackets pan
-and Shift-drag selects a range. Space pauses refresh; the graph menu provides
+T opens the data table. Wheel zoom and keyboard zoom/pan are disabled by default;
+use `-EnableZoom` or enable zoom in the axes/view editor to opt in. Where supported,
+Shift-drag selects a range. Space pauses refresh; the graph menu provides
 axis, series, export and configuration options.
 
 Numeric charts support multiple series, distributions and specialized layouts.
@@ -460,7 +461,7 @@ $tasks | Out-Chart -GraphType Gantt -ProgressProperty Progress -ShowLegend -Titl
 
 Input rows keep separate lanes. Completed fractions color the left portion of
 each interval; Release is a zero-duration milestone. Use Up/Down to scroll tasks,
-wheel to zoom time, and click an interval then D to inspect the original record.
+wheel to zoom time when `-EnableZoom` is set, and click an interval then D to inspect the original record.
 
 ### Example 20: Draw a flow with separate nodes and connections
 
@@ -806,6 +807,27 @@ Click selection and Enter inspection remain available.
 ```yaml
 Type: System.Management.Automation.SwitchParameter
 DefaultValue: None
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+```
+
+### -EnableZoom
+
+Opt in to mouse-wheel zoom, +/- zoom, and bracket-key panning on supported numeric
+charts. Disabled by default so embedded charts leave wheel input to their parent
+scroll viewer. Selection, hover, and Shift-drag range selection remain available.
+Use `-EnableZoom:$false` to disable zoom restored from a configuration file.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
 SupportsWildcards: false
 Aliases: []
 ParameterSets:
@@ -1246,6 +1268,19 @@ ParameterSets:
 ### -Theme
 
 Built-in theme name or custom palette, as supported by the other fullscreen apps.
+Use `(Get-FullscreenTheme Monokai).Colors` to inspect or copy all editable colors.
+Partial hashtables inherit unspecified colors from Base (Default when omitted):
+
+`-Theme @{ Base = 'Monokai'; ChartBlue = '#58d5e6'; ChartGrid = '#555555' }`
+
+Eight series colors repeat in order: ChartBlue, ChartOrange, ChartPurple, ChartGreen, ChartCyan, ChartRed, ChartYellow, ChartPink.
+Explicit series colors take precedence. Success, Warning, and Error remain status colors, not automatic series colors.
+ChartGrid, ChartAxis, and ChartLabel control lines, axes, and labels.
+Heatmap shades interpolate between ChartSequentialLow and ChartSequentialHigh.
+Gauge colors interpolate through ChartPositive, ChartNeutral, and ChartNegative as load increases.
+The gauge uses 16 precomputed color steps along the arc; RadialBars retains one solid series color per ring.
+All color overrides accept #RGB or #RRGGBB hex strings; setting one does not change the other roles.
+Syntax colors for the embedded object inspector are also editable; see Get-FullscreenTheme for the complete role list.
 
 ```yaml
 Type: System.Object

@@ -5,7 +5,7 @@ using XenoAtom.Terminal.UI.Controls;
 
 namespace fullscreen.Themes;
 /// <summary>Precomputed styles, owned by each surface. Theme configuration never runs in the render loop.</summary>
-public sealed class ThemePalette {
+public sealed partial class ThemePalette {
     /// <summary>Gets the display name.</summary>
     public string Name { get; }
     /// <summary>Gets whether this palette represents the default theme.</summary>
@@ -77,7 +77,8 @@ public sealed class ThemePalette {
         Color warning,
         Color error,
         Color purple,
-        bool isDefault = false
+        bool isDefault = false,
+        Color[]? colors = null
     ) {
         Name = name;
         IsDefault = isDefault;
@@ -88,6 +89,17 @@ public sealed class ThemePalette {
         Warning = warning;
         Error = error;
         Purple = purple;
+        _colors = colors ?? [
+            purple, accent, warning, foreground, foreground, success, warning, muted, foreground,
+            Color.Rgb(88, 166, 255), Color.Rgb(230, 160, 70), Color.Rgb(112, 225, 176), purple,
+            accent, error, warning, Color.Rgb(230, 130, 195),
+            Color.Mix(background, muted, .3f), muted, foreground,
+            Color.Mix(background, accent, .1f), accent, error, muted, success,
+            foreground, foreground, warning, foreground
+        ];
+        for (int i = 0; i < _gaugeColors.Length; i++) {
+            _gaugeColors[i] = DivergingColor(1 - i / (float)(GaugeColorCount - 1));
+        }
         Body = Style.None.WithForeground(foreground).WithBackground(background);
         TableBody = isDefault ? Body.WithForeground(Color.Rgb(206, 218, 235)) : Body;
         Panel = Body.WithBackground(panel);
@@ -105,7 +117,7 @@ public sealed class ThemePalette {
         ChartFill = Body.WithForeground(Color.Mix(background, accent, 0.24f));
         ChartGreenFill = Body.WithForeground(Color.Mix(background, success, 0.24f));
         ChartPurpleFill = Body.WithForeground(Color.Mix(background, purple, 0.24f));
-        ChartGrid = Body.WithForeground(Color.Mix(background, muted, 0.3f));
+        ChartGrid = Body.WithForeground(ChartGridColor);
         Controls = new Theme {
             Foreground = foreground,
             Background = background,

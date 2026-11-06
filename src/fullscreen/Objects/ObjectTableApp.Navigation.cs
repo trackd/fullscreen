@@ -13,6 +13,7 @@ public sealed partial class ObjectTableApp {
         public string? Json { get; set; }
         public List<PSObject>? Items { get; set; }
         public bool MemberRows { get; set; }
+        public bool Members { get; set; }
     }
 
     /// <summary>Gets the display path of the current nested object.</summary>
@@ -23,14 +24,24 @@ public sealed partial class ObjectTableApp {
     /// <summary>Opens an inspection view of the selected row&apos;s original object.</summary>
     /// <param name="row">The table row whose original object is inspected.</param>
     public void InspectSelected(TableRow row) {
+        var inspection = _node ?? _inspection;
+        if (View == ObjectView.Inspect && inspection?.Members == true) {
+            if (row.Original is PSMethodInfo or ObjectMembers.Signature) {
+                Surface.ShowDetail(row.Detail);
+            }
+            else if (row.Values[3] is { } memberValue) {
+                OpenNode(memberValue, row.Cells[2]);
+            }
+            return;
+        }
         if (_node is { MemberRows: false, Items: null } && View == ObjectView.Formatted) {
-            SwitchNodeView(ObjectView.Expanded);
+            SwitchNodeView(ObjectView.Inspect);
             return;
         }
 
-        object? value = _node?.MemberRows == true ? row.Values[1] : row.Original;
+        object? value = View == ObjectView.Inspect && inspection?.MemberRows == true ? row.Values[1] : row.Original;
         if (value is not null) {
-            OpenNode(value, _node?.MemberRows == true ? row.Cells[0] : $"[{row.Id}]");
+            OpenNode(value, View == ObjectView.Inspect && inspection?.MemberRows == true ? row.Cells[0] : $"[{row.Id}]");
         }
     }
 
@@ -38,7 +49,8 @@ public sealed partial class ObjectTableApp {
     /// <param name="value">The original object to open as a navigation node.</param>
     /// <param name="name">The label identifying the nested object in navigation.</param>
     public void OpenNode(object value, string name) {
-        if (_node is not null && ObjectSnapshot.IsScalar(_node.Value) && ObjectSnapshot.IsScalar(value)) {
+        if ((View == ObjectView.Inspect ? _node ?? _inspection : _node) is { } current
+            && ObjectSnapshot.IsScalar(current.Value) && ObjectSnapshot.IsScalar(value)) {
             Surface.Status = "Scalar values have no nested members";
             Surface.Refresh();
             return;
@@ -51,12 +63,13 @@ public sealed partial class ObjectTableApp {
         }
 
         try {
-            var node = new NodeState(value, NodePath + (name.StartsWith('[') ? name : "." + name));
+            string path = _node?.Path ?? (View == ObjectView.Inspect ? _inspection?.Path : null) ?? "$";
+            var node = new NodeState(value, path + (name.StartsWith('[') ? name : "." + name));
             // Resolve getters before changing navigation, so a failure leaves the parent usable.
-            node.Models[1] = CreateNodeModel(node, ObjectView.Expanded);
+            node.Models[1] = CreateNodeModel(node, ObjectView.Inspect);
             _parents.Push((_node, Surface.Model, View));
             _node = node;
-            SwitchNodeView(ObjectView.Expanded);
+            SwitchNodeView(ObjectView.Inspect);
         }
         catch (Exception error) {
             Surface.ShowDetail(TableModel.Text(error.Message));
@@ -76,13 +89,16 @@ public sealed partial class ObjectTableApp {
         Surface.PreferredWidths = parent.Model.PreferredWidths;
         Surface.SetDocument(null);
         Surface.ResetColumns();
-        Surface.EnterAccepts = _node is null && _options.PassThru;
+        Surface.EnterAccepts = _node is null && _options.PassThru && View == ObjectView.Formatted;
         Surface.ActiveTab = (int)View;
         if (_node is not null) {
             SwitchNodeView(View);
         }
         else if (View == ObjectView.Json) {
             SwitchView(View);
+        }
+        else if (View == ObjectView.Inspect && _inspection is not null) {
+            ShowInspection(_inspection);
         }
 
         UpdateNavigation();
@@ -106,12 +122,18 @@ public sealed partial class ObjectTableApp {
             return view == ObjectView.Formatted ? PowerShellObjectViews.Format(node.Items) : ObjectSnapshot.Create(node.Items);
         }
 
-        return view == ObjectView.Formatted ? PowerShellObjectViews.Format([PSObject.AsPSObject(node.Value)]) : ObjectSnapshot.Inspect(node.Value);
+        if (view == ObjectView.Formatted) { return PowerShellObjectViews.Format([PSObject.AsPSObject(node.Value)]); }
+        node.MemberRows = raw is IDictionary;
+        node.Members = !node.MemberRows;
+        return node.Members ? ObjectMembers.Create(node.Value) : ObjectSnapshot.Inspect(node.Value);
     }
 
     private void SwitchNodeView(ObjectView view) {
         var node = _node!;
-        if (view == ObjectView.Json) {
+        if (view == ObjectView.Inspect) {
+            ShowInspection(node);
+        }
+        else if (view == ObjectView.Json) {
             if (node.Json is null) {
                 string json = PowerShellObjectViews.Json(node.Value, _options.JsonDepth);
                 node.Json = json.Length <= 1024 * 1024 ? json : json[..(1024 * 1024)] +
@@ -130,8 +152,6 @@ public sealed partial class ObjectTableApp {
                 }
             }
 
-            object raw = node.Value is PSObject ps ? ps.BaseObject : node.Value;
-            node.MemberRows = view == ObjectView.Expanded && (raw is not IEnumerable || raw is string or IDictionary);
             Surface.Model = model;
             Surface.PreferredWidths = model.PreferredWidths;
             Surface.SetDocument(null);
@@ -149,7 +169,12 @@ public sealed partial class ObjectTableApp {
         Surface.Navigation = _node is null ? "$ · M/F10 menu" : "‹ Back · " + NodePath + " · M/F10 menu";
         Surface.DocumentHint = NodePath;
         Surface.Status = _node is null ? "Select a row · Enter/I inspect · / search · click column to sort" : "Selected node · Enter/I dive · / search · S sort · up to 1,000 members · Backspace/Esc back";
-        Surface.DocumentHelp = "1 Formatted  2 Expanded  3 JSON · / search · N next · M/F10 menu · Backspace/Esc back · Q close";
+        Surface.DocumentHelp = "1 Formatted  2 Inspect  3 JSON · drag/Shift+arrows select · Ctrl+A all · Ctrl+C copy · / search · N next · Q close";
+        if (View == ObjectView.Inspect && (_node ?? _inspection)?.Members == true) {
+            object? value = _node?.Value ?? (_selected is { } id && id < _objects.Count ? _objects[(int)id] : null);
+            string type = value is PSObject ps ? ps.TypeNames.FirstOrDefault() ?? ps.BaseObject.GetType().FullName ?? "" : value?.GetType().FullName ?? "";
+            Surface.Status = TableModel.Text(type) + " · properties and method overloads · Enter/I inspect · up to 1,000 rows";
+        }
     }
 
     private void ShowMenu(int x, int y) {
@@ -160,7 +185,7 @@ public sealed partial class ObjectTableApp {
 
         if (Surface.Model.Current is { } row && View != ObjectView.Json) {
             items.Add(new("Inspect selected · Enter / I", () => InspectSelected(row)));
-            object? selected = _node?.MemberRows == true ? row.Values[1] : row.Original;
+            object? selected = View == ObjectView.Inspect ? null : row.Original;
             if (selected is not null) {
                 foreach (var member in ObjectSnapshot.Inspect(selected).Rows) {
                     if (member.Values[1] is { } value) {
@@ -174,7 +199,7 @@ public sealed partial class ObjectTableApp {
         }
 
         items.Add(new("Formatted view", () => SwitchView(ObjectView.Formatted)));
-        items.Add(new("Expanded view", () => SwitchView(ObjectView.Expanded)));
+        items.Add(new("Inspect view", () => SwitchView(ObjectView.Inspect)));
         items.Add(new("JSON of this node", () => SwitchView(ObjectView.Json)));
         items.Add(new("Search / filter · /", Surface.BeginFilter));
         if (View != ObjectView.Json) {

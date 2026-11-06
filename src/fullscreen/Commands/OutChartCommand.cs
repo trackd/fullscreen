@@ -79,6 +79,9 @@ public sealed class OutChartCommand : FullscreenCommand {
     /// <summary>Show point details after a 200 ms hover. Use -ShowTooltips:$false to disable.</summary>
     [Parameter]
     public SwitchParameter ShowTooltips { get; set; }
+    /// <summary>Enable mouse-wheel zoom and keyboard viewport navigation. Disabled by default.</summary>
+    [Parameter]
+    public SwitchParameter EnableZoom { get; set; }
 
     /// <summary>Lower shared value bound; cumulative endpoints for Waterfall, color scale for Heatmap. Gauge and RadialBars default to 0. Pie does not accept bounds.</summary>
     [Parameter]
@@ -337,6 +340,9 @@ public sealed class OutChartCommand : FullscreenCommand {
             if (MyInvocation.BoundParameters.ContainsKey(nameof(ShowTooltips))) {
                 app.Surface.Plot.ShowTooltips = ShowTooltips.IsPresent;
             }
+            if (MyInvocation.BoundParameters.ContainsKey(nameof(EnableZoom))) {
+                app.Surface.Plot.EnableZoom = EnableZoom.IsPresent;
+            }
             if (MyInvocation.BoundParameters.ContainsKey(nameof(Minimum))) {
                 app.Surface.Plot.Minimum = Minimum;
             }
@@ -421,6 +427,9 @@ public sealed class OutChartCommand : FullscreenCommand {
         }
         if (MyInvocation.BoundParameters.ContainsKey(nameof(ShowTooltips))) {
             app.Surface.Plot.ShowTooltips = ShowTooltips.IsPresent;
+        }
+        if (MyInvocation.BoundParameters.ContainsKey(nameof(EnableZoom))) {
+            app.Surface.Plot.EnableZoom = EnableZoom.IsPresent;
         }
         _ = app.Surface.Plot.GetRenderData(100);
         FullscreenHost.Run(app, PipelineStopToken, ResolveTheme(), Minimal.IsPresent, ChartRenderer);

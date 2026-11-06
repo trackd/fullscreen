@@ -132,7 +132,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             VerticalAlignment = Align.Stretch
         };
         AttachChild(_inspection);
-        PixelInk = Palette.Accent;
+        PixelInk = Palette.ChartBlue;
         PixelBackground = Palette.Background;
     }
 
@@ -163,7 +163,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
 
     private void UpdateAutomaticColors() {
         if (!_explicitColors) {
-            PixelInk = Palette.Accent;
+            PixelInk = Palette.ChartBlue;
             PixelBackground = Palette.Background;
         }
     }
@@ -402,7 +402,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         if (ChartRadial.IsRadial(GraphKind)) {
             return PickRadial(rendered, x, y);
         }
-        if (ChartGrid.Supports(GraphKind) || ChartStackedArea.Supports(GraphKind)) {
+        if (ChartGrid.Supports(GraphKind) || ChartStackedArea.Supports(GraphKind) || GraphKind == GraphKind.HorizontalBars) {
             return PickGrid(rendered, x, y);
         }
         if (ChartMarket.Supports(GraphKind)) {
@@ -557,32 +557,8 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     private Color DefaultSeriesColor(int index) =>
         AutomaticSeriesColor(Palette, PixelInk, GraphKind, index);
 
-    internal static bool UsesStackedPalette(GraphKind kind) =>
-        kind is GraphKind.StackedBars or GraphKind.StackedArea or GraphKind.PercentStackedArea or GraphKind.Marimekko;
-
-    internal static Color AutomaticSeriesColor(Themes.ThemePalette palette, Color ink, GraphKind kind, int index) {
-        if (index >= 0 && UsesStackedPalette(kind)) {
-            var primary = ink.ToRgb();
-            var purple = palette.Purple.ToRgb();
-            bool errorFirst = (primary.R - purple.R) * (primary.R - purple.R)
-                + (primary.G - purple.G) * (primary.G - purple.G)
-                + (primary.B - purple.B) * (primary.B - purple.B) < 10_000;
-            return (index % 5) switch {
-                0 => ink,
-                1 => errorFirst ? palette.Error : palette.Purple,
-                2 => errorFirst ? palette.Purple : palette.Warning,
-                3 => errorFirst ? palette.Warning : palette.Success,
-                _ => errorFirst ? palette.Success : palette.Error
-            };
-        }
-        return (index % 5) switch {
-            0 => ink,
-            1 => palette.Success,
-            2 => palette.Warning,
-            3 => palette.Purple,
-            _ => palette.Error
-        };
-    }
+    internal static Color AutomaticSeriesColor(Themes.ThemePalette palette, Color ink, GraphKind kind, int index) =>
+        index % Themes.ThemePalette.SeriesColorCount == 0 ? ink : palette.SeriesColor(index);
 }
 
 internal readonly record struct ChartPixelKey(

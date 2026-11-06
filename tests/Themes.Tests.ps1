@@ -42,6 +42,27 @@ BeforeAll {
 }
 
 Describe 'Theme color contracts' {
+    It 'Exports editable syntax and chart roles that round-trip without losing colors' {
+        $catalog = (Get-Command Get-FullscreenTheme).ImplementingType.Assembly.GetType('fullscreen.Themes.ThemeCatalog')
+        $roles = 'DefaultToken','Comment','Keyword','String','Operator','Variable','Command','Parameter','Type','Number','Property','Function','Punctuation',
+            'ChartBlue','ChartOrange','ChartPurple','ChartGreen','ChartCyan','ChartRed','ChartYellow','ChartPink',
+            'ChartGrid','ChartAxis','ChartLabel','ChartSequentialLow','ChartSequentialHigh','ChartNegative','ChartNeutral','ChartPositive'
+        foreach ($theme in Get-FullscreenTheme) {
+            $palette = $catalog.GetMethod('FromDictionary').Invoke($null, @($theme.Colors))
+            foreach ($role in $roles) {
+                $theme.Colors[$role] | Should -Match '^#[0-9A-F]{6}$'
+                $property = switch ($role) { String { 'StringLiteral' }; ChartGrid { 'ChartGridColor' }; default { $role } }
+                $color = $palette.$property
+                ('#{0:X2}{1:X2}{2:X2}' -f $color.R,$color.G,$color.B) | Should -BeExactly $theme.Colors[$role]
+            }
+        }
+        $custom = $catalog.GetMethod('FromDictionary').Invoke($null, @(@{ Base = 'Monokai'; ChartBlue = '#123'; Keyword = '#456' }))
+        $custom.ChartBlue.R | Should -Be 17
+        $custom.Keyword.R | Should -Be 68
+        $original = (Get-FullscreenTheme Monokai).Colors
+        ('#{0:X2}{1:X2}{2:X2}' -f $custom.Success.R,$custom.Success.G,$custom.Success.B) | Should -BeExactly $original.Success
+    }
+
     It 'Preserves every color role in <ThemeName>' -ForEach $paletteCases {
         $colors = (Get-FullscreenTheme -Name $ThemeName).Colors
         $roles = 'Background','Foreground','Panel','Muted','Accent','Selection','SelectedText','Success','Warning','Error','Purple'

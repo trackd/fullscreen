@@ -47,16 +47,19 @@ public sealed partial class DeveloperApp {
 
     private Chart SummaryChart(string title, IEnumerable<(string Label, double Value)> data, int height = 14) {
         var rows = data.ToArray();
-        var chart = new Chart(rows.Select(row => row.Value)) {
+        var chart = new Chart {
             Title = title,
             GraphKind = GraphKind.HorizontalBars,
-            MinHeight = height,
-            MaxHeight = height,
+            MinHeight = Math.Max(height, rows.Length * 2 + 4),
+            MaxHeight = Math.Max(height, rows.Length * 2 + 4),
             Minimum = 0,
-            PreferTerminalCells = true
+            ShowLegend = true,
+            ShowAxes = true
         };
         foreach (var row in rows) {
-            chart.Labels.Add(row.Label);
+            var series = new ChartSeries(row.Label, [row.Value]) { Marker = ChartMarker.None };
+            series.Labels.Add(row.Label);
+            chart.Series.Add(series);
         }
         Surface.Palette.Apply(chart);
         return chart;
@@ -107,10 +110,11 @@ public sealed partial class DeveloperApp {
         if (analytics.Flow.Length > 0) {
             var dates = analytics.Flow.Select(row => row.Date).Distinct().Order().ToArray();
             var chart = new Chart { Title = "Cumulative flow · daily board column counts", GraphKind = GraphKind.StackedArea,
-                MinHeight = 18, MaxHeight = 18, Maximum = null, Minimum = 0, ShowLegend = true, PreferTerminalCells = true };
+                MinHeight = 18, MaxHeight = 18, Maximum = null, Minimum = 0, ShowLegend = true, ShowAxes = true,
+                XAxis = new() { Scale = ChartScale.Category } };
             foreach (var column in analytics.Flow.Select(row => row.Column).Distinct()) {
                 var indexed = analytics.Flow.Where(row => row.Column == column).GroupBy(row => row.Date).ToDictionary(group => group.Key, group => group.Sum(row => row.Count));
-                var series = new ChartSeries(column, dates.Select(date => (double)indexed.GetValueOrDefault(date)));
+                var series = new ChartSeries(column, dates.Select(date => (double)indexed.GetValueOrDefault(date))) { Marker = ChartMarker.None };
                 foreach (var date in dates) {
                     series.Labels.Add(date.ToString("MM-dd", CultureInfo.InvariantCulture));
                 }
@@ -125,13 +129,14 @@ public sealed partial class DeveloperApp {
         }
         if (analytics.Velocity.Length > 0) {
             var chart = new Chart { Title = "Velocity · count of work items · last eligible six sprints", GraphKind = GraphKind.Bars,
-                MinHeight = 16, MaxHeight = 16, Minimum = 0, ShowLegend = true, PreferTerminalCells = true };
+                MinHeight = 16, MaxHeight = 16, Minimum = 0, ShowLegend = true, ShowAxes = true,
+                XAxis = new() { Scale = ChartScale.Category } };
             foreach (var (name, values) in new[] {
                 ("Planned (first day)", analytics.Velocity.Select(sprint => (double)sprint.Planned)),
                 ("Completed", analytics.Velocity.Select(sprint => (double)sprint.Completed)),
                 ("Incomplete", analytics.Velocity.Select(sprint => (double)sprint.Incomplete))
             }) {
-                var series = new ChartSeries(name, values);
+                var series = new ChartSeries(name, values) { Marker = ChartMarker.None };
                 foreach (var sprint in analytics.Velocity) {
                     series.Labels.Add(sprint.Name);
                 }

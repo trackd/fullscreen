@@ -6,7 +6,8 @@ namespace fullscreen.Charts;
 internal sealed class SixelEncoder {
     private readonly StringBuilder _output = new(4096);
     private byte[] _planes = [];
-    private readonly Color[] _chartPalette = new Color[SixelPlot.InkColors + 1];
+    private readonly Color[] _chartPalette = new Color[SixelPlot.MaximumInkColors + 1];
+    private int _chartColorCount;
     private readonly StringBuilder _chartPaletteHeader = new(256);
     internal string EncodePlot(SixelPlot plot) {
         return BuildPlot(plot).ToString();
@@ -19,24 +20,24 @@ internal sealed class SixelEncoder {
     private StringBuilder BuildPlot(SixelPlot plot) {
         var output = _output;
         output.Clear();
-        // These six theme-derived shades are known before any pixels are drawn.
-        // Cache their protocol definitions until the theme/ink changes.
-        if (_chartPaletteHeader.Length == 0 || !plot.Palette.AsSpan().SequenceEqual(_chartPalette)) {
+        // Cache protocol definitions until the theme/ink or active palette size changes.
+        if (_chartPaletteHeader.Length == 0 || _chartColorCount != plot.ColorCount || !plot.Palette.AsSpan().SequenceEqual(_chartPalette)) {
             _chartPaletteHeader.Clear();
-            for (int color = 1; color <= SixelPlot.InkColors; color++) {
+            for (int color = 1; color <= plot.ColorCount; color++) {
                 _chartPaletteHeader.AddSixelColor(color, plot.Palette[color]);
             }
 
             plot.Palette.AsSpan().CopyTo(_chartPalette);
+            _chartColorCount = plot.ColorCount;
         }
 
         output.AddSixelCanvas(plot.Width, plot.Height);
         output.Append(_chartPaletteHeader);
-        int emittedBand = 0, selectedColor = SixelPlot.InkColors;
+        int emittedBand = 0, selectedColor = plot.ColorCount;
         bool painted = false;
         for (int band = 0; band < plot.BandCount; band++) {
             bool first = true;
-            for (int color = 1; color <= SixelPlot.InkColors; color++) {
+            for (int color = 1; color <= plot.ColorCount; color++) {
                 var (left, right) = plot.Columns(band, color);
                 if (left >= right) {
                     continue;

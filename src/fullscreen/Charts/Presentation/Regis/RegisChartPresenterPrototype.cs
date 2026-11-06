@@ -102,7 +102,7 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
                     continue;
                 }
 
-                var color = shape.Color ?? (chart.GraphKind == GraphKind.Heatmap ? ChartGrid.HeatColor(chart.PixelKey.Background, chart.PixelKey.Ink, shape.Shade)
+                var color = shape.Color ?? (chart.GraphKind == GraphKind.Heatmap ? chart.PixelKey.Palette.SequentialColor((Math.Clamp(shape.Shade, (byte)2, (byte)6) - 2) / 4f)
                     : shape.Shade > 0 ? Color.Mix(chart.PixelKey.Background, chart.PixelKey.Ink, (shape.Shade - 1) / 5f)
                     : data.ElementAtOrDefault(shape.Series)?.Color ?? Chart.AutomaticSeriesColor(chart.PixelKey.Palette, chart.PixelKey.Ink, chart.GraphKind, shape.Series));
                 var rgb = color.ToRgb();

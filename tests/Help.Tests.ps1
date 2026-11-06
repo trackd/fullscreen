@@ -11,6 +11,21 @@ BeforeAll {
 }
 
 Describe 'Cmdlet help' {
+    It 'Documents individual color overrides on every Theme parameter' {
+        foreach ($path in Get-ChildItem (Join-Path $PSScriptRoot '../docs/en-US') -Filter '*.md' -File) {
+            $text = Get-Content $path.FullName -Raw
+            $section = [regex]::Match($text, '(?ms)^### -Theme\s*\r?\n(.*?)(?=^### |^## |\z)')
+            if ($section.Success) {
+                $section.Groups[1].Value | Should -Match 'Base'
+                $section.Groups[1].Value | Should -Match 'ChartBlue'
+                $section.Groups[1].Value | Should -Match 'Get-FullscreenTheme'
+                $section.Groups[1].Value | Should -Match '(?i)inherit'
+                $help = Get-Help -Name $path.BaseName -Parameter Theme
+                ($help.Description.Text -join '') | Should -Match 'ChartBlue'
+                ($help.Description.Text -join '') | Should -Match '(?i)inherit'
+            }
+        }
+    }
     It 'Generates complete chart input in the error bounds and column line examples without opening a host' {
         $text = Get-Content (Join-Path $PSScriptRoot '../docs/en-US/Out-Chart.md') -Raw
         foreach ($kind in 'ErrorBars', 'ColumnLine') {

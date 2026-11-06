@@ -30,6 +30,13 @@ internal sealed partial class SixelPlot {
         }
 
         Initialize(width, height, ink, background, kind);
+        Palette[1] = theme?.ChartGridColor ?? Palette[1];
+        if (kind == GraphKind.Heatmap && theme is not null) {
+            for (int shade = 2; shade <= 6; shade++) {
+                Palette[shade] = theme.SequentialColor((shade - 2) / 4f);
+            }
+            _hasPalette = false;
+        }
         if (kind is GraphKind.Waterfall or GraphKind.Kagi) {
             Palette[2] = ink;
             Palette[3] = theme?.Success ?? ink;
@@ -52,13 +59,12 @@ internal sealed partial class SixelPlot {
             }
             _hasPalette = false;
         }
-        if (multiple && (theme is not null || Chart.UsesStackedPalette(kind))
-            && kind != GraphKind.Heatmap && !ChartTopology.Supports(kind)) {
+        if (multiple && kind != GraphKind.Heatmap && !ChartTopology.Supports(kind)) {
             var palette = theme ?? Themes.ThemePalette.Default;
-            for (int index = 0; index < 5; index++) {
+            for (int index = 0; index < Themes.ThemePalette.SeriesColorCount; index++) {
                 Palette[2 + index] = Chart.AutomaticSeriesColor(palette, ink, kind, index);
             }
-            for (int index = 0; index < Math.Min(5, data.Length); index++) {
+            for (int index = 0; index < Math.Min(Themes.ThemePalette.SeriesColorCount, data.Length); index++) {
                 if (data[index].Color is { } color) {
                     Palette[2 + index] = color;
                 }
@@ -103,7 +109,7 @@ internal sealed partial class SixelPlot {
                 continue;
             }
 
-            byte color = multiple ? (byte)(2 + index % 5) : (byte)6;
+            byte color = multiple ? (byte)(2 + index % Themes.ThemePalette.SeriesColorCount) : (byte)6;
             void SeriesPaint(int x, int y, byte shade) {
                 if (kind == GraphKind.ColumnLine && (uint)x < (uint)Width && (uint)y < (uint)Height) {
                     SetPixel(x, y, shade);

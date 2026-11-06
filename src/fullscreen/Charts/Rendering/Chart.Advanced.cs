@@ -20,7 +20,7 @@ public partial class Chart {
             _kagiKeyReversal = ReversalAmount;
         }
         var bounds = PlotBounds;
-        WriteFeature(buffer, bounds.X, bounds.Bottom + (ShowAxes ? 1 : 0), _kagiKey, Palette.Muted, bounds.Width);
+        WriteFeature(buffer, bounds.X, bounds.Bottom + (ShowAxes ? 1 : 0), _kagiKey, Palette.Body.WithForeground(Palette.ChartLabel), bounds.Width);
     }
 
     private void RenderMarketCategories(CellBuffer buffer, ChartDataSeries[] data, int row) {
@@ -37,7 +37,7 @@ public partial class Chart {
             int end = GraphKind == GraphKind.Marimekko ? shape.X1 + 1 : bounds.Width;
             int width = Math.Min(end - shape.X0, Math.Max(1, bounds.Width / XAxis.TickCount));
             string label = data[shape.Series].Points[shape.Point].Label;
-            WriteFeature(buffer, bounds.X + shape.X0, row, label, Palette.Muted, width);
+            WriteFeature(buffer, bounds.X + shape.X0, row, label, Palette.Body.WithForeground(Palette.ChartLabel), width);
             occupied = shape.X0 + Math.Min(width, label.Length);
         }
     }
@@ -60,7 +60,7 @@ public partial class Chart {
         for (int index = 0; index < Math.Min(5, bounds.Width); index++) {
             buffer.WriteText(bounds.X + index, y, "█", Palette.Body.WithForeground(GridColor((byte)(index + 2))));
         }
-        WriteFeature(buffer, bounds.X + Math.Min(5, bounds.Width), y, _heatmapScale, Palette.Muted, Math.Max(0, bounds.Width - 5));
+        WriteFeature(buffer, bounds.X + Math.Min(5, bounds.Width), y, _heatmapScale, Palette.Body.WithForeground(Palette.ChartLabel), Math.Max(0, bounds.Width - 5));
     }
 
     private void RenderWaterfallKey(CellBuffer buffer) {
@@ -73,7 +73,7 @@ public partial class Chart {
 
     private Color GridColor(byte shade) => GraphKind == GraphKind.Waterfall
         ? shade == 3 ? Palette.Success : shade == 6 ? Palette.Error : shade == 1 ? Color.Mix(PixelBackground, PixelInk, .1f) : PixelInk
-        : ChartGrid.HeatColor(PixelBackground, PixelInk, shade);
+        : Palette.SequentialColor((Math.Clamp(shade, (byte)2, (byte)6) - 2) / 4f);
 
     private ChartSelection? PickGrid(ChartDataSeries[] data, int x, int y) {
         var bounds = PlotBounds;
@@ -199,7 +199,7 @@ internal sealed partial class SixelPlot {
                 continue;
             }
 
-            byte color = shape.Shade > 0 ? shape.Shade : data.Length > 1 ? (byte)(2 + shape.Series % 5) : (byte)6;
+            byte color = shape.Shade > 0 ? shape.Shade : data.Length > 1 ? (byte)(2 + shape.Series % Themes.ThemePalette.SeriesColorCount) : (byte)6;
             if (ChartTopology.Supports(kind) && shape.Point >= 0 && data[shape.Series].Points[shape.Point].Index == selected) {
                 color = 5;
             }
@@ -209,7 +209,7 @@ internal sealed partial class SixelPlot {
             if (shape.Color is { } requested) {
                 var rgb = requested.ToRgb();
                 int nearest = int.MaxValue;
-                for (byte index = 2; index <= 6; index++) {
+                for (byte index = 2; index <= ColorCount; index++) {
                     var candidate = Palette[index].ToRgb();
                     int distance = (candidate.R - rgb.R) * (candidate.R - rgb.R) + (candidate.G - rgb.G) * (candidate.G - rgb.G) + (candidate.B - rgb.B) * (candidate.B - rgb.B);
                     if (distance < nearest) {
