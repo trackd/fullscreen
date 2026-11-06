@@ -28,11 +28,11 @@ public sealed class ReusableObjectExplorer : Themes.ThemedSurface, IDisposable {
 
     private ObjectTableApp Create(IReadOnlyList<PSObject> objects) {
         var app = new ObjectTableApp(
-            objects,
+            [PSObject.AsPSObject(objects)],
             new() {
                 Title = _node.Text.Length > 0 ? _node.Text : "OBJECTS",
                 Property = _node.Columns.Length > 0 ? _node.Columns : null,
-                View = ObjectView.Expanded
+                View = ObjectView.Inspect
             }
         );
         app.Surface.Embedded = true;
@@ -51,7 +51,11 @@ public sealed class ReusableObjectExplorer : Themes.ThemedSurface, IDisposable {
     /// <param name="root">The root visual whose descendants are inspected.</param>
     /// <param name="token">The token used to cancel the operation.</param>
     public void Tick(Visual root, CancellationToken token) {
-        if (!_dirty || !TuiComponentHost.IsVisibleWithin(this, root)) {
+        if (!TuiComponentHost.IsVisibleWithin(this, root)) {
+            return;
+        }
+        if (!_dirty) {
+            _application.Tick();
             return;
         }
 

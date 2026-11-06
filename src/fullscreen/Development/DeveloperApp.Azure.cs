@@ -5,6 +5,7 @@ using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Layout;
+using XenoAtom.Terminal.UI.Text;
 
 namespace fullscreen.Development;
 
@@ -13,11 +14,12 @@ public sealed partial class DeveloperApp {
     private bool _analyticsRequested;
 
     private void UpdateAzureCommands() {
-        Surface.PriorityShortcuts = ["k", "K", "v", "V", "u", "U", .. View is 2 or 3 ? new[] { "i", "I" } : [], .. View == 6 ? new[] { "l", "L" } : []];
-        Surface.FooterHelp = "Q close · Enter details · / filter · C columns · S sort · G group · [/] pages";
+        Surface.PriorityShortcuts = ["k", "K", "v", "V", "u", "U", "y", "Y", .. View is 1 or 2 or 3 ? new[] { "i", "I" } : [],
+            .. View is 0 or 6 ? new[] { "l", "L" } : [], .. View == 1 ? new[] { "t", "T" } : []];
+        Surface.FooterHelp = "Q close · " + (View == 5 ? "Enter monitor" : "Enter details") + " · / filter · C columns · S sort · G group · [/] pages";
         Surface.ExtraHelp = "A actions · V preview · F5 refresh" +
             (AzureDevOpsBackend.IsWorkItemView(View) ? " · K kanban · M filter assignee" : "") +
-            (View is 2 or 3 ? " · I sprint" : "");
+            (View is 1 or 2 or 3 ? " · I sprint" : "");
         var commands = new List<(string, Action)> {
             ("A Actions", () => ShowActions(Surface.Bounds.X + 1, Surface.Bounds.Y + 3)),
             ("V Preview " + (_previewEnabled ? "☑" : "☐"), TogglePreview)
@@ -25,16 +27,31 @@ public sealed partial class DeveloperApp {
         if (AzureDevOpsBackend.IsWorkItemView(View)) {
             commands.Add((_backend is AzureDevOpsBackend { MineOnly: true } ? "M Filter: everyone" : "M Filter: mine",
                 () => { if (!Busy) { Execute(_backend.Operations(View, null).First(), ""); } }));
-            commands.Add(("K Kanban", ShowKanban));
+            if (View != 1 || _backend is not AzureDevOpsBackend { AllWorkItemTypes: true }) {
+                commands.Add(("K Kanban", ShowKanban));
+            }
         }
-        if (View is 2 or 3) {
-            commands.Add(("I Sprint", ShowSprints));
+        if (View is 1 or 2 or 3) {
+            commands.Add(("I Sprint: " + ((AzureDevOpsBackend)_backend).SprintLabel, ShowSprints));
+        }
+        if (View == 0) {
+            commands.Add(("L Board level: " + ((AzureDevOpsBackend)_backend).BoardLevelLabel, ShowBoardLevels));
+        }
+        if (View == 1) {
+            var ado = (AzureDevOpsBackend)_backend;
+            commands.Add(("T Type: " + (ado.BoardOpen ? "Board mappings" : ado.WorkItemTypeLabel), ShowWorkItemTypes));
         }
         if (View == 6) {
-            commands.Add(("L Backlog level", ShowBacklogLevels));
+            commands.Add(("L Backlog level: " + ((AzureDevOpsBackend)_backend).BacklogLabel, ShowBacklogLevels));
         }
         if (AzureDevOpsBackend.IsWorkItemView(View) || View == 5) {
             commands.Add((View == 5 ? "U Run summary" : "U Sprint review", ShowAnalytics));
+        }
+        if (View == 5) {
+            commands.Add(("Enter Monitor run", RequestPipelineMonitor));
+        }
+        if (View != 4 && View != 5) {
+            commands.Add(("Y Boards analytics", () => LoadBoardsAnalytics()));
         }
         commands.Add(("F5 Refresh", () => { if (!Busy) { Load(); } }));
         Surface.ToolbarCommands = [.. commands];
@@ -48,7 +65,7 @@ public sealed partial class DeveloperApp {
     }
 
     private void ShowSprints() {
-        if (Busy || _backend is not AzureDevOpsBackend ado || View is not (2 or 3)) {
+        if (Busy || _backend is not AzureDevOpsBackend ado || View is not (1 or 2 or 3)) {
             return;
         }
         var options = ado.SprintOperations(View).Select(operation =>
@@ -63,10 +80,33 @@ public sealed partial class DeveloperApp {
         var options = ado.BacklogOperations().Select(operation =>
             new MenuItem(operation.Label, () => Execute(operation, ""))).ToArray();
         if (options.Length == 0) {
-            Surface.Status = "No visible backlog levels configured for this team.";
+            Surface.Status = "No backlog levels configured for this team.";
             Surface.Refresh();
             return;
         }
+        ContextMenuService.Show(Surface, options, Surface.Bounds.X + 2, Surface.Bounds.Y + 3);
+    }
+
+    private void ShowBoardLevels() {
+        if (Busy || _backend is not AzureDevOpsBackend ado || View != 0) {
+            return;
+        }
+        var options = ado.BoardLevelOperations().Select(operation =>
+            new MenuItem(operation.Label, () => Execute(operation, ""))).ToArray();
+        if (options.Length == 0) {
+            Surface.Status = "No board levels available for this team.";
+            Surface.Refresh();
+            return;
+        }
+        ContextMenuService.Show(Surface, options, Surface.Bounds.X + 2, Surface.Bounds.Y + 3);
+    }
+
+    private void ShowWorkItemTypes() {
+        if (Busy || _backend is not AzureDevOpsBackend ado || View != 1) {
+            return;
+        }
+        var options = ado.WorkItemTypeOperations().Select(operation =>
+            new MenuItem(operation.Label, () => Execute(operation, ""))).ToArray();
         ContextMenuService.Show(Surface, options, Surface.Bounds.X + 2, Surface.Bounds.Y + 3);
     }
 
@@ -93,17 +133,8 @@ public sealed partial class DeveloperApp {
             Surface.Refresh();
             return;
         }
-        var chart = new Charts.Chart(counts.Select(count => (double)count.Count)) {
-            Title = "Pipeline runs by result",
-            GraphKind = Charts.GraphKind.HorizontalBars,
-            MinHeight = Math.Clamp(counts.Length * 3 + 4, 10, 25),
-            MaxHeight = 25,
-            Minimum = 0
-        };
-        foreach (var (Label, Count) in counts) {
-            chart.Labels.Add(Label);
-        }
-        Surface.Palette.Apply(chart);
+        var chart = SummaryChart("Pipeline runs by result", counts.Select(count => (count.Label, (double)count.Count)),
+            Math.Clamp(counts.Length * 3 + 4, 10, 25));
         Dialog? dialog = null;
         void Close() {
             dialog!.Close();
@@ -290,9 +321,18 @@ public sealed partial class DeveloperApp {
             dialog!.Close();
             _expanded = false;
         }
+        string clean = FileReader.Sanitize(text, true).Replace("\r\n", "\n", StringComparison.Ordinal);
+        var runs = new List<StyledRun>();
+        int offset = 0;
+        foreach (string line in clean.Split('\n')) {
+            if (Surface.DocumentAccent?.Invoke(line) is { } color) {
+                runs.Add(new(offset, line.Length, Style.None.WithForeground(color)));
+            }
+            offset += line.Length + 1;
+        }
         var content = new VStack(AzureButton("Back to list · Esc", Close),
             AzureActions(_backend.Operations(View, item), operation => { Close(); Prompt(operation); }),
-            new TextBlock(FileReader.Sanitize(text, true)) { Wrap = true }) { Spacing = 1 };
+            new Paragraph(clean) { Wrap = true, Runs = [.. runs] }) { Spacing = 1 };
         dialog = new Dialog {
             Title = new TextBlock(_backend.Tabs[View] + " · #" + item.Key),
             IsModal = true,
@@ -371,6 +411,11 @@ public sealed partial class DeveloperApp {
         if (Busy) {
             return;
         }
+        if (View == 1 && _backend is AzureDevOpsBackend { AllWorkItemTypes: true }) {
+            Surface.Status = "All types is a list-only view. Choose a type with T or open a board level before using Kanban.";
+            Surface.Refresh();
+            return;
+        }
         _expanded = true;
         var lanes = new HStack {
             Spacing = 1
@@ -379,7 +424,7 @@ public sealed partial class DeveloperApp {
             .Where(item => item.Cells.Length > 4).ToArray();
         static string Lane(DeveloperItem item) => string.IsNullOrWhiteSpace(item.Cells[4]) ? item.Cells[3] : item.Cells[4];
         var groups = items.GroupBy(Lane).ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
-        string[] laneNames = _backend is AzureDevOpsBackend { BoardOpen: true } ado && ado.BoardColumns.Length > 0
+        string[] laneNames = View == 1 && _backend is AzureDevOpsBackend { BoardOpen: true } ado && ado.BoardColumns.Length > 0
             ? ado.BoardColumns
             : [.. groups.Keys];
         laneNames = [.. laneNames.Concat(groups.Keys).Distinct(StringComparer.OrdinalIgnoreCase)];

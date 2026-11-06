@@ -57,6 +57,9 @@ public sealed class GetFullscreenThemeCommand : PSCmdlet {
             ["Purple"] = Hex(palette.Purple)
         };
         var result = new PSObject();
+        for (int i = 0; i < ThemePalette.RoleNames.Length; i++) {
+            colors[ThemePalette.RoleNames[i]] = Hex(palette.RoleColor(i));
+        }
         result.TypeNames.Insert(0, "fullscreen.Theme");
         result.Properties.Add(new PSNoteProperty("Name", palette.Name));
         result.Properties.Add(new PSNoteProperty("Colors", colors));

@@ -5,6 +5,14 @@ namespace fullscreen.Charts;
 
 internal sealed partial class ObjectChartData {
     internal ChartDataSeries[] ProjectTasks(string startProperty, string endProperty, string nameProperty, string? progressProperty, int[] indices, IReadOnlyList<object>? sources = null) {
+        var schedule = new ChartSchedule(ReadTasks(startProperty, endProperty, nameProperty, progressProperty, indices, sources));
+        for (int position = 0; position < indices.Length; position++) {
+            schedule.Data[0].Points[position] = schedule.Data[0].Points[position] with { Index = indices[position] };
+        }
+        return schedule.Data;
+    }
+
+    internal ChartTask[] ReadTasks(string startProperty, string endProperty, string nameProperty, string? progressProperty, int[] indices, IReadOnlyList<object>? sources = null) {
         string start = Resolve(startProperty), end = Resolve(endProperty), name = Resolve(nameProperty);
         string? progress = progressProperty is null ? null : Resolve(progressProperty);
         var tasks = new ChartTask[indices.Length];
@@ -17,11 +25,7 @@ internal sealed partial class ObjectChartData {
             }
             tasks[position] = new(label, TaskTime(Value(index, start), label, startProperty), TaskTime(Value(index, end), label, endProperty), completed, sources is null ? Objects[index] : sources[index]);
         }
-        var schedule = new ChartSchedule(tasks);
-        for (int position = 0; position < indices.Length; position++) {
-            schedule.Data[0].Points[position] = schedule.Data[0].Points[position] with { Index = indices[position] };
-        }
-        return schedule.Data;
+        return tasks;
     }
 
     private static DateTimeOffset TaskTime(object? value, string label, string field) {

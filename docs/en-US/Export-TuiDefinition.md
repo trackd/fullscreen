@@ -31,34 +31,12 @@ None.
 
 ## DESCRIPTION
 
-Exports a validated layout as UTF-8 to the required literal Path. The extension
-chooses the output: .ps1 creates a runnable script with the layout embedded;
-.psd1 or .json saves layout data and creates a same-stem .ps1 companion if missing.
-For example, MyTool.tui.json creates MyTool.tui.ps1, which loads that exact JSON
-file. PSD1 files can also be read with Import-PowerShellDataFile (use
-SkipLimitCheck for large layouts). The parent directory must exist. No terminal
-opens and no handlers run during export.
+Save a validated TUI layout as PSD1, JSON or a runnable PowerShell script without
+opening a terminal or running handlers. Data-file exports also create a companion
+script unless disabled; edit that script to add application behavior.
 
-Scaffolds include help, shared state, control-event stubs and an OnTick callback.
-Edit the .ps1 to add application behavior. Generated scripts accept Theme,
-Minimal, State, TickInterval and DefinitionOnly.
-Runtime State overrides layout defaults; DefinitionOnly returns the complete
-layout without running the UI. Omitted Theme/Minimal use host defaults; explicit
-values, including Minimal:$false, are forwarded.
-
-For .ps1 exports, LinkedLayout uses a sibling .tui.psd1 instead of embedding
-the layout. Data-file exports are already linked to their companion. Script
-remains accepted for compatibility but is no longer required; use Script:$false
-with .psd1 or .json when you want data only.
-
-Existing scripts are never overwritten, even with Force. Re-exporting layout data
-requires Force; existing companion scripts keep all custom code. An inline .ps1
-cannot be re-exported to the same path: choose a new path and transfer the layout
-edits yourself, or use a linked layout for future updates. A linked .ps1 export
-rejects an existing script that is not linked to its expected layout.
-Existing companions are preserved as-is, so if one loads a different definition,
-update its import path yourself. WhatIf changes nothing; Confirm shows the
-affected targets. PassThru returns the validated definition only after saving.
+Existing scripts are never overwritten. Linked layouts let you update layout
+data without replacing custom script code.
 
 ## EXAMPLES
 

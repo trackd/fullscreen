@@ -24,7 +24,7 @@ Show-SystemMonitor [-RefreshRate <int>] [-SampleInterval <int>] [-Filter <string
  [-SortBy <ProcessSort>] [-View <MonitorView>] [-GraphType <GraphKind>] [-ChartRenderer <ChartRenderer>] [-Tree] [-Column <ProcessColumn[]>]
  [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
- [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling]
+ [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal]
  [<CommonParameters>]
 ```
 
@@ -35,7 +35,7 @@ Show-SystemMonitor -Session <PSSession> [-RefreshRate <int>] [-SampleInterval <i
  [-Filter <string>] [-SortBy <ProcessSort>] [-View <MonitorView>] [-GraphType <GraphKind>] [-ChartRenderer <ChartRenderer>] [-Tree]
  [-Column <ProcessColumn[]>] [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
- [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling]
+ [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal]
  [<CommonParameters>]
 ```
 
@@ -47,7 +47,7 @@ Show-SystemMonitor -ComputerName <string> [-RefreshRate <int>] [-SampleInterval 
  [-Column <ProcessColumn[]>] [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
  [-ExcludeGpuColumn <GpuColumn[]>] [-Credential <pscredential>] [-ConfigurationName <string>]
- [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling] [<CommonParameters>]
+ [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -57,75 +57,24 @@ ftop
 
 ## DESCRIPTION
 
-Opens an interactive system monitor, similar to top or Task Manager, with
-Processes, Services, Network, GPU, Users and Dashboard views; it starts on
-Processes. Use 1-6 to switch views, / to search, C to choose columns, F6 or the
-column headers to sort, R to reverse the sort, T to toggle process trees, G to
-cycle chart styles, P to pause and Q to quit. Header dropdowns filter each column
-together with the search. Press ? for the full key reference. Q closes read-only
-dialogs before quitting; Escape or Ctrl+Q dismisses dialogs, including editable
-filters where Q remains ordinary input.
+Monitor local or remote processes, services, network traffic, GPUs and user
+sessions in a fullscreen terminal app. Dashboard histories stay current across
+views until paused.
 
-Processes defaults to Name, User, CPU, RSS, Net/s, GPU, Threads and PID, with fixed
-column widths. Left/Right scrolls through overflow columns; in tree mode use
-Shift+Left/Right, or click the header edge arrows. Memory and transfer rates use
-scaled units such as MiB and GiB. Press D or right-click for process details,
-including wrapped command-line arguments. Missing or inaccessible command lines
-show an unavailable message; long command lines are explicitly truncated.
-On macOS, ambiguous padding or an empty first argument also reports unavailable
-so environment variables cannot be mistaken for command-line arguments.
+Use 1-6 to switch views, / to search, C to choose columns, T to toggle process
+trees, P to pause and Q to quit. Enter or D opens details; A or right-click opens
+available actions. Press ? for the full key reference.
 
-Users lists accounts with a login session, including disconnected sessions, and
-groups each account's processes with CPU and memory totals. Sorting moves whole
-accounts by their totals and sorts the processes inside each account. Plus/Right
-expands and Minus/Left collapses an account, L toggles process rows, and D shows
-session details such as logon and idle time, client name and protocol. On Linux
-and macOS, sessions come from who -u.
+Actions use your existing permissions and require confirmation. Logging off a
+Windows session closes its applications and can lose unsaved work. Unsupported
+metrics are hidden; temporarily inaccessible values appear as unknown.
+Per-process network and GPU metrics require supported Windows providers.
+CPU is a percentage of total processor capacity; RSS includes shared pages.
 
-In Users, Space marks an account's sessions and M marks or unmarks all visible
-sessions. The shaded Mark all and Log off buttons sit at the right of the Users
-header and support mouse or keyboard activation. Click Log off or press X to select individual sessions, including
-disconnected ones. Mark all and Clear marks are also available in the picker.
-The final confirmation lists the target computer, session count and identities.
-Logoff requires Windows sessions with a verified logon time; changed identities
-are rejected, and each selected session's result is reported separately.
-
-Services lists Windows services by display name, systemd units on Linux and
-launchd jobs on macOS. Press A or right-click a process, service or account for
-confirmed actions such as stopping a process, starting or restarting a service,
-or logging off a Windows session. Logging off closes that session's applications
-and can lose unsaved work. Actions use your current permissions and never request
-elevation.
-
-CPU is shown as 0-100 percent of total processor capacity. CpuTime adds user and
-kernel time across threads, so it can advance faster than wall time. RSS includes
-shared pages, so summed RSS overstates physical memory use. Values the current
-account cannot read show as unknown. Columns unsupported by the target platform,
-architecture or metric provider are hidden from the table and chooser; supported
-columns remain visible during warm-up or temporary access/sampling failures.
-Remote views use the target computer's capabilities, not the local terminal's.
-
-Per-process network rates require 64-bit Windows 8 / Server 2012 or later and
-access to kernel tracing. Per-process GPU utilization and memory require Windows
-10 version 1709 or later and an exposed WDDM counter provider. Linux and macOS
-support per-process disk rates but not per-process network or GPU metrics.
-GPU device telemetry is separate: NVIDIA NVML and Linux DRM/sysfs can supply
-device counters without per-process GPU support. Device memory and temperature
-columns depend on the provider. On 32-bit Windows targets, parent PID, process
-state and per-process disk/network rates are unavailable.
-
-Use BackgroundSampling to keep CPU, memory, network and GPU dashboard histories
-current while another view is open, including in Minimal mode. Sampling still
-uses SampleInterval and stops while paused or the terminal is too small to
-display the monitor. This increases collection work and remote traffic; it does
-not load hidden service/session lists or additional per-process counters.
-
-Use ComputerName or Session to monitor a remote computer over PowerShell
-remoting; all metrics and actions then use the remote target. The target can run
-PowerShell 7 or Windows PowerShell 5.1 with .NET Framework 4.7.2 or later, and
-must allow loading assemblies in memory. A Session you supply stays open after
-the monitor closes. If sampling fails, the last data stays visible with its age
-while the monitor retries. Press F12 to toggle the diagnostic overlay.
+Remote metrics and actions apply to the target computer. Targets support
+PowerShell 7 or Windows PowerShell 5.1 with .NET Framework 4.7.2 or later and
+must allow in-memory assembly loading. If sampling fails, the last data remains
+visible while the monitor retries.
 
 ## EXAMPLES
 
@@ -139,7 +88,7 @@ Show-SystemMonitor -Tree -Column Name,Id,UserName,Cpu,CpuTime,Memory
 
 ### Example 2: Show a fullscreen network table
 
-Minimal mode hides surrounding UI and requests the active view's telemetry.
+Minimal mode hides surrounding UI.
 
 ```powershell
 Show-SystemMonitor -View Network -Minimal -SampleInterval 250
@@ -162,36 +111,10 @@ finally { Remove-PSSession -Session $session }
 Start in Users and continue sampling dashboard metrics when switching views.
 
 ```powershell
-ftop -View Users -BackgroundSampling -SampleInterval 2000
+ftop -View Users -SampleInterval 2000
 ```
 
 ## PARAMETERS
-
-### -BackgroundSampling
-
-Keep CPU, memory, network and GPU dashboard histories current while viewing other
-tabs, including in Minimal mode. Respects SampleInterval and Pause. Sampling
-stops when the terminal is too small to display the monitor. Adds collection
-cost and remote traffic without loading hidden service/session lists or extra
-per-process counters.
-
-```yaml
-Type: System.Management.Automation.SwitchParameter
-DefaultValue: False
-SupportsWildcards: false
-Aliases: []
-ParameterSets:
-- Name: (All)
-  Position: Named
-  IsRequired: false
-  ValueFromPipeline: false
-  ValueFromPipelineByPropertyName: false
-  ValueFromRemainingArguments: false
-DontShow: false
-AcceptedValues: []
-HelpMessage: ''
-```
-
 
 ### -ChartRenderer
 
@@ -569,6 +492,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

@@ -5,6 +5,7 @@ Cycle through every chart kind in one fullscreen window.
 Shows deterministic synthetic data, one chart at a time, using a bound
 TabControl. Tick callbacks advance the page without blocking input or
 opening another window. The default cycle takes about 78 seconds and repeats.
+Bar charts use category colors or series colors with matching legends.
 .PARAMETER Theme
 Built-in palette or custom theme.
 .PARAMETER Minimal
@@ -27,6 +28,8 @@ A portable TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
 Import fullscreen first. No files, services, jobs or external data are required.
 Use Previous, Pause / Resume and Next to control playback; Close or F10 exits.
+Hover for 200 ms for point details; selecting a point pauses playback and shows
+the original record below the chart. Resume restarts automatic playback.
 Sixel-capable terminals use pixel rendering; other terminals use cell rendering.
 #>
 [CmdletBinding()]
@@ -111,6 +114,22 @@ $resources = @(
         Resource = 'Network'
         Load = 90
         Target = 85
+    }
+)
+$gaugeResources = @(
+    for ($index = 0; $index -lt $resources.Count; $index++) {
+        [pscustomobject]@{
+            Resource = $resources[$index].Resource
+            Load = @(68, 82, 91, 97)[$index]
+        }
+    }
+)
+$radialResources = @(
+    for ($index = 0; $index -lt $resources.Count; $index++) {
+        [pscustomobject]@{
+            Resource = $resources[$index].Resource
+            Load = @(88, 72, 95, 83)[$index]
+        }
     }
 )
 $changes = @(
@@ -347,6 +366,7 @@ $pages = foreach ($kind in $chartKinds) {
     $chart = @{
         Id = "chart_$kind"
         Type = 'Chart'
+        SelectionBind = 'selectedPoint'
         Bind = 'signal'
         GraphKind = $kind
         XProperty = 'Sample'
@@ -360,6 +380,12 @@ $pages = foreach ($kind in $chartKinds) {
         { $_ -in 'Histogram', 'BoxPlot' } {
             $chart.XProperty = ''
             $description = 'Distribution of response times (ms)'
+        }
+        { $_ -in 'Bars', 'HorizontalBars' } {
+            $chart.Bind = 'resources'
+            $chart.XProperty = 'Resource'
+            $chart.YProperty = @('Load')
+            $description = 'Resource load (%) - automatic category colors and matching legend'
         }
         { $_ -in 'StackedBars', 'Heatmap', 'StackedArea', 'PercentStackedArea' } {
             $chart.Bind = 'outcomes'
@@ -390,6 +416,10 @@ $pages = foreach ($kind in $chartKinds) {
             }
             if ($kind -eq 'Radar') {
                 $chart.YProperty = @('Load', 'Target')
+            }
+            if ($kind -in 'Gauge', 'RadialBars') {
+                $chart.Bind = if ($kind -eq 'Gauge') { 'gaugeResources' } else { 'radialResources' }
+                $description = 'Resource load - active to near capacity (%)'
             }
             if ($kind -eq 'Pie') {
                 $description = 'Relative resource weights (not percentages of a shared capacity)'
@@ -473,6 +503,11 @@ $layout = New-TuiDefinition -Title 'Chart showcase' -Root @{
             Children = @($pages)
         }
         @{
+            Id = 'selection'
+            Type = 'Text'
+            Bind = 'selectedDetails'
+        }
+        @{
             Id = 'status'
             Type = 'Text'
             Bind = 'playback'
@@ -514,9 +549,13 @@ $layout = New-TuiDefinition -Title 'Chart showcase' -Root @{
     paused = $false
     slideStarted = 0
     playback = "Playing - $SecondsPerChart seconds per chart"
+    selectedPoint = $null
+    selectedDetails = 'Click a point to show its values; hover for details (200 ms).'
     signal = @($signal)
     outcomes = $outcomes
     resources = $resources
+    gaugeResources = $gaugeResources
+    radialResources = $radialResources
     changes = $changes
     markets = $markets
     prices = @($prices)
@@ -557,7 +596,15 @@ $onEvent = {
         $tuiEvent,
         $state
     )
+    if ($tuiEvent.Id -like 'chart_*' -and $tuiEvent.Kind -in 'Selection', 'Invoke') {
+        $state.selectedDetails = (($tuiEvent.Value | Format-List * | Out-String).Trim() -split '\r?\n' |
+            Where-Object { $_.Trim().Length -gt 0 }) -join ' | '
+        $state.paused = $true
+        $state.playback = 'Paused - inspecting selection'
+        return
+    }
     if ($tuiEvent.Id -eq 'pages' -and $tuiEvent.Kind -eq 'Change') {
+        $state.selectedDetails = 'Click a point to show its values; hover for details (200 ms).'
         $state.slideStarted = [System.Diagnostics.Stopwatch]::GetTimestamp()
         return
     }

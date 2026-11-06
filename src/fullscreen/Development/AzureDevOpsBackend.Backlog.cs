@@ -14,7 +14,7 @@ public sealed partial class AzureDevOpsBackend {
 
     internal DeveloperOperation[] BacklogOperations() =>
         [.. _backlogs.Select(level => new DeveloperOperation(
-            S(level, "name"),
+            S(level, "name") + (P(level, "isHidden").ValueKind == JsonValueKind.True ? " · hidden in team navigation" : ""),
             "Show this team's backlog level in its planning order, across all sprints.",
             (_, _) => {
                 SelectBacklog(level);
@@ -37,7 +37,7 @@ public sealed partial class AzureDevOpsBackend {
             if (P(levels, "value").ValueKind != JsonValueKind.Array) {
                 throw new InvalidOperationException("Azure DevOps did not return the team's backlog level configuration.");
             }
-            _backlogs = [.. Values(levels).Where(level => P(level, "isHidden").ValueKind != JsonValueKind.True && S(level, "id").Length > 0)
+            _backlogs = [.. Values(levels).Where(level => S(level, "id").Length > 0)
                 .Select(level => level.Clone())];
             var selected = _backlogs.FirstOrDefault(level => S(level, "id") == _backlogId);
             if (selected.ValueKind == JsonValueKind.Undefined) {
@@ -51,7 +51,7 @@ public sealed partial class AzureDevOpsBackend {
                 _backlogId = null;
                 _backlogName = "";
                 _backlogTypes = [];
-                return new(WorkColumns, [], "No visible backlog levels configured for this team.", WorkWidths);
+                return new(WorkColumns, [], "No backlog levels configured for this team.", WorkWidths);
             }
             SelectBacklog(selected);
             var backlog = await Get(TeamApi("backlogs/" + E(_backlogId!) + "/workItems"), token).ConfigureAwait(false);
@@ -83,8 +83,10 @@ public sealed partial class AzureDevOpsBackend {
         }
         int[] pageIds = [.. _backlogIds.Skip(page * _pageSize).Take(_pageSize)];
         var rows = pageIds.Length == 0 ? [] : await LoadWorkItemRows(pageIds, "System.BoardColumn", token).ConfigureAwait(false);
-        return new(WorkColumns, rows,
-            "Backlog · " + _backlogName + " · " + _backlogIds.Length + " items · team planning order · all sprints · L choose level",
-            WorkWidths);
+        return new([.. WorkColumns, "Order"], [.. rows.Select((row, index) => row with {
+            Cells = [.. row.Cells, (page * _pageSize + index + 1).ToString(CultureInfo.InvariantCulture)]
+        })],
+            "Backlog · " + _backlogName + " · " + _backlogIds.Length + " items · team planning order · Order ascending · all sprints · L choose level",
+            [.. WorkWidths, 8]);
     }
 }

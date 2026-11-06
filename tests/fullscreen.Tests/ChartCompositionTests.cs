@@ -15,10 +15,10 @@ public sealed class ChartCompositionTests {
     public TestContext TestContext { get; set; }
 
     [TestMethod]
-    [DataRow(GraphKind.Line, "2EBDAE3357F829952CD302205ED6713AA27F6FE7ADFA6AEDC287632A10DB84C6", "807CFB6BB764DAA6C5BB0A5F2A1F5ADFCEB1AB0768F1360066AA824FB4224844")]
-    [DataRow(GraphKind.Area, "7D496E5BE65D9D8E6C9C1F99A7284225D5AC9760705BFDCACF3600317FB8CE8C", "3844E26543AD26EF728AD2387EA8B75A025BD898DC888600D04FF5C1D776DACC")]
-    [DataRow(GraphKind.Bars, "EB03639F4AC31F96543230EED7EB8BB1A30A842C298717B4CA5312207DED2105", "8CBC0138C6396CCF3DDB732E415A53212F2850CD7283C26A07FF72A01271847F")]
-    [DataRow(GraphKind.ColumnLine, "121362A67C8C071C023C13062E94DC82F035AA0C9DF0736F550464364DFA6884", "0F5F2B84BF0E9D4031F4F6FF57F19DDA8475D696B520CA6216E07F24778C9D3C")]
+    [DataRow(GraphKind.Line, "450E2DB515688FD9AE25F92B49BCCE44BDFA53E18E3C2F4CDEED8CED84CAE0C8", "807CFB6BB764DAA6C5BB0A5F2A1F5ADFCEB1AB0768F1360066AA824FB4224844")]
+    [DataRow(GraphKind.Area, "C18D32BE995ED4CE9BD31C6B13965869B9E3D84C5E36C7E78F193FCF59158AEE", "3844E26543AD26EF728AD2387EA8B75A025BD898DC888600D04FF5C1D776DACC")]
+    [DataRow(GraphKind.Bars, "F10FAEB606D2D66D8AA3CCEED9A9BB834234A3D5169B9E47D8D2DA0217FA711D", "23FDBEE8B7C527DD11F1AF4BC188E841B7223A3E77843398D003CB746BCF7DA0")]
+    [DataRow(GraphKind.ColumnLine, "E787E373201A232D751E913A439C8C6135AF3D5F78BBE6FCB392C4242FCB60F7", "0F5F2B84BF0E9D4031F4F6FF57F19DDA8475D696B520CA6216E07F24778C9D3C")]
     public void MultipleSeriesRenderGapsSignedValuesAndReuseWarmRasterAndLegend(GraphKind kind, string expectedCells, string expectedPixels) {
         var chart = new Chart { GraphKind = kind, ShowLegend = true };
         chart.Series.Add(new("Actual", [-2, double.NaN, 6]));
@@ -37,6 +37,7 @@ public sealed class ChartCompositionTests {
 
         Assert.Contains((byte)2, plot.Pixels.ToArray());
         Assert.Contains((byte)3, plot.Pixels.ToArray());
+        TestContext.WriteLine($"{kind}: cell {Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cells)))}, pixel {Convert.ToHexString(SHA256.HashData(plot.Pixels))}");
         Assert.AreEqual(expectedCells, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cells))));
         Assert.AreEqual(expectedPixels, Convert.ToHexString(SHA256.HashData(plot.Pixels)));
         long before = GC.GetAllocatedBytesForCurrentThread();
@@ -64,7 +65,7 @@ public sealed class ChartCompositionTests {
         Assert.AreEqual(columns.Center(data[0].Points[0].X, range, 60), columns.Center(data[1].Points[0].X, range, 60));
         var a = columns.Bounds(0, 0, range, 60);
         var b = columns.Bounds(1, 0, range, 60);
-        Assert.AreEqual(a.Right, b.X);
+        Assert.IsLessThan(b.X, a.Right, "Grouped bars leave a visible gap between their colors.");
         Assert.IsLessThanOrEqualTo(60, b.Right);
         Assert.AreEqual(12, Array.IndexOf(Enum.GetValues<GraphKind>(), GraphKind.ColumnLine), "Existing enum values must not move.");
     }

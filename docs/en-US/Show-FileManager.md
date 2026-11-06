@@ -37,19 +37,13 @@ binary files, and copy, move, rename or create folders. File operations are
 confirmed and never overwrite existing destinations. Previewed files are read,
 never executed, and paths are treated literally, including wildcard characters.
 
-Common keys (letters are case-sensitive): Space marks an item and a toggles marks;
-y and x set the copy and move buffers and p pastes; F2 renames and n creates a
-folder; / filters, . shows hidden files, s chooses the sort and r reverses it;
-[ and ] move through history, ~ goes home and g opens a path; t opens a tab,
-{ and } switch tabs and w closes one; b opens bookmarks and B bookmarks the
-current folder; Tab or Enter focuses the preview and Escape returns; F5
-refreshes; Q quits. Right-click an item for its actions, and press ? inside the
-app for the full key reference.
+Space marks items, / filters and Q quits. Right-click for available actions or
+press ? for the full key reference.
 
 With PassThru, the selected paths are returned when you accept them. Syntax
 highlighting uses the optional TextMate module (L chooses the language), and
 image previews use the optional Sixel module in a Sixel-capable terminal; a
-notice is shown otherwise. Minimal mode hides the parent and preview panes.
+notice is shown otherwise.
 
 ## EXAMPLES
 
@@ -264,6 +258,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

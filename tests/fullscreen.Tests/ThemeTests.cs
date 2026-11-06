@@ -84,4 +84,59 @@ public sealed class ThemeTests {
         Assert.AreSame(XenoAtom.Terminal.UI.Styling.Theme.Default, surface.GetTheme());
     }
 
+    [TestMethod]
+    public void SyntaxAndChartOverridesAreIndependentAndInheritEveryUnspecifiedRole() {
+        foreach (string name in ThemeCatalog.Names) {
+            var basis = ThemeCatalog.Load(name);
+            for (int index = 0; index < ThemePalette.RoleNames.Length; index++) {
+                string role = ThemePalette.RoleNames[index];
+                var custom = ThemeCatalog.FromDictionary(new Hashtable { ["Base"] = name, [role.ToLowerInvariant()] = "#123" });
+                for (int other = 0; other < ThemePalette.RoleNames.Length; other++) {
+                    Assert.AreEqual(other == index ? Color.Rgb(17, 34, 51) : basis.RoleColor(other),
+                        custom.RoleColor(other), $"{name}: {role} must not change {ThemePalette.RoleNames[other]}.");
+                }
+                Assert.AreEqual(basis.Success, custom.Success);
+                Assert.AreEqual(basis.Error, custom.Error);
+                Assert.AreNotEqual(Color.Rgb(17, 34, 51), ThemeCatalog.Load(name).RoleColor(index));
+            }
+        }
+    }
+
+    [TestMethod]
+    public void OriginalThemeScopesInheritanceAndChartFallbacksHaveKnownColors() {
+        var dark = ThemeCatalog.Load("Dark+");
+        Assert.AreEqual(Color.Rgb(78, 201, 176), dark.Type);
+        Assert.AreEqual(Color.Rgb(206, 145, 120), dark.StringLiteral);
+        Assert.AreEqual(Color.Rgb(181, 206, 168), dark.Number);
+        Assert.AreEqual(dark.Type, ThemeCatalog.Load("Dark Modern").Type);
+        var monokai = ThemeCatalog.Load("Monokai");
+        Assert.AreEqual(Color.Rgb(249, 38, 114), monokai.Keyword);
+        Assert.AreEqual(Color.Rgb(253, 151, 31), monokai.Parameter);
+        Assert.AreEqual(Color.Rgb(106, 126, 200), monokai.ChartBlue);
+        Assert.AreEqual(Color.Rgb(89, 164, 249), dark.ChartBlue);
+        Assert.AreEqual(dark.ChartSequentialLow, dark.SequentialColor(0));
+        Assert.AreEqual(dark.ChartSequentialHigh, dark.SequentialColor(1));
+        Assert.AreEqual(dark.ChartNegative, dark.DivergingColor(0));
+        Assert.AreEqual(dark.ChartNeutral, dark.DivergingColor(.5f));
+        Assert.AreEqual(dark.ChartPositive, dark.DivergingColor(1));
+    }
+
+    [TestMethod]
+    public void JsonUsesIndependentPropertyStringNumberKeywordAndPunctuationColors() {
+        var palette = ThemeCatalog.FromDictionary(new Hashtable {
+            ["Property"] = "#123456",
+            ["String"] = "#234567",
+            ["Number"] = "#345678",
+            ["Keyword"] = "#456789",
+            ["Punctuation"] = "#56789A"
+        });
+        var surface = new TableSurface(new TableModel(["Value"]), "JSON");
+        palette.Apply(surface);
+        surface.SetDocument("""{"name":"hello","count":42,"ready":true}""");
+        string svg = CellBufferSvgExporter.Export(VisualSnapshotRenderer.Render(surface, 100, 20));
+        foreach (var color in new[] { palette.Property, palette.StringLiteral, palette.Number, palette.Keyword, palette.Punctuation }) {
+            Assert.Contains($"rgb({color.R},{color.G},{color.B})", svg);
+        }
+    }
+
 }

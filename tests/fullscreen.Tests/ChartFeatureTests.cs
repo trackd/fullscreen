@@ -14,6 +14,73 @@ namespace fullscreen.Tests;
 [DoNotParallelize]
 public sealed class ChartFeatureTests {
     [TestMethod]
+    public async Task WheelScrollsParentUnlessZoomIsExplicitlyEnabledAndSettingsPreserveOptIn() {
+        var chart = new Chart([10, 30, 20]) { MinHeight = 12, MaxHeight = 12, Title = "Chart" };
+        var scroll = new ScrollViewer(new VStack(chart, new TextBlock("More content") { MinHeight = 40, MaxHeight = 40 })) {
+            HorizontalScrollEnabled = false
+        };
+        await using var ui = new DesignerUxTests.UiSession(scroll, () => { }, 90, 24);
+        Assert.IsFalse(chart.EnableZoom);
+        var host = chart.EnumerateVisualsDepthFirst().OfType<TooltipHost>().Single();
+        ui.Mouse(TerminalMouseKind.Move, TerminalMouseButton.None, chart.PlotBounds.X + 2, chart.PlotBounds.Y + 2,
+            () => host.TooltipContent is not null);
+        ui.Wheel(chart.PlotBounds.X + 2, chart.PlotBounds.Y + 2, -1, () => scroll.VerticalOffset > 0);
+        ui.Tick();
+        Assert.IsNull(host.TooltipContent, "Scrolling must invalidate a tooltip anchored to the old chart position.");
+        Assert.IsNull(chart.MinimumX);
+        Assert.IsNull(chart.MaximumX);
+        ui.App.Focus(chart);
+        ui.Text("+", () => true);
+        ui.Tick();
+        Assert.IsNull(chart.MinimumX, "Keyboard zoom must also be opt-in.");
+        chart.EnableZoom = true;
+        ui.Wheel(chart.PlotBounds.X + 2, Math.Max(0, chart.PlotBounds.Y) + 2, 1, () => chart.MinimumX.HasValue);
+        Assert.IsLessThan(2d, (chart.MaximumX - chart.MinimumX)!.Value);
+        var copy = new Chart();
+        copy.ImportSettings(chart.ExportSettings());
+        Assert.IsTrue(copy.EnableZoom);
+        copy.ImportSettings("{}");
+        Assert.IsFalse(copy.EnableZoom);
+    }
+
+    [TestMethod]
+    public async Task HorizontalBarHoverMatchesTheWholePaintedBarAndClearsInGaps() {
+        var chart = new Chart { GraphKind = GraphKind.HorizontalBars, Minimum = 0, ShowLegend = true };
+        chart.Series.Add(new("Long", [100]));
+        chart.Series.Add(new("Short", [10]));
+        await using var ui = new DesignerUxTests.UiSession(chart, () => { }, 100, 24);
+        var bounds = chart.PlotBounds;
+        var host = chart.EnumerateVisualsDepthFirst().OfType<TooltipHost>().Single();
+        var geometry = new ChartGeometry();
+        var data = chart.GetRenderData(100);
+        geometry.Build(data, chart.RenderRange(data), chart.GraphKind, bounds.Width, bounds.Height);
+        foreach (var shape in geometry.Primitives) {
+            int x = bounds.X + shape.X0 + 1, y = bounds.Y + (shape.Y0 + shape.Y1) / 2;
+            ui.Mouse(TerminalMouseKind.Move, TerminalMouseButton.None, x, y,
+                () => host.TooltipContent is Paragraph { Text: { } text } && text.Contains(data[shape.Series].Property, StringComparison.Ordinal));
+        }
+        ui.Mouse(TerminalMouseKind.Move, TerminalMouseButton.None, bounds.Right - 1, bounds.Bottom - 1, () => host.TooltipContent is null);
+    }
+
+    [TestMethod]
+    [DataRow(GraphKind.Bars)]
+    [DataRow(GraphKind.HorizontalBars)]
+    public async Task CategoryBarLegendSelectsOriginalRowsRatherThanHidingTheSeries(GraphKind kind) {
+        object source = new();
+        var chart = new Chart { GraphKind = kind, ShowLegend = true };
+        chart.Series.Add(new("Load", [20, 40]));
+        chart.Series[0].Labels.AddRange(["CPU", "Memory"]);
+        chart.Series[0].Sources.AddRange([source, new object()]);
+        ChartSelection? selection = null;
+        chart.SelectionChanged += value => selection = value;
+        await using var ui = new DesignerUxTests.UiSession(chart, () => { }, 80, 24);
+        ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, 2, 0, () => selection is not null);
+        Assert.AreSame(source, selection!.Source);
+        Assert.AreEqual(0, selection.PointIndex);
+        Assert.IsTrue(chart.Series[0].Visible);
+    }
+
+    [TestMethod]
     public void LegendsMeasureWrapAndTruncateUnicodeLabelsInCells() {
         const string wide = "\u4e2d\u6587";
         var chart = new Chart { ShowLegend = true };

@@ -3,7 +3,7 @@
     ModuleVersion        = '0.3.0'
     GUID                 = 'f3fb06ad-95c3-47ae-9469-0cc3bb5f8112'
     Author               = 'trackd'
-    Copyright            = '(c) trackd. All rights reserved.'
+    Copyright            = 'Copyright (c) 2026 trackd. Licensed under MIT.'
     Description          = 'fullscreen terminal apps, visual TUI designer and custom PowerShell TUIs.'
     PowerShellVersion    = '7.6'
     CompatiblePSEditions = @('Core')

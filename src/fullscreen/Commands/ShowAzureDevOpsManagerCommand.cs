@@ -54,6 +54,11 @@ public sealed class ShowAzureDevOpsManagerCommand : ShowDeveloperCommand {
     [Parameter]
     public AzureDevOpsView View { get; set; } = AzureDevOpsView.Boards;
 
+    /// <summary>Hide optional tabs without querying them. Uses resource names, independent of displayed tab numbers.</summary>
+    [Parameter]
+    [ValidateSet("Boards", "WorkItems", "Stories", "Tasks", "Backlog", "PullRequests", "Pipelines")]
+    public string[] ExcludeTab { get; set; } = [];
+
     /// <summary>Story work item type, default User Story for Agile. Use Product Backlog Item for Scrum or
     /// Issue for Basic/custom processes. Applies to the Stories tab and create-story action.</summary>
     [Parameter]
@@ -64,6 +69,9 @@ public sealed class ShowAzureDevOpsManagerCommand : ShowDeveloperCommand {
     /// <inheritdoc/>
     protected override void EndProcessing() =>
         Run((_, stop) => {
+            if (ExcludeTab.Distinct(StringComparer.OrdinalIgnoreCase).Count() == Enum.GetValues<AzureDevOpsView>().Length) {
+                throw new ArgumentException("At least one tab must remain visible.", nameof(ExcludeTab));
+            }
             // Validate the destination before launching any external authentication UI.
             using (var validation = new AzureDevOpsClient(Organization, "validate", true)) {
             }
@@ -112,5 +120,5 @@ public sealed class ShowAzureDevOpsManagerCommand : ShowDeveloperCommand {
 
                 throw;
             }
-        }, (int)View, "FullscreenAzureDevOpsManagerFailed");
+        }, (int)View, "FullscreenAzureDevOpsManagerFailed", ExcludeTab);
 }

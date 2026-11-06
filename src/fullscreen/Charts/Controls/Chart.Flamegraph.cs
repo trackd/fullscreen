@@ -46,11 +46,11 @@ public partial class Chart {
     private int _frameVersion = -1;
     private ChartFlameTree? _flameTree;
     internal static Color FlameColor(Themes.ThemePalette palette, byte shade) => shade switch {
-        2 => palette.Warning,
-        3 => Color.Mix(palette.Warning, palette.Error, .35f),
-        4 => Color.Mix(palette.Warning, palette.Error, .7f),
-        5 => palette.Error,
-        _ => palette.Accent
+        2 => palette.ChartYellow,
+        3 => Color.Mix(palette.ChartYellow, palette.ChartRed, .35f),
+        4 => Color.Mix(palette.ChartYellow, palette.ChartRed, .7f),
+        5 => palette.ChartRed,
+        _ => palette.ChartBlue
     };
     private Color FlameColor(byte shade) => FlameColor(Palette, shade);
 

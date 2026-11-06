@@ -5,6 +5,12 @@ using System.Text.Json;
 namespace fullscreen.Development;
 /// <summary>Defines authenticated JSON requests to an Azure DevOps organization.</summary>
 public interface IAzureDevOpsClient {
+    /// <summary>Reads a bounded, paginated Analytics query for the selected project.</summary>
+    Task<JsonElement> ReadAnalyticsAsync(string project, string query, CancellationToken token) =>
+        throw new NotSupportedException("This transport does not support Azure Boards Analytics.");
+    /// <summary>Downloads an organization-relative resource to a new file without extracting it.</summary>
+    Task DownloadAsync(string path, string destination, CancellationToken token) =>
+        throw new NotSupportedException("This Azure DevOps transport does not support downloads.");
     /// <summary>Gets the normalized Azure DevOps organization URL.</summary>
     string OrganizationUrl { get; }
 
@@ -27,8 +33,114 @@ public interface IAzureDevOpsClient {
     );
 }
 
-/// <summary>Bounded REST transport. Credentials never enter process arguments; redirects are disabled.</summary>
+/// <summary>Bounded REST transport with credential-isolated artifact redirects.</summary>
 public sealed class AzureDevOpsClient : IAzureDevOpsClient, IDisposable {
+    /// <inheritdoc/>
+    public async Task<JsonElement> ReadAnalyticsAsync(string project, string query, CancellationToken token) {
+        string organization = _http.BaseAddress!.Host == "dev.azure.com"
+            ? _http.BaseAddress.AbsolutePath.Trim('/')
+            : Uri.EscapeDataString(_http.BaseAddress.Host[..^".visualstudio.com".Length]);
+        var root = new Uri($"https://analytics.dev.azure.com/{organization}/{Uri.EscapeDataString(project)}/_odata/v3.0-preview/");
+        var address = new Uri(root, query);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var rows = new List<JsonElement>();
+        while (true) {
+            if (!root.IsBaseOf(address) || address.UserInfo.Length != 0 || !address.IsDefaultPort || address.Scheme != "https"
+                || !seen.Add(address.AbsoluteUri) || seen.Count > 100) {
+                throw new InvalidOperationException("Analytics returned an unsafe, repeated or excessive continuation link.");
+            }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(60));
+            using var request = new HttpRequestMessage(HttpMethod.Get, address);
+            request.Headers.Authorization = _tokens is null ? _authorization
+                : new AuthenticationHeaderValue("Bearer", await _tokens.GetTokenAsync(timeout.Token).ConfigureAwait(false));
+            request.Headers.Accept.Add(new("application/json"));
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) {
+                throw new HttpRequestException($"Azure Boards Analytics returned {(int)response.StatusCode}. Check Analytics access and project permissions.", null, response.StatusCode);
+            }
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+            using var buffer = new MemoryStream();
+            byte[] chunk = new byte[16384];
+            int count;
+            while ((count = await stream.ReadAsync(chunk, timeout.Token).ConfigureAwait(false)) > 0) {
+                if (buffer.Length + count > 4 * 1024 * 1024) {
+                    throw new InvalidOperationException("Analytics response exceeds 4 MiB. Choose a smaller date range.");
+                }
+                buffer.Write(chunk, 0, count);
+            }
+            using var data = JsonDocument.Parse(buffer.GetBuffer().AsMemory(0, (int)buffer.Length));
+            rows.AddRange(data.RootElement.GetProperty("value").EnumerateArray().Select(row => row.Clone()));
+            if (rows.Count > 20000) {
+                throw new InvalidOperationException("Analytics query exceeds 20,000 aggregate rows. Choose a smaller date range.");
+            }
+            if (!data.RootElement.TryGetProperty("@odata.nextLink", out var next)) {
+                return JsonSerializer.SerializeToElement(new { value = rows });
+            }
+            address = new Uri(address, next.GetString() ?? throw new InvalidOperationException("Analytics returned an empty continuation link."));
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task DownloadAsync(string path, string destination, CancellationToken token) {
+        if (path.StartsWith('/') || !Uri.TryCreate(path, UriKind.Relative, out _) || path.Contains("..", StringComparison.Ordinal)) {
+            throw new ArgumentException("Expected relative API path.", nameof(path));
+        }
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromMinutes(10));
+        token = timeout.Token;
+        var address = new Uri(_http.BaseAddress!, path);
+        if (!_http.BaseAddress!.IsBaseOf(address)) {
+            throw new ArgumentException("Expected an API path within the selected organization.", nameof(path));
+        }
+        using var request = new HttpRequestMessage(HttpMethod.Get, address);
+        request.Headers.Authorization = _tokens is null ? _authorization : new AuthenticationHeaderValue("Bearer", await _tokens.GetTokenAsync(token).ConfigureAwait(false));
+        request.Headers.Accept.Add(new("application/zip"));
+        HttpResponseMessage response = await SendArtifactRequest(request, token).ConfigureAwait(false);
+        try {
+            for (int redirect = 0; (int)response.StatusCode is 301 or 302 or 303 or 307 or 308; redirect++) {
+                if (redirect >= 5 || response.Headers.Location is not { } location) {
+                    throw new HttpRequestException("Artifact redirect limit exceeded or redirect has no location.");
+                }
+                address = new Uri(address, location);
+                bool organization = new Uri(OrganizationUrl + "/").IsBaseOf(address);
+                bool storage = address.Host.EndsWith(".vsblob.vsassets.io", StringComparison.OrdinalIgnoreCase)
+                    || address.Host.EndsWith(".blob.core.windows.net", StringComparison.OrdinalIgnoreCase);
+                if (address.Scheme != "https" || address.UserInfo.Length != 0 || !address.IsDefaultPort || !(organization || storage)) {
+                    throw new HttpRequestException("Artifact redirected outside the organization or supported Azure artifact storage.");
+                }
+                response.Dispose();
+                using var redirected = new HttpRequestMessage(HttpMethod.Get, address);
+                // Signed storage URLs must never receive the organization's credentials.
+                if (organization) {
+                    redirected.Headers.Authorization = request.Headers.Authorization;
+                }
+                response = await SendArtifactRequest(redirected, token).ConfigureAwait(false);
+            }
+
+            if (!response.IsSuccessStatusCode) {
+                throw new HttpRequestException($"Artifact download returned {(int)response.StatusCode}.", null, response.StatusCode);
+            }
+            if (response.Content.Headers.ContentLength > PipelineFiles.MaximumBytes) {
+                throw new IOException("Artifact exceeds the 1 GiB download limit.");
+            }
+            await using var stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
+            await PipelineFiles.CopyNewAsync(stream, destination, token).ConfigureAwait(false);
+        }
+        finally {
+            response.Dispose();
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendArtifactRequest(HttpRequestMessage request, CancellationToken token) {
+        try {
+            return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        }
+        catch (HttpRequestException error) {
+            throw new HttpRequestException("Artifact request failed. Check connectivity and artifact access.", null, error.StatusCode);
+        }
+    }
+
     private readonly HttpClient _http;
     private readonly AuthenticationHeaderValue? _authorization;
     private readonly IAzureDevOpsTokenProvider? _tokens;

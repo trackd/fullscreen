@@ -11,6 +11,388 @@ namespace fullscreen.Tests;
 [DoNotParallelize]
 public sealed class AzureDevOpsTests {
     [TestMethod]
+    public async Task BoardLevelDefaultsToRequirementsAndExplicitPortfolioSelectionUsesItsOwnMappings() {
+        var client = new FixtureClient {
+            Response = path => path.Contains("/boards?", StringComparison.Ordinal)
+                ? """{"value":[{"id":"epics","name":"Epics"},{"id":"features","name":"Features"},{"id":"stories","name":"Stories"}]}"""
+                : path.Contains("/boards/features?", StringComparison.Ordinal)
+                    ? """{"columns":[{"name":"Feature queue","stateMappings":{"Feature":"New"}},{"name":"Delivered","stateMappings":{"Feature":"Done"}}],"fields":{"columnField":{"referenceName":"WEF_features.Column"}}}"""
+                    : null
+        };
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        var boards = await backend.LoadAsync(0, 0, default);
+        Assert.AreEqual("Stories", boards.Items.Single().Cells[0]);
+        CollectionAssert.AreEqual(new[] { "Epics", "Features", "Stories" }, backend.BoardLevelOperations().Select(operation => operation.Label).ToArray());
+        await backend.BoardLevelOperations().Single(operation => operation.Label == "Features").Execute("", default);
+        boards = await backend.LoadAsync(0, 0, default);
+        Assert.AreEqual("Features", boards.Items.Single().Cells[0]);
+        await backend.Operations(0, boards.Items[0]).Single().Execute("", default);
+        await backend.LoadAsync(1, 0, default);
+        string wiql = client.Requests.Last(request => request.Path.Contains("wiql", StringComparison.Ordinal)).Body.GetProperty("query").GetString()!;
+        Assert.Contains("[System.WorkItemType] IN ('Feature')", wiql);
+        Assert.Contains("[System.IterationPath] = 'Project\\Sprint 2'", wiql);
+        CollectionAssert.AreEqual(new[] { "Feature queue", "Delivered" }, backend.BoardColumns);
+        Assert.IsTrue(backend.Operations(1, null).Any(operation => operation.Label == "Create Feature"));
+        Assert.IsFalse(backend.Operations(1, null).Any(operation => operation.Label == "Create User Story"));
+        Assert.IsFalse(client.Requests.Any(request => request.Method != HttpMethod.Get && !request.Path.Contains("wiql", StringComparison.Ordinal)
+            && !request.Path.Contains("workitemsbatch", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task WorkItemTypeFilterDefaultsToStoriesAndAllTypesPreservesOtherFilters() {
+        var client = new FixtureClient();
+        using var backend = new AzureDevOpsBackend(client, "Project", "Core");
+        await backend.LoadAsync(1, 0, default);
+        Assert.Contains("[System.WorkItemType] = 'User Story'", Query());
+        CollectionAssert.AreEquivalent(new[] { "All types", "User Story", "Feature", "Epic", "Task", "Bug" },
+            backend.WorkItemTypeOperations().Select(operation => operation.Label).ToArray());
+        await backend.Operations(1, null).First().Execute("", default);
+        await backend.WorkItemTypeOperations().Single(operation => operation.Label == "Epic").Execute("", default);
+        await backend.LoadAsync(1, 0, default);
+        Assert.Contains("[System.WorkItemType] = 'Epic'", Query());
+        Assert.Contains("[System.AssignedTo] = @Me", Query());
+        Assert.Contains("[System.IterationPath] = 'Project\\Sprint 2'", Query());
+        Assert.IsTrue(backend.Operations(1, null).Any(operation => operation.Label == "Create Epic"));
+        await backend.WorkItemTypeOperations().Single(operation => operation.Label == "All types").Execute("", default);
+        await backend.LoadAsync(1, 0, default);
+        Assert.DoesNotContain("[System.WorkItemType]", Query());
+        Assert.Contains("[System.AssignedTo] = @Me", Query());
+        Assert.Contains("[System.IterationPath]", Query());
+        Assert.Contains("[System.AreaPath]", Query());
+        await backend.SprintOperations(1).Single(operation => operation.Label == "All sprints").Execute("", default);
+        await backend.LoadAsync(1, 0, default);
+        Assert.DoesNotContain("[System.IterationPath]", Query());
+        Assert.AreEqual("All types", backend.WorkItemTypeLabel);
+        Assert.AreEqual(1, client.Requests.Count(request => request.Path.Contains("workitemtypes?", StringComparison.Ordinal)));
+        string Query() => client.Requests.Last(request => request.Path.Contains("wiql", StringComparison.Ordinal)).Body.GetProperty("query").GetString()!;
+    }
+
+    [TestMethod]
+    public async Task TypeFilterClearsBoardColumnsAndQuotesCustomProcessTypes() {
+        var client = new FixtureClient {
+            Response = path => path.Contains("workitemtypes?", StringComparison.Ordinal)
+                ? """{"value":[{"name":"User Story"},{"name":"Owner's Request"},{"name":"Disabled","isDisabled":true}]}""" : null
+        };
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        var board = (await backend.LoadAsync(0, 0, default)).Items.Single();
+        await backend.Operations(0, board).Single().Execute("", default);
+        await backend.LoadAsync(1, 0, default);
+        Assert.IsTrue(backend.BoardOpen);
+        Assert.IsFalse(backend.WorkItemTypeOperations().Any(operation => operation.Label == "Disabled"));
+        await backend.WorkItemTypeOperations().Single(operation => operation.Label == "Owner's Request").Execute("", default);
+        await backend.LoadAsync(1, 0, default);
+        Assert.IsFalse(backend.BoardOpen);
+        Assert.IsEmpty(backend.BoardColumns);
+        string wiql = client.Requests.Last(request => request.Path.Contains("wiql", StringComparison.Ordinal)).Body.GetProperty("query").GetString()!;
+        Assert.Contains("[System.WorkItemType] = 'Owner''s Request'", wiql);
+        Assert.Contains("[System.AreaPath]", wiql);
+    }
+
+    [TestMethod]
+    public async Task ScrumProcessDefaultsToConfiguredRequirementTypeAndLevelRatherThanEnglishStories() {
+        var client = new FixtureClient {
+            BacklogLevels = """{"value":[{"id":"requirements","name":"Backlog items","type":"requirement","workItemTypes":[{"name":"Product Backlog Item"}]}]}""",
+            Response = path => path.Contains("workitemtypes?", StringComparison.Ordinal) ? """{"value":[{"name":"Product Backlog Item"},{"name":"Bug"}]}"""
+                : path.Contains("processconfiguration?", StringComparison.Ordinal) ? """{"requirementBacklog":{"workItemTypes":[{"name":"Product Backlog Item"}]}}"""
+                : path.Contains("/boards?", StringComparison.Ordinal) ? """{"value":[{"id":"features","name":"Features"},{"id":"requirements","name":"Backlog items"}]}""" : null
+        };
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        Assert.AreEqual("Backlog items", (await backend.LoadAsync(0, 0, default)).Items.Single().Cells[0]);
+        await backend.LoadAsync(1, 0, default);
+        Assert.AreEqual("Product Backlog Item", backend.WorkItemTypeLabel);
+        Assert.Contains("[System.WorkItemType] = 'Product Backlog Item'", client.Requests.Last(request => request.Path.Contains("wiql", StringComparison.Ordinal)).Body.GetProperty("query").GetString()!);
+    }
+
+    [TestMethod]
+    [DataRow("{}")]
+    [DataRow("{\"value\":[]}")]
+    public async Task MissingProcessTypesReportAnErrorRatherThanSilentlyLoadingAllTypes(string response) {
+        var client = new FixtureClient { Response = path => path.Contains("workitemtypes?", StringComparison.Ordinal) ? response : null };
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => backend.LoadAsync(1, 0, default));
+        Assert.IsFalse(client.Requests.Any(request => request.Path.Contains("wiql", StringComparison.Ordinal)));
+        Assert.IsFalse(backend.AllWorkItemTypes);
+    }
+
+    [TestMethod]
+    [DataRow("asTasks", false)]
+    [DataRow("off", false)]
+    [DataRow("asRequirements", true)]
+    public async Task StoryBoardRespectsTeamBugBehaviorAndCustomBugCategory(string behavior, bool includesBugs) {
+        var client = new FixtureClient {
+            Response = path => path.Contains("teamsettings?", StringComparison.Ordinal) ? JsonSerializer.Serialize(new { bugsBehavior = behavior })
+                : path.Contains("/boards/board-1?", StringComparison.Ordinal)
+                    ? """{"columns":[{"name":"New","stateMappings":{"User Story":"New","Defect":"New"}}]}"""
+                    : path.Contains("workitemtypecategories/Microsoft.BugCategory", StringComparison.Ordinal)
+                        ? """{"workItemTypes":[{"name":"Defect"}]}""" : null
+        };
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        var board = (await backend.LoadAsync(0, 0, default)).Items.Single();
+        await backend.Operations(0, board).Single().Execute("", default);
+        await backend.LoadAsync(1, 0, default);
+        string wiql = client.Requests.Last(request => request.Path.Contains("wiql", StringComparison.Ordinal)).Body.GetProperty("query").GetString()!;
+        Assert.AreEqual(includesBugs, wiql.Contains("'Defect'", StringComparison.Ordinal));
+        Assert.Contains("'User Story'", wiql);
+    }
+
+    [TestMethod]
+    public async Task TypeAndLevelDropdownsAreKeyboardAccessibleAndKeepSelectionsAcrossRefresh() {
+        var client = new FixtureClient {
+            Response = path => path.Contains("/boards?", StringComparison.Ordinal)
+                ? """{"value":[{"id":"epics","name":"Epics"},{"id":"features","name":"Features"},{"id":"stories","name":"Stories"}]}""" : null
+        };
+        using var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"), readOnly: true);
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 110, 45);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        ui.App.Focus(app.Surface);
+        ui.Text("l", () => ui.App.FocusedElement?.GetType().Name == "ContextMenuList");
+        Assert.Contains("Features", ui.Output);
+        ui.Key(XenoAtom.Terminal.TerminalKey.Home, () => true);
+        ui.Key(XenoAtom.Terminal.TerminalKey.Enter, () => !app.Busy && app.Surface.Model.Rows.Single().Cells[0] == "Epics");
+        app.SwitchView(1);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        ui.App.Focus(app.Surface);
+        ui.Text("t", () => ui.App.FocusedElement?.GetType().Name == "ContextMenuList");
+        Assert.Contains("All types", ui.Output);
+        ui.Key(XenoAtom.Terminal.TerminalKey.Home, () => true);
+        ui.Key(XenoAtom.Terminal.TerminalKey.Enter, () => !app.Busy && app.Surface.ToolbarCommands.Any(command => command.Label == "T Type: All types"));
+        Assert.IsTrue(app.Surface.ToolbarCommands.Any(command => command.Label.Contains("Project\\Sprint 2", StringComparison.Ordinal)));
+        ui.App.Focus(app.Surface);
+        ui.Text("k", () => app.Surface.Status.Contains("list-only", StringComparison.Ordinal));
+        Assert.IsFalse(ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Any());
+        Assert.IsFalse(app.Surface.ToolbarCommands.Any(command => command.Label == "K Kanban"));
+        app.SwitchView(0);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        Assert.AreEqual("Epics", app.Surface.Model.Rows.Single().Cells[0]);
+        Assert.IsFalse(client.Requests.Any(request => request.Patch));
+    }
+
+    [TestMethod]
+    public async Task WorkItemsDefaultToCurrentSprintAndCanClearItWithoutFilteringBacklog() {
+        var client = new FixtureClient();
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        var page = await backend.LoadAsync(1, 0, default);
+        Assert.Contains("Project\\Sprint 2", page.Summary);
+        Assert.Contains("[System.IterationPath] = 'Project\\Sprint 2'", client.Requests.Last(request => request.Path.Contains("wiql", StringComparison.Ordinal)).Body.GetProperty("query").GetString()!);
+        await backend.SprintOperations(1).Single(operation => operation.Label == "All sprints").Execute("", default);
+        foreach (int view in new[] { 1, 2, 3 }) {
+            page = await backend.LoadAsync(view, 0, default);
+            Assert.Contains("All sprints", page.Summary);
+            Assert.DoesNotContain("[System.IterationPath]", client.Requests.Last(request => request.Path.Contains("wiql", StringComparison.Ordinal)).Body.GetProperty("query").GetString()!);
+        }
+        page = await backend.LoadAsync(6, 0, default);
+        Assert.Contains("all sprints", page.Summary);
+        Assert.AreEqual("Order", page.Columns[^1]);
+        Assert.AreEqual("1", page.Items[0].Cells[^1]);
+        await backend.SprintOperations(1).First().Execute("", default);
+        await backend.LoadAsync(3, 0, default);
+        Assert.Contains("[System.IterationPath] = 'Project\\Sprint 2'", client.Requests.Last(request => request.Path.Contains("wiql", StringComparison.Ordinal)).Body.GetProperty("query").GetString()!);
+    }
+
+    [TestMethod]
+    public async Task VisibleTabsMapNumbersToCanonicalViewsAndBacklogDefaultsToNumericOrder() {
+        var client = new FixtureClient { BacklogIds = [42, 9], ItemFixtures = [ReviewItem(42, "User Story", "Active"), ReviewItem(9, "User Story", "Active")] };
+        using var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"), initialView: 1, excludeTabs: ["Tasks"]);
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 110, 40);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        CollectionAssert.AreEqual(new[] { "Boards", "Work items", "Stories", "Backlog", "Pull requests", "Pipelines" }, app.Surface.Tabs);
+        ui.App.Focus(app.Surface);
+        ui.Text("4", () => !app.Busy && app.View == 6);
+        Assert.AreEqual("Order", app.Surface.Model.Columns[app.Surface.Model.SortColumn]);
+        Assert.IsFalse(app.Surface.Model.Descending);
+        CollectionAssert.AreEqual(new[] { "42", "9" }, app.Surface.Model.Visible.Select(row => ((DeveloperItem)row.Original).Key).ToArray());
+        int requests = client.Requests.Count;
+        app.SwitchView(3);
+        Assert.HasCount(requests, client.Requests);
+        Assert.Contains("excluded", app.Surface.Status);
+    }
+
+    [TestMethod]
+    public void ExcludedInitialTabFallsBackAndAllExcludedIsRejected() {
+        var client = new FixtureClient();
+        using (var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"), initialView: 3, excludeTabs: ["Boards", "Tasks"])) {
+            Assert.AreEqual(1, app.View);
+        }
+        using var backend = new AzureDevOpsBackend(new FixtureClient(), "Project");
+        Assert.ThrowsExactly<ArgumentException>(() => new DeveloperApp(backend, excludeTabs: ["Boards", "WorkItems", "Stories", "Tasks", "Backlog", "PullRequests", "Pipelines"]));
+    }
+
+    [TestMethod]
+    public async Task BoardsLandingDashboardRendersNativeBarsAndDoesNotRequireAnalytics() {
+        var client = new FixtureClient { ItemFixtures = [ReviewItem(42, "User Story", "Active"), ReviewItem(9, "User Story", "Done")] };
+        using var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"));
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 110, 45);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        Assert.Contains("TEAM DASHBOARD", ui.Output);
+        Assert.Contains("Current sprint by state", ui.Output);
+        Assert.Contains("█", ui.Output);
+        Assert.HasCount(0, client.AnalyticsQueries);
+        var chart = app.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Charts.Chart>().Single();
+        Assert.IsFalse(chart.PreferTerminalCells, "Use pixel rendering when the terminal supports it.");
+        Assert.IsFalse(chart.EnableZoom);
+        Assert.IsTrue(chart.ShowLegend);
+        Assert.AreEqual(2, chart.Series.Count);
+        Assert.IsTrue(chart.Series.All(series => series.Values.Count == 1 && series.Name.Length > 0));
+    }
+
+    [TestMethod]
+    public async Task BoardsAnalyticsOpensFullHeightAndCanSwitchRangeWithoutACurrentSprint() {
+        var client = new FixtureClient { NoCurrentSprint = true };
+        using var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"));
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 110, 45);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        app.Surface.ToolbarCommands.Single(command => command.Label == "Y Boards analytics").Execute();
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        var dialog = ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Single();
+        Assert.IsGreaterThan(30, dialog.Bounds.Height);
+        Assert.Contains("No dated current sprint", ui.Output);
+        var range = dialog.EnumerateVisualsDepthFirst().OfType<Button>().Single(button => button.Content is TextBlock { Text: "Last 30 days" });
+        ui.App.Focus(range);
+        ui.Key(XenoAtom.Terminal.TerminalKey.Enter, () => !app.Busy && client.AnalyticsQueries.Count > 0);
+        Assert.Contains("Last 30 days", ui.Output);
+        ui.Key(XenoAtom.Terminal.TerminalKey.Escape, () => !ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Any());
+        Assert.AreEqual(0, app.View);
+    }
+
+    [TestMethod]
+    public async Task CumulativeFlowUsesSharedRendererAndScrollsInsideTheAnalyticsDialog() {
+        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var client = new FixtureClient {
+            Analytics = query => query.Contains("StateCategory", StringComparison.Ordinal) ? """{"value":[]}""" :
+                JsonSerializer.Serialize(new { value = new[] {
+                    new { DateValue = today, ColumnName = "New", Count = 5 },
+                    new { DateValue = today, ColumnName = "Done", Count = 3 }
+                } })
+        };
+        using var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"));
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 110, 24);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        int before = ui.Output.Length;
+        app.Surface.ToolbarCommands.Single(command => command.Label == "Y Boards analytics").Execute();
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        string rendered = ui.Output[before..];
+        Assert.Contains("Cumulative flow", rendered);
+        Assert.Contains("Done", rendered);
+        Assert.Contains("█", rendered);
+        var chart = ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Single().EnumerateVisualsDepthFirst().OfType<fullscreen.Charts.Chart>().Single();
+        Assert.IsTrue(chart.ShowLegend);
+        Assert.AreEqual(2, chart.Series.Count);
+        Assert.IsFalse(chart.PreferTerminalCells);
+        Assert.IsFalse(chart.EnableZoom);
+        var scroll = ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Single().EnumerateVisualsDepthFirst().OfType<ScrollViewer>().Single();
+        ui.Wheel(chart.PlotBounds.X + 2, chart.PlotBounds.Y + 2, -1, () => scroll.VerticalOffset > 0);
+        Assert.IsNull(chart.MinimumX);
+        Assert.IsNull(chart.MaximumX);
+    }
+
+    [TestMethod]
+    public async Task AnalyticsScopesTeamBoardRangeAndUsesOnlyValidSprintBaselines() {
+        var client = new FixtureClient();
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly start = today.AddDays(-5);
+        string Iso(DateOnly date) => date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        client.Response = path => path.Contains("teamsettings/iterations", StringComparison.Ordinal)
+            ? JsonSerializer.Serialize(new { value = new[] { new { id = "sprint-id", name = "Current", path = "Project\\Current", attributes = new { startDate = Iso(start) + "T00:00:00Z", finishDate = Iso(today.AddDays(5)) + "T00:00:00Z" } } } })
+            : null;
+        client.Analytics = query => query.Contains("StateCategory", StringComparison.Ordinal)
+            ? JsonSerializer.Serialize(new { value = new[] {
+                new { DateValue = Iso(start), Iteration = new { IterationPath = "Project\\Current" }, StateCategory = "Proposed", Count = 5 },
+                new { DateValue = Iso(today), Iteration = new { IterationPath = "Project\\Current" }, StateCategory = "Completed", Count = 3 },
+                new { DateValue = Iso(today), Iteration = new { IterationPath = "Project\\Current" }, StateCategory = "InProgress", Count = 4 }
+            } })
+            : JsonSerializer.Serialize(new { value = new[] {
+                new { DateValue = Iso(today), ColumnName = "Done", Count = 3 },
+                new { DateValue = Iso(today), ColumnName = "New", Count = 4 }
+            } });
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        var current = await backend.LoadBoardsAnalyticsAsync(false, null, default);
+        Assert.HasCount(1, current.Velocity);
+        Assert.AreEqual(new SprintVelocity("Current", 5, 3, 4), current.Velocity[0]);
+        CollectionAssert.AreEqual(new[] { "New", "Done" }, current.Flow.Select(row => row.Column).ToArray());
+        Assert.Contains("Team/TeamId eq 22222222-2222-2222-2222-222222222222", client.AnalyticsQueries[0]);
+        Assert.Contains("BoardName eq 'Stories'", client.AnalyticsQueries[0]);
+        Assert.Contains("Iteration/IterationPath eq 'Project\\Current'", client.AnalyticsQueries[0]);
+        Assert.Contains("completed-late", current.Notice);
+        client.AnalyticsQueries.Clear();
+        await backend.LoadBoardsAnalyticsAsync(true, null, default);
+        Assert.DoesNotContain("Iteration/IterationPath eq", client.AnalyticsQueries[0]);
+        Assert.Contains(Iso(today.AddDays(-29)) + "Z", client.AnalyticsQueries[0]);
+        client.Analytics = query => query.Contains("StateCategory", StringComparison.Ordinal)
+            ? JsonSerializer.Serialize(new { value = new[] { new { DateValue = Iso(today), Iteration = new { IterationPath = "Project\\Current" }, StateCategory = "Completed", Count = 3 } } })
+            : """{"value":[]}""";
+        Assert.HasCount(0, (await backend.LoadBoardsAnalyticsAsync(true, null, default)).Velocity);
+        client.Analytics = _ => "{}";
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => backend.LoadBoardsAnalyticsAsync(true, null, default));
+    }
+
+    [TestMethod]
+    public async Task CapacityUsesWorkingDaysAndUnionOfDaysOffWithoutConvertingPoints() {
+        var client = new FixtureClient();
+        client.Response = path => path.Contains("teamsettings/iterations", StringComparison.Ordinal)
+            ? path.Contains("/capacities", StringComparison.Ordinal)
+                ? """{"teamMembers":[{"activities":[{"capacityPerDay":6},{"capacityPerDay":1}],"daysOff":[{"start":"2026-10-14","end":"2026-10-15"}]}]}"""
+                : path.Contains("/teamdaysoff", StringComparison.Ordinal)
+                    ? """{"daysOff":[{"start":"2026-10-13","end":"2026-10-14"}]}"""
+                    : """{"value":[{"id":"sprint-id","name":"Sprint","path":"Project\\Sprint","attributes":{"startDate":"2026-10-12","finishDate":"2026-10-18"}}]}"""
+            : path.Contains("teamsettings?", StringComparison.Ordinal)
+                ? """{"workingDays":["monday","tuesday","wednesday","thursday","friday"]}"""
+                : path.Contains("workitemsbatch", StringComparison.Ordinal)
+                    ? """{"value":[{"id":42,"fields":{"System.WorkItemType":"User Story","Microsoft.VSTS.Scheduling.StoryPoints":13,"Microsoft.VSTS.Scheduling.OriginalEstimate":8}}]}"""
+                    : null;
+        using var backend = new AzureDevOpsBackend(client, "Project");
+        await backend.LoadAsync(2, 0, default);
+        var capacity = await backend.LoadCapacityAsync("Project\\Sprint", default);
+        Assert.AreEqual(14d, capacity.Hours);
+        Assert.AreEqual(8d, capacity.Planned.Single().Hours);
+        Assert.AreEqual(1, capacity.Planned.Single().Reported);
+        Assert.Contains("Story points are not hours", capacity.Notice);
+        client.Response = path => path.Contains("teamsettings?", StringComparison.Ordinal) ? """{"workingDays":[]}""" : null;
+        Assert.IsNull((await backend.LoadCapacityAsync("Project\\Sprint", default)).Hours);
+    }
+
+    [TestMethod]
+    [DataRow("https://evil.test/value")]
+    [DataRow("https://analytics.dev.azure.com/another/Project/_odata/v3.0-preview/next")]
+    [DataRow("http://analytics.dev.azure.com/fixture/Project/_odata/v3.0-preview/next")]
+    [DataRow("https://analytics.dev.azure.com/fixture/Project/_odata/v3.0-preview/WorkItemBoardSnapshot")]
+    public async Task AnalyticsTransportRejectsUnsafeOrRepeatedContinuationsBeforeSendingCredentials(string next) {
+        int requests = 0;
+        using var handler = new FixtureHandler {
+            Response = _ => {
+                requests++;
+                return new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new Dictionary<string, object> { ["value"] = Array.Empty<object>(), ["@odata.nextLink"] = next })) };
+            }
+        };
+        using var client = new AzureDevOpsClient("fixture", "fixture-token", true, handler);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => client.ReadAnalyticsAsync("Project", "WorkItemBoardSnapshot", default));
+        Assert.AreEqual(1, requests);
+    }
+
+    [TestMethod]
+    public async Task AnalyticsTransportAggregatesPagesAuthenticatesAndReportsPermissionFailures() {
+        int requests = 0;
+        using var handler = new FixtureHandler {
+            Response = request => {
+                requests++;
+                Assert.AreEqual("Bearer fixture-token", request.Headers.Authorization?.ToString());
+                return new(HttpStatusCode.OK) { Content = new StringContent(requests == 1
+                    ? """{"value":[{"Count":1}],"@odata.nextLink":"next"}"""
+                    : """{"value":[{"Count":2}]}""") };
+            }
+        };
+        using var client = new AzureDevOpsClient("fixture", "fixture-token", true, handler);
+        var response = await client.ReadAnalyticsAsync("Project", "WorkItemBoardSnapshot", default);
+        Assert.AreEqual(2, response.GetProperty("value").GetArrayLength());
+        handler.Response = _ => new(HttpStatusCode.Forbidden) { Content = new StringContent("private-server-detail") };
+        var error = await Assert.ThrowsExactlyAsync<HttpRequestException>(() => client.ReadAnalyticsAsync("Project", "WorkItemBoardSnapshot", default));
+        Assert.Contains("Analytics returned 403", error.Message);
+        Assert.DoesNotContain("private-server-detail", error.Message);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => client.ReadAnalyticsAsync("Project", "WorkItemBoardSnapshot", cancelled.Token));
+    }
+
+    [TestMethod]
     public async Task BacklogAndSprintReviewResolveTheDefaultTeamOnceWhenTeamIsOmitted() {
         var client = new FixtureClient();
         using var backend = new AzureDevOpsBackend(client, "Project");
@@ -164,18 +546,21 @@ public sealed class AzureDevOpsTests {
     }
 
     [TestMethod]
-    public async Task BacklogSkipsHiddenLevelsAndReportsAnUnconfiguredTeam() {
+    public async Task BacklogOffersHiddenLevelsExplicitlyWithoutChangingTeamSettings() {
         var client = new FixtureClient {
             BacklogLevels = """{"value":[{"id":"hidden","name":"Hidden Stories","type":"requirement","isHidden":true},{"id":"features","name":"Features","type":"portfolio","defaultWorkItemType":{"name":"Feature"}}]}"""
         };
         using var backend = new AzureDevOpsBackend(client, "Project");
         await backend.LoadAsync(6, 0, default);
-        Assert.AreEqual("Features", backend.BacklogLabel);
-        Assert.HasCount(1, backend.BacklogOperations());
+        Assert.AreEqual("Hidden Stories", backend.BacklogLabel);
+        Assert.HasCount(2, backend.BacklogOperations());
+        Assert.IsTrue(backend.BacklogOperations().Any(operation => operation.Label.Contains("hidden in team navigation", StringComparison.Ordinal)));
+        await backend.BacklogOperations().Single(operation => operation.Label == "Features").Execute("", default);
+        await backend.LoadAsync(6, 0, default);
         Assert.IsTrue(backend.Operations(6, null).Any(operation => operation.Label == "Create Feature"));
         client.BacklogLevels = """{"value":[]}""";
         var empty = await backend.LoadAsync(6, 0, default);
-        Assert.Contains("No visible backlog levels", empty.Summary);
+        Assert.Contains("No backlog levels", empty.Summary);
         Assert.IsEmpty(empty.Items);
         Assert.IsEmpty(backend.BacklogOperations());
     }
@@ -452,8 +837,27 @@ public sealed class AzureDevOpsTests {
     }
 
     [TestMethod]
+    public async Task PipelineMonitorRetainsResultColorsAndReturnsToManager() {
+        using var app = new DeveloperApp(new AzureDevOpsBackend(new FixtureClient(), "Project"), initialView: 5);
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 120, 40);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy && app.Surface.Model.Rows.Count > 0; }, 5000));
+        Assert.AreEqual(app.Surface.Palette.Error, app.Surface.RowAccent!(app.Surface.Model.Current!));
+        ui.App.Focus(app.Surface);
+        ui.Key(XenoAtom.Terminal.TerminalKey.Enter,
+            () => ui.App.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Tables.TableSurface>().Any(surface => surface != app.Surface && surface.Model.Rows.Count > 0));
+        var monitor = ui.App.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Tables.TableSurface>().Single(surface => surface != app.Surface);
+        Assert.AreEqual(app.Surface.Palette.Error, monitor.CellAccent!(monitor.Model.Current!, 2));
+        Assert.Contains("Compile", monitor.Model.Current!.Cells[1]);
+        ui.Key(XenoAtom.Terminal.TerminalKey.Backspace,
+            () => !ui.App.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Tables.TableSurface>().Any(surface => surface != app.Surface));
+        Assert.IsFalse(app.Surface.ExitRequested);
+    }
+
+    [TestMethod]
     public async Task OverviewToolbarSupportsNativeMousePreviewToggleAndSprintReview() {
-        using var app = new DeveloperApp(new AzureDevOpsBackend(new FixtureClient(), "Project"), initialView: 2);
+        using var app = new DeveloperApp(new AzureDevOpsBackend(new FixtureClient {
+            ItemFixtures = [ReviewItem(42, "User Story", "Active"), ReviewItem(9, "User Story", "Done")]
+        }, "Project"), initialView: 2);
         await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 140, 45);
         Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy && app.Surface.Model.Rows.Count > 0; }, 5000));
         var preview = app.Root.EnumerateVisualsDepthFirst().OfType<Button>().Single(button => button.Content is TextBlock text && text.Text == "V Preview ☐");
@@ -469,6 +873,9 @@ public sealed class AzureDevOpsTests {
         Assert.IsGreaterThan(60, chart.Bounds.Width);
         Assert.IsGreaterThanOrEqualTo(10, chart.Bounds.Height);
         Assert.IsGreaterThan(0, chart.PlotBounds.Height);
+        Assert.IsFalse(chart.EnableZoom);
+        Assert.IsTrue(chart.ShowLegend);
+        Assert.AreEqual(2, chart.Series.Count);
         Assert.Contains("█", ui.Output, "Analytics must draw bars, not only attach a chart to the dialog.");
     }
 
@@ -498,7 +905,9 @@ public sealed class AzureDevOpsTests {
         var app = new DeveloperApp(new AzureDevOpsBackend(client, "Project"));
         try {
             Assert.IsTrue(SpinWait.SpinUntil(() => { app.Tick(); return app.Surface.Model.Rows.Count != 0; }, 5000));
-            Assert.IsTrue(client.Requests.All(x => x.Path.Contains("boards", StringComparison.Ordinal)));
+            Assert.IsFalse(client.Requests.Any(x => x.Path.Contains("pullrequests", StringComparison.Ordinal)
+                || x.Path.Contains("build/builds", StringComparison.Ordinal) || x.Path.Contains("/workItems?", StringComparison.Ordinal)));
+            Assert.IsTrue(client.Requests.Any(x => x.Path.Contains("boards", StringComparison.Ordinal)));
         }
         finally { app.Dispose(); }
         Assert.IsTrue(client.Disposed);
@@ -644,9 +1053,21 @@ public sealed class AzureDevOpsTests {
         public string? WorkflowStates;
         public bool RejectReview;
         public bool IncompleteReview;
+        public Func<string, string?>? Response;
+        public Func<string, string>? Analytics;
+        public List<string> AnalyticsQueries { get; } = [];
+        public Task<JsonElement> ReadAnalyticsAsync(string project, string query, CancellationToken token) {
+            token.ThrowIfCancellationRequested();
+            query = Uri.UnescapeDataString(query);
+            AnalyticsQueries.Add(query);
+            return Task.FromResult(JsonSerializer.Deserialize<JsonElement>(Analytics?.Invoke(query) ?? """{"value":[]}"""));
+        }
         public async Task<JsonElement> SendAsync(HttpMethod method, string path, object? body, CancellationToken token, bool patch = false) {
             token.ThrowIfCancellationRequested();
             Requests.Add(new(method, path, JsonSerializer.SerializeToElement(body), patch));
+            if (Response?.Invoke(path) is { } overridden) {
+                return JsonSerializer.Deserialize<JsonElement>(overridden);
+            }
             if (RejectReview && path.Contains("/states?", StringComparison.Ordinal)) {
                 throw new HttpRequestException("Azure DevOps Forbidden (403).", null, HttpStatusCode.Forbidden);
             }
@@ -669,6 +1090,9 @@ public sealed class AzureDevOpsTests {
                 : path.Contains("$timeframe=current", StringComparison.Ordinal) ? NoCurrentSprint ? """{"value":[]}""" : """{"value":[{"name":"Sprint 2","path":"Project\\Sprint 2"}]}"""
                 : path.Contains("teamsettings/iterations", StringComparison.Ordinal) ? """{"value":[{"name":"Sprint 1","path":"Project\\Sprint 1"},{"name":"Sprint 2","path":"Project\\Sprint 2","attributes":{"startDate":"2026-10-12T00:00:00Z","finishDate":"2026-10-25T00:00:00Z"}}]}"""
                 : path.Contains("teamfieldvalues", StringComparison.Ordinal) ? """{"defaultValue":"Project\\Core","values":[{"value":"Project\\Core","includeChildren":true}]}"""
+                : path.Contains("teamsettings?", StringComparison.Ordinal) ? """{"bugsBehavior":"asTasks","workingDays":[]}"""
+                : path.Contains("workitemtypecategories/Microsoft.BugCategory", StringComparison.Ordinal) ? """{"workItemTypes":[{"name":"Bug"}]}"""
+                : path.Contains("workitemtypes?", StringComparison.Ordinal) ? """{"value":[{"name":"User Story"},{"name":"Feature"},{"name":"Epic"},{"name":"Task"},{"name":"Bug"}]}"""
                 : path.Contains("/backlogs/", StringComparison.Ordinal) ? JsonSerializer.Serialize(new { workItems = BacklogIds.Select(id => new { target = new { id } }) })
                 : path.Contains("/backlogs?", StringComparison.Ordinal) ? BacklogLevels ?? """{"value":[{"id":"Microsoft.FeatureCategory","name":"Features","type":"portfolio","workItemTypes":[{"name":"Feature"}]},{"id":"Microsoft.RequirementCategory","name":"Stories","type":"requirement","workItemTypes":[{"name":"User Story"},{"name":"Bug"}]}]}"""
                 : path.Contains("/states?", StringComparison.Ordinal) ? WorkflowStates ?? """{"value":[{"name":"Active","category":"InProgress"},{"name":"Done","category":"Completed"},{"name":"Removed","category":"Removed"}]}"""
@@ -709,11 +1133,15 @@ public sealed class AzureDevOpsTests {
         public bool Disposed;
         public HttpStatusCode Status = HttpStatusCode.OK;
         public string? Payload;
+        public Func<HttpRequestMessage, HttpResponseMessage>? Response;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
             cancellationToken.ThrowIfCancellationRequested();
             Authorization = request.Headers.Authorization?.ToString();
             MediaType = request.Content?.Headers.ContentType?.MediaType;
             Address = request.RequestUri?.AbsoluteUri;
+            if (Response is not null) {
+                return Task.FromResult(Response(request));
+            }
             var response = new HttpResponseMessage(Status) { Content = new StringContent(Payload ?? (Status == HttpStatusCode.OK ? "{}" : "server-secret")) };
             response.Headers.Add("x-ms-continuationtoken", "opaque");
             return Task.FromResult(response);

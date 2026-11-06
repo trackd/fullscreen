@@ -17,6 +17,81 @@ namespace fullscreen.Tests;
 [TestClass]
 public sealed partial class SixelTests {
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    [DoNotParallelize]
+    public async Task ChartsInsideDialogsRemainVisibleWhileLaterDialogsMaskTheirPixels(bool earlierDialog) {
+        var metrics = new TerminalPixelMetrics(400, 288, 4, 12, 100, 24);
+        using var backend = new InMemoryTerminalBackend(new TerminalSize(100, 24));
+        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        await using var app = new TerminalApp(new XenoAtom.Terminal.UI.Controls.TextBlock("Background"), session.Instance,
+            new TerminalAppOptions { HostKind = TerminalHostKind.Fullscreen });
+        typeof(TerminalApp).GetMethod("BeginRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(app, null);
+        long time = Stopwatch.GetTimestamp();
+        void Tick() {
+            time += Stopwatch.Frequency / 10;
+            typeof(TerminalApp).GetMethod("Tick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(app, [time]);
+        }
+        try {
+            Tick();
+            var behind = new XenoAtom.Terminal.UI.Controls.Dialog(new XenoAtom.Terminal.UI.Controls.TextBlock("Behind")) { Width = 100, Height = 24 };
+            if (earlierDialog) {
+                behind.Show();
+                Tick();
+            }
+            var chart = new Chart([10, 30, 20]) { GraphKind = GraphKind.Bars, Maximum = 100 };
+            var dialog = new XenoAtom.Terminal.UI.Controls.Dialog(chart) { Width = 90, Height = 20 };
+            dialog.Show();
+            Tick();
+            Tick();
+            var bounds = chart.PlotBounds;
+            var commands = new GraphicsCommandBuffer {
+                new GraphicsCommand(1, bounds, bounds, TerminalGraphicContent.FromObject(chart), ImageScaleMode.Stretch, false, 0, true, null)
+            };
+            var context = (TerminalGraphicsPresentContext)Activator.CreateInstance(typeof(TerminalGraphicsPresentContext), BindingFlags.Instance | BindingFlags.NonPublic,
+                null, [app, session.Instance, TerminalHostKind.Fullscreen, new Rectangle(0, 0, 100, 24), 0, default(Rectangle), TerminalGraphicsTextFrameKind.None], null)!;
+            using var presenter = new SixelChartPresenter(TerminalGraphicsCapabilities.None, metrics);
+            using var output = new StringWriter();
+            var writer = new AnsiWriter(output);
+            await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+            byte[] Pixels() {
+                string text = output.ToString();
+                int start = text.IndexOf("\x1bP", StringComparison.Ordinal), end = text.IndexOf("\x1b\\", start, StringComparison.Ordinal) + 2;
+                return Decode(text[start..end]).Pixels;
+            }
+            Assert.IsTrue(Pixels().Any(pixel => pixel > 0), "A chart's containing dialog must not mask its own raster.");
+            chart.Values[1] = 5;
+            output.GetStringBuilder().Clear();
+            await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+            Assert.MatchesRegex(@"\x1b\[\d+X", output.ToString(), "Changed transparent charts must erase old ink inside their containing dialog.");
+            var cover = new XenoAtom.Terminal.UI.Controls.Dialog(new XenoAtom.Terminal.UI.Controls.TextBlock("Cover")) { Width = 100, Height = 24 };
+            cover.Show();
+            Tick();
+            Tick();
+            Assert.IsTrue(presenter.HasPendingOutput(commands, context));
+            output.GetStringBuilder().Clear();
+            await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+            Assert.IsTrue(Pixels().All(pixel => pixel == 0), "A later dialog must still mask the underlying chart.");
+            Assert.DoesNotMatchRegex(@"\x1b\[\d+X", output.ToString(), "The overlying dialog must be protected from erasure.");
+            cover.Close();
+            Tick();
+            output.GetStringBuilder().Clear();
+            await presenter.PresentAsync(commands, context, writer, CancellationToken.None);
+            Assert.IsTrue(Pixels().Any(pixel => pixel > 0));
+            output.GetStringBuilder().Clear();
+            await presenter.PresentAsync(new GraphicsCommandBuffer(), context, writer, CancellationToken.None);
+            Assert.MatchesRegex(@"\x1b\[\d+X", output.ToString(), "Removed charts must erase their old ink without masking their own dialog.");
+            dialog.Close();
+            if (earlierDialog) {
+                behind.Close();
+            }
+        }
+        finally {
+            typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(app, null);
+        }
+    }
+
+    [TestMethod]
     [DataRow(GraphKind.Bars)]
     [DataRow(GraphKind.Area)]
     [DataRow(GraphKind.Heatmap)]
@@ -570,7 +645,7 @@ public sealed partial class SixelTests {
                 plot.Draw(history, history.Latest, 100, size.Item1, size.Item2, ink, Color.Rgb(13, 20, 32), kind, 5);
                 var actual = Decode(encoder.EncodePlot(plot));
                 CollectionAssert.AreEqual(plot.Pixels.ToArray(), actual.Pixels, $"{kind}: {size}");
-                var expectedColor = (ChartRadial.IsRadial(kind) || kind == GraphKind.Waterfall ? plot.Palette[6] : ink).ToRgb();
+                var expectedColor = (ChartRadial.IsRadial(kind) || kind is GraphKind.Waterfall or GraphKind.Bars or GraphKind.HorizontalBars ? plot.Palette[6] : ink).ToRgb();
                 Assert.AreEqual(((expectedColor.R * 100 + 127) / 255, (expectedColor.G * 100 + 127) / 255, (expectedColor.B * 100 + 127) / 255), actual.Colors[6]);
             }
         }

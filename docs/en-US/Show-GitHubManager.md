@@ -32,23 +32,18 @@ fgh
 
 ## DESCRIPTION
 
-Opens GitHub Issues, Pull requests, Runs and Workflows for a repository in a
-fullscreen terminal app. Tabs load when first opened. Issues show their body and
-comments; pull requests show diffs, checks and reviews. Runs, jobs and steps show
-a green check, red cross or progress marker for their status. Workflows show their
-recent runs, and run details list jobs, steps, durations, pending deployments and
-artifacts with links that open in the browser.
+Browse repository issues, open pull requests, workflow runs and workflows in a
+fullscreen terminal app. Inspect discussions, diffs, checks and reviews, with
+status colors matching GitHub conventions.
 
-Press A or right-click for actions: comment on issues, approve, request changes
-or comment on pull requests, view failed-step logs, rerun failed jobs, cancel
-runs, approve pending deployments and dispatch a workflow on a chosen branch or
-tag. Changes are confirmed before they are sent. A review is rejected if the pull
-request changed after you opened it, and GitHub permissions and protection rules
-still apply.
+Enter opens details or a run monitor with jobs, steps, published logs and artifact
+downloads. GitHub normally makes job logs available after a job completes; this
+is not a live console stream. A or right-click opens actions such as commenting,
+reviewing, rerunning jobs and dispatching workflows. Changes require confirmation
+and remain subject to GitHub permissions and protection rules.
 
-Requires the GitHub CLI (gh), already signed in with gh auth login; the app does
-not sign in for you. The cmdlet writes no pipeline output. Press F12 to toggle
-the diagnostic overlay.
+Requires the GitHub CLI (gh), already signed in with gh auth login. The command
+does not sign in for you and produces no pipeline output.
 
 ## EXAMPLES
 
@@ -242,6 +237,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

@@ -48,6 +48,9 @@ internal readonly struct ChartColumns {
         int start = Math.Clamp(Center(x, range, width) - span / 2, 0, Math.Max(0, width - span));
         int from = start + slot * span / _columns;
         int to = start + (slot + 1) * span / _columns;
+        int inset = _columns > 1 ? Math.Min(Math.Max(0, (to - from - 1) / 2), Math.Max(1, (to - from) / 10)) : 0;
+        from += inset;
+        to -= inset;
         return new(from, 0, Math.Max(1, to - from), 1);
     }
 }

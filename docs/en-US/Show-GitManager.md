@@ -31,21 +31,16 @@ fgit
 
 ## DESCRIPTION
 
-Tabs show Changes, Staged, History, Branches, Remotes, Worktrees, Stashes and Tags.
-Local/remote branches show tracking, ahead/behind and checkout paths; actions create/switch/rename/delete merged branches, set upstreams, compare, merge or rebase.
-Worktrees can be added on existing/new branches or detached, opened in this TUI, moved, locked/unlocked and removed when Git permits clean removal.
-Stashes support save/apply/pop/drop; tags support create/delete local/push selected.
-History supports cherry-pick/revert, with continue/abort actions for in-progress operations.
-Stage/unstage selected files or all changes, commit, fetch, fast-forward-only pull and explicit upstream push.
-Mutations require in-app confirmation and stale targets are checked.
-ReadOnly retains worktree navigation.
-Git hooks/signing apply; continuation uses existing messages without an editor.
-Enter expands previews, Backspace returns, Tab or numbers switch views, slash filters, F5 refreshes, brackets page history, and A/right-click opens actions.
-No pipeline objects are emitted.
+Browse changes, history, branches, remotes, worktrees, stashes and tags in a
+fullscreen terminal app. Stage and commit changes, manage branches and worktrees,
+and perform common Git operations with in-app confirmation. Git hooks, signing
+and permissions still apply.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+File statuses, branch tracking and diff additions/deletions use semantic colors.
+
+Enter expands previews, Backspace returns, Tab switches views, / filters and
+F5 refreshes. A or right-click opens available actions. Produces no pipeline
+output.
 
 ## EXAMPLES
 
@@ -192,6 +187,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

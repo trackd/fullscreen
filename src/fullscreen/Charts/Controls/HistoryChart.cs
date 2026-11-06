@@ -33,6 +33,16 @@ public sealed partial class HistoryChart : Themes.ThemedSurface {
         get => _trend.ShowLegend;
         set => _trend.ShowLegend = value;
     }
+    /// <summary>Gets or sets whether the history chart allows hover tooltips. Defaults to true.</summary>
+    public bool ShowTooltips {
+        get => _trend.ShowTooltips;
+        set => _trend.ShowTooltips = value;
+    }
+    /// <summary>Gets or sets whether interactive zoom and viewport navigation are enabled. Defaults to false.</summary>
+    public bool EnableZoom {
+        get => _trend.EnableZoom;
+        set => _trend.EnableZoom = value;
+    }
     /// <summary>Gets or sets whether the history chart shows supported coordinate axes.</summary>
     public bool ShowAxes {
         get => _trend.ShowAxes;
@@ -57,7 +67,8 @@ public sealed partial class HistoryChart : Themes.ThemedSurface {
     /// <inheritdoc/>
     protected override SizeHints MeasureCore(in LayoutConstraints constraints) {
         _ = Revision;
-        _trend.PixelInk = Palette.Accent;
+        _trend.PixelInk = Palette.ChartBlue;
+        _trend.Palette = Palette;
         _trend.PixelBackground = Palette.Background;
         _trend.Update(
             History,
@@ -97,7 +108,7 @@ public sealed partial class HistoryChart : Themes.ThemedSurface {
             $"values 0–{(Maximum > 0 ? Maximum : History.Scale):G4} · {(GraphKind == GraphKind.Histogram ? "frequency, auto-scaled" : "quartiles · median · 1.5 IQR whiskers")}",
             out length
         )) {
-            buffer.WriteText(Bounds.X, Bounds.Bottom - 1, label[..Math.Min(length, Bounds.Width)], Palette.Muted);
+            buffer.WriteText(Bounds.X, Bounds.Bottom - 1, label[..Math.Min(length, Bounds.Width)], Palette.Body.WithForeground(Palette.ChartLabel));
         }
     }
 }

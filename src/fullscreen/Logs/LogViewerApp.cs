@@ -51,8 +51,10 @@ public sealed class LogViewerApp : IFullscreenApp {
         Model.Include = Include;
         Surface = new(Model, "≋ LOGS") {
             PreferredWidths = [25, 13, 24, 0],
+            ColumnFiltering = true,
             ExtraHelp = "F follow · L severity · B bookmarks · / text, regex:pattern or wildcard:*pattern*"
         };
+        UpdateCommands();
         Surface.RowAccent = row => ((LogEntry)row.Original).Level switch {
             LogLevel.Error or LogLevel.Critical => Surface.Palette.Error,
             LogLevel.Warning => Surface.Palette.Warning,
@@ -88,8 +90,16 @@ public sealed class LogViewerApp : IFullscreenApp {
     public void SetMinimumLevel(LogLevel level) {
         MinimumLevel = level;
         Model.Rebuild();
+        UpdateCommands();
         Surface.Refresh();
     }
+
+    private void UpdateCommands() =>
+        Surface.ToolbarCommands = [
+            ("Filter column", Surface.ShowColumnFilterMenu),
+            ("L Severity: " + MinimumLevel + "+", Levels),
+            ("/ Search", Surface.BeginFilter)
+        ];
 
     private void Levels() {
         var items = Enum.GetValues<LogLevel>().Where(level => level != LogLevel.Unknown).Select(level => new MenuItem(level +

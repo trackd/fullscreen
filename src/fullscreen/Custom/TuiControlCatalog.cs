@@ -203,6 +203,8 @@ public static class TuiControlCatalog {
                 "Maximum",
                 "GraphKind",
                 "ShowLegend",
+                "ShowTooltips",
+                "EnableZoom",
                 "ShowAxes",
                 "ReversalAmount",
                 "FrameIdProperty",

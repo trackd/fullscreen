@@ -33,7 +33,8 @@ internal sealed class SixelChartPresenter(
         string? ImagePayload,
         SixelPayload? ChartPayload,
         Rectangle[] Windows,
-        Color? Background
+        Color? Background,
+        Visual? Window
     ) {
         internal ReadOnlySpan<char> Payload => ChartPayload is { } chart ? chart.Span : ImagePayload.AsSpan();
     }
@@ -42,6 +43,7 @@ internal sealed class SixelChartPresenter(
     private readonly SixelEncoder _encoder = new();
     private byte[] _cropped = [];
     private readonly List<Rectangle> _windows = [];
+    private readonly List<(Visual? Owner, Rectangle Bounds)> _overlays = [];
     public TerminalGraphicsCapabilities Capabilities => capabilities;
 
     public bool CanPresent(TerminalGraphicsCapabilities detected) =>
@@ -51,26 +53,52 @@ internal sealed class SixelChartPresenter(
         && !detected.IsMultiplexer
         && detected.SupportedProtocols.Contains(TerminalGraphicsProtocol.Sixel);
     private void RefreshWindows(TerminalGraphicsPresentContext context) {
-        _windows.Clear();
+        _overlays.Clear();
         var debug = TerminalOverlayBounds.Debug(context.App);
         if (debug.Width > 0 && debug.Height > 0) {
-            _windows.Add(debug);
+            _overlays.Add((null, debug));
         }
 
         foreach (var visual in context.App.Root.EnumerateVisualsDepthFirst()) {
             if (visual is Hosting.FullscreenChrome chrome) {
-                _windows.Add(chrome.CloseBounds);
+                _overlays.Add((null, chrome.CloseBounds));
             }
 
             if (visual is Chart chart && visual.IsVisible) {
-                _windows.AddRange(chart.AnnotationBounds);
+                foreach (var bounds in chart.AnnotationBounds) {
+                    _overlays.Add((null, bounds));
+                }
             }
 
             if (visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)) {
-                // Popup is a viewport-sized input host; only its content covers pixels.
-                _windows.Add(visual is Popup { Content: { } content } ? content.Bounds : visual.Bounds);
+                _overlays.Add((visual, TerminalOverlayBounds.Window(visual)));
             }
         }
+        SelectWindows(null);
+    }
+
+    private Visual? SelectWindows(Visual? source) {
+        _windows.Clear();
+        int containingWindow = -1;
+        for (int index = 0; index < _overlays.Count; index++) {
+            var (owner, _) = _overlays[index];
+            if (owner is not null) {
+                for (var ancestor = source; ancestor is not null; ancestor = ancestor.Parent) {
+                    if (ReferenceEquals(ancestor, owner)) {
+                        containingWindow = index;
+                        break;
+                    }
+                }
+            }
+        }
+        for (int index = 0; index < _overlays.Count; index++) {
+            var (owner, bounds) = _overlays[index];
+            // Only windows above the source's containing window may cover it.
+            if (owner is null || index > containingWindow) {
+                _windows.Add(bounds);
+            }
+        }
+        return containingWindow < 0 ? null : _overlays[containingWindow].Owner;
     }
 
     private bool Covered(Rectangle clip) {
@@ -101,6 +129,7 @@ internal sealed class SixelChartPresenter(
             if (chart is null && image is null) {
                 continue;
             }
+            var containingWindow = SelectWindows(command.Content.Source as Visual);
 
             var clip = Intersect(
                 Intersect(command.CellBounds, command.ClipBounds),
@@ -118,6 +147,7 @@ internal sealed class SixelChartPresenter(
                 || previous.Clip != clip
                 || previous.Key != key
                 || !SameWindows(previous)
+                || !ReferenceEquals(previous.Window, containingWindow)
                 || image is not null && !ReferenceEquals(previous.ImagePayload, image)
                 || previous.CellWidth != pixelMetrics.CellPixelWidth
                 || previous.CellHeight != pixelMetrics.CellPixelHeight
@@ -187,6 +217,7 @@ internal sealed class SixelChartPresenter(
             if (chart is null && image is null) {
                 continue;
             }
+            var containingWindow = SelectWindows(command.Content.Source as Visual);
 
             var key = chart?.PixelKey ?? default;
             var bounds = command.CellBounds;
@@ -210,6 +241,7 @@ internal sealed class SixelChartPresenter(
                 && previous.Clip == clip
                 && previous.Key == key
                 && SameWindows(previous)
+                && ReferenceEquals(previous.Window, containingWindow)
                 && (image is null || ReferenceEquals(previous.ImagePayload, image))
                 && previous.CellWidth == cellWidth
                 && previous.CellHeight == cellHeight) {
@@ -226,7 +258,7 @@ internal sealed class SixelChartPresenter(
                     LastCacheMissCount = _diagnostics.LastCacheMissCount + 1
                 };
                 if (image is not null) {
-                    next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, image, null, [.. _windows], null);
+                    next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, image, null, [.. _windows], null, containingWindow);
                     continue;
                 }
 
@@ -280,7 +312,7 @@ internal sealed class SixelChartPresenter(
                 };
             }
 
-            next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, null, payload, [.. _windows], key.Background);
+            next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, null, payload, [.. _windows], key.Background, containingWindow);
         }
 
         writer.SaveCursor();
@@ -292,6 +324,7 @@ internal sealed class SixelChartPresenter(
                 }
 
                 SetBackground(writer, previous.Background);
+                SelectWindows(previous.Window);
                 Erase(writer, previous.Clip, _windows, context.ViewportBounds);
                 cleared = true;
             }
@@ -309,6 +342,7 @@ internal sealed class SixelChartPresenter(
                 // terminal. Erase cells, rather than encoding background pixels.
                 if (changed && old is not null && old.Clip == placement.Clip) {
                     SetBackground(writer, placement.Background);
+                    SelectWindows(placement.Window);
                     Erase(writer, placement.Clip, _windows, context.ViewportBounds);
                 }
 

@@ -604,6 +604,10 @@ public sealed class TuiNode {
     public string GraphKind { get; set; } = "Area";
     /// <summary>Gets or sets whether a chart shows its wrapping, clickable series legend.</summary>
     public bool ShowLegend { get; set; }
+    /// <summary>Gets or sets whether a chart shows hover tooltips. Defaults to true.</summary>
+    public bool ShowTooltips { get; set; } = true;
+    /// <summary>Gets or sets whether wheel zoom and keyboard chart viewport navigation are enabled.</summary>
+    public bool EnableZoom { get; set; }
     /// <summary>Gets or sets whether a chart shows supported coordinate axes. Defaults to false.</summary>
     public bool ShowAxes { get; set; }
     /// <summary>Gets or sets whether the checkable control is selected.</summary>

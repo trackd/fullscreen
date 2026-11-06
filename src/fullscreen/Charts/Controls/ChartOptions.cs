@@ -194,6 +194,10 @@ public sealed record ChartSettings {
     public bool ShowAxes { get; init; }
     /// <summary>Gets or sets whether the series legend is displayed.</summary>
     public bool ShowLegend { get; init; }
+    /// <summary>Gets or sets whether hovering shows point details. Defaults to true.</summary>
+    public bool ShowTooltips { get; init; } = true;
+    /// <summary>Gets or sets whether interactive wheel zoom and keyboard viewport navigation are enabled.</summary>
+    public bool EnableZoom { get; init; }
     /// <summary>Gets or sets the horizontal axis presentation settings.</summary>
     public ChartAxis XAxis { get; init; } = new();
     /// <summary>Gets or sets the vertical axis presentation settings.</summary>

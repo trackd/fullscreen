@@ -35,6 +35,8 @@ function Remove-BuiltinParameterHelp {
     }
 }
 
+task Bootstrap {}
+
 task Clean {
     if (Test-Path -LiteralPath $folders.OutputPath) {
         if ((Get-Item -LiteralPath $folders.OutputPath).LinkType) { throw 'Build output must not be a directory link.' }
@@ -78,9 +80,6 @@ task ModuleFiles {
 }
 
 task GenerateHelp -If (-not $SkipHelp.IsPresent) {
-    if (-not (Get-Module -ListAvailable -Name Microsoft.PowerShell.PlatyPS)) {
-        Install-Module -Name Microsoft.PowerShell.PlatyPS -Scope CurrentUser -Force -AllowClobber
-    }
     Import-Module Microsoft.PowerShell.PlatyPS -ErrorAction Stop
 
     $helpOutputPath = Join-Path $folders.OutputPath 'en-US'
@@ -157,9 +156,6 @@ task DotNetTest -If (-not $SkipTests.IsPresent) {
 }
 
 task UpdateHelp {
-    if (-not (Get-Module -ListAvailable -Name Microsoft.PowerShell.PlatyPS)) {
-        Install-Module -Name Microsoft.PowerShell.PlatyPS -Scope CurrentUser -Force -AllowClobber
-    }
     Import-Module Microsoft.PowerShell.PlatyPS -ErrorAction Stop
     Import-Module -Name (Join-Path $folders.OutputPath "$moduleName.psd1") -Force -ErrorAction Stop
     foreach ($file in Get-ChildItem -LiteralPath $folders.DocsPath -Filter '*.md' -File) {

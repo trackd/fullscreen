@@ -38,6 +38,9 @@ public sealed record CommandResult(int ExitCode, string Output, string Error, bo
 
 /// <summary>Defines cancellable child-process execution for developer backends.</summary>
 public interface ICommandRunner {
+    /// <summary>Copies binary stdout into a new file without overwriting existing data.</summary>
+    Task DownloadAsync(CommandRequest request, string destination, CancellationToken token) =>
+        throw new NotSupportedException("This command runner does not support binary downloads.");
     /// <summary>Executes a child-process request and captures its output.</summary>
     /// <param name="request">The operation request to execute.</param>
     /// <param name="token">The token used to cancel the operation.</param>
@@ -47,6 +50,65 @@ public interface ICommandRunner {
 
 /// <summary>Argument-list invocation, bounded output, no shell, prompt, pager or terminal inheritance.</summary>
 public sealed class CommandRunner : ICommandRunner {
+    /// <inheritdoc/>
+    public async Task DownloadAsync(CommandRequest request, string destination, CancellationToken token) {
+        token.ThrowIfCancellationRequested();
+        var start = new ProcessStartInfo(request.FileName) {
+            WorkingDirectory = request.Directory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true
+        };
+        foreach (string argument in request.Arguments) {
+            start.ArgumentList.Add(argument);
+        }
+        start.Environment["GH_PROMPT_DISABLED"] = "1";
+        start.Environment["GH_PAGER"] = "cat";
+        start.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        start.Environment["GCM_INTERACTIVE"] = "never";
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(request.TimeoutSeconds));
+        using var process = new Process { StartInfo = start };
+        try {
+            if (!process.Start()) {
+                throw new InvalidOperationException("Could not start " + request.FileName);
+            }
+        }
+        catch (System.ComponentModel.Win32Exception error) {
+            throw new InvalidOperationException("Install " + request.FileName + " and make it available on PATH.", error);
+        }
+        process.StandardInput.Close();
+        var errors = new Capture(process.StandardError, timeout.Token);
+        string temporary = destination + "." + Guid.NewGuid().ToString("N") + ".partial";
+        try {
+            await PipelineFiles.CopyNewAsync(process.StandardOutput.BaseStream, temporary, timeout.Token).ConfigureAwait(false);
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            await errors.Reading.WaitAsync(timeout.Token).ConfigureAwait(false);
+            if (process.ExitCode != 0) {
+                throw new InvalidOperationException("Artifact download failed: " + errors.Text);
+            }
+            File.Move(temporary, destination, false);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) {
+            throw new TimeoutException($"Artifact download timed out after {request.TimeoutSeconds}s.");
+        }
+        finally {
+            try {
+                if (!process.HasExited) {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (InvalidOperationException) {
+                // The process may exit between the status check and cancellation.
+            }
+            timeout.Cancel();
+            await DrainAfterStop(process, Task.CompletedTask, errors.Reading).ConfigureAwait(false);
+            File.Delete(temporary);
+        }
+    }
+
     /// <summary>Executes a cancellable child process and captures both output streams.</summary>
     /// <param name="request">The operation request to execute.</param>
     /// <param name="token">The token used to cancel the operation.</param>

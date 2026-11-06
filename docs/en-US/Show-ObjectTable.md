@@ -33,10 +33,11 @@ fobject
 
 ## DESCRIPTION
 
-Collects pipeline input and opens it in an interactive table with three tabs.
-Formatted uses the object's normal PowerShell table formatting, Expanded shows
-every readable property and lets you drill into nested objects and arrays, and
-JSON shows a highlighted snapshot of the current object. Circular references,
+Collects pipeline input and opens it in an interactive table.
+Formatted uses the object's normal PowerShell table formatting. Inspect shows
+the selected object's property kinds, short types, values and highlighted method declarations,
+or collection items and dictionary entries. JSON shows a highlighted snapshot of the current object.
+Browsing methods never invokes them. Circular references,
 depth limits and failing properties are marked rather than causing errors. Switch
 tabs with Tab, Shift+Tab, 1-3 or the tab headers.
 
@@ -45,9 +46,10 @@ the parent with its selection, filter and sort restored. Filter with / using
 plain text, wildcard: or regex: patterns; sort by clicking a column or with S,
 and reverse with R. G groups, C chooses columns, Space marks rows, and M, F10 or
 right-click opens the menu. In JSON, / searches and Enter or N finds the next
-match. Values are colored by type, and ANSI colors in displayed values are kept.
+match. Drag or use Shift+arrows to select JSON text, Ctrl+A selects all, and Ctrl+C copies.
+Values are colored by type, and ANSI colors in displayed values are kept.
 
-With PassThru, Enter returns the marked objects or the current selection; Q
+With PassThru, Enter in the root Formatted table returns the marked objects or the current selection; Q
 cancels. Displaying and serializing objects runs their property getters, which can
 execute custom code.
 
@@ -85,9 +87,9 @@ Show-ObjectTable -InputObject $items -Property Name,Environment,Count -GroupBy E
 
 ### Example 4: Explore nested arrays and properties
 
-Open a row, then its Services member. The array shows Name and Port columns;
+Open the Services property in Inspect. The array shows Name and Port columns;
 filter with /, click a header to sort, and open an individual service. Switch
-between Expanded and JSON without leaving that node. Back returns one level.
+between Inspect and JSON without leaving that node. Back returns one level.
 
 ```powershell
 [pscustomobject]@{
@@ -96,7 +98,7 @@ between Expanded and JSON without leaving that node. Back returns one level.
         [pscustomobject]@{ Name = 'api'; Port = 443; Health = @{ Ready = $true } }
         [pscustomobject]@{ Name = 'worker'; Port = 8080; Health = @{ Ready = $false } }
     )
-} | fobject -View Expanded
+} | fobject -View Inspect
 ```
 
 ## PARAMETERS
@@ -284,8 +286,8 @@ HelpMessage: ''
 
 ### -PassThru
 
-Return original marked objects, or the current object, when Enter accepts at a root
-table or the JSON tab. Enter inside a nested property inspection does not accept.
+Return original marked objects, or the current object, when Enter accepts in the root
+Formatted table. Enter inside Inspect or JSON does not accept.
 Q or Escape cancels with no output.
 
 ```yaml
@@ -307,10 +309,10 @@ HelpMessage: ''
 
 ### -Property
 
-Literal property names to display in both table tabs, in order.
+Literal property names for the Formatted table, in order.
 Overrides automatic display metadata.
 Missing properties produce empty cells.
-Without Property, Formatted uses display metadata and Expanded uses the union of up to 256 readable properties.
+Without Property, Formatted uses display metadata.
 
 ```yaml
 Type: System.String[]
@@ -332,8 +334,8 @@ HelpMessage: ''
 ### -SortBy
 
 Initial displayed column label for typed sorting.
-In Formatted this can be a custom label such as CPU(s); in Expanded it is a literal property name.
-With Property, both use the supplied names.
+In Formatted this can be a custom label such as CPU(s).
+With Property, use the supplied names.
 Raw numeric and timestamp values sort by type.
 
 ```yaml
@@ -359,6 +361,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.
@@ -403,7 +408,7 @@ HelpMessage: ''
 
 ### -View
 
-Initial tab: Formatted (default), Expanded or Json. Properties is accepted as another name for Expanded.
+Initial tab: Formatted (default), Inspect or Json.
 Unopened tabs perform no metadata lookup, getter evaluation or serialization.
 
 ```yaml

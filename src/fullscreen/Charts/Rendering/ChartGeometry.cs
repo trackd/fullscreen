@@ -108,7 +108,8 @@ internal sealed class ChartGeometry {
             int x1,
             int y1,
             int series,
-            byte shade = 0
+            byte shade = 0,
+            int point = -1
         ) =>
             Primitives.Add(new(
                 ChartPrimitiveKind.Rectangle,
@@ -117,11 +118,13 @@ internal sealed class ChartGeometry {
                 Math.Min(width - 1, Math.Max(x0, x1)),
                 Math.Min(height - 1, Math.Max(y0, y1)),
                 series,
-                shade
+                shade,
+                Point: point
             ));
         for (int seriesIndex = 0; !ChartGrid.Supports(kind) && !ChartStackedArea.Supports(kind) && seriesIndex < data.Length; seriesIndex++) {
             var series = data[seriesIndex];
-            foreach (var point in series.Span) {
+            for (int position = 0; position < series.Count; position++) {
+                var point = series.Points[position];
                 if (point.Y is not { } value) {
                     continue;
                 }
@@ -131,7 +134,8 @@ internal sealed class ChartGeometry {
                     int center = ChartMath.BarCenter(point.X, 0, Math.Max(0, series.Count - 1), height, series.Count);
                     int top = Math.Clamp(center - span / 2, 0, height - span);
                     int from = top + seriesIndex * span / Math.Max(1, data.Length), to = top + (seriesIndex + 1) * span / Math.Max(1, data.Length) - 1;
-                    Rect(X(0), from, X(value), Math.Max(from, to), seriesIndex);
+                    int inset = data.Length > 1 ? Math.Min(Math.Max(0, (to - from) / 2), Math.Max(1, (to - from + 1) / 8)) : 0;
+                    Rect(X(0), from + inset, X(value), Math.Max(from + inset, to - inset), seriesIndex, point: position);
                 }
                 else if (kind == GraphKind.StackedBars) {
                     _stacks.TryGetValue(point.X, out var stack);

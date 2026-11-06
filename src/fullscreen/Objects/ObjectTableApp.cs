@@ -204,7 +204,11 @@ public sealed record ObjectTableOptions {
 public sealed partial class ObjectTableApp : IFullscreenApp {
     private readonly IReadOnlyList<PSObject> _objects;
     private readonly ObjectTableOptions _options;
-    private readonly TableModel?[] _models = new TableModel?[2];
+    private TableModel? _formatted;
+    private NodeState? _inspection;
+    private long? _inspectionId;
+    private Themes.ThemePalette? _memberPalette;
+    private int _memberWidth;
     private readonly HashSet<long> _marked = [];
     private readonly Dictionary<long, string> _json = [];
     private readonly Queue<long> _jsonOrder = new();
@@ -223,7 +227,7 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
     /// <param name="view">The resource or monitor view index.</param>
     /// <returns>True when the requested view is available.</returns>
     public bool IsLoaded(ObjectView view) =>
-        view == ObjectView.Json ? _json.Count > 0 : _models[(int)view] is not null;
+        view == ObjectView.Json ? _json.Count > 0 : view == ObjectView.Inspect ? _inspection is not null : _formatted is not null;
     /// <summary>Gets the number of cached JSON object representations.</summary>
     public int CachedJsonCount => _json.Count;
 
@@ -255,7 +259,7 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
         _objects = objects;
         _options = options;
         Surface = new(new TableModel(["Value"]), options.Title) {
-            Tabs = ["Formatted", "Expanded", "JSON"],
+            Tabs = ["Formatted", "Inspect", "JSON"],
             ExtraHelp = "Tab / 1–3 views · M/F10 menu · Backspace/Esc back · G group"
         };
         SwitchView(options.View);
@@ -303,7 +307,22 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
         }
 
         SaveSelection();
-        if (view == ObjectView.Json) {
+        if (view == ObjectView.Inspect) {
+            _selected ??= _objects.Count > 0 ? 0 : null;
+            if (_selected is { } id && id < _objects.Count) {
+                if (_inspection is null || _inspectionId != id) {
+                    _inspection = new NodeState(_objects[(int)id], $"$[{id}]");
+                    _inspectionId = id;
+                }
+                ShowInspection(_inspection);
+            }
+            else {
+                Surface.Model = new TableModel(["Kind", "Type", "Name", "Value / signature"]);
+                Surface.SetDocument(null);
+                Surface.ResetColumns();
+            }
+        }
+        else if (view == ObjectView.Json) {
             // Opening JSON directly does not materialize either table.
             if (_root is null) {
                 _selected ??= _objects.Count > 0 ? 0 : null;
@@ -332,7 +351,7 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
             Surface.Status = $"Selected object {(_selected is { } index ? index + 1 : 0)}/{_objects.Count} · bounded JSON snapshot · depth {_options.JsonDepth} · cycles marked";
         }
         else {
-            var model = _models[(int)view] ?? CreateModel(view);
+            var model = _formatted ?? CreateModel(view);
             model.Marked.Clear();
             model.Marked.UnionWith(_marked);
             if (_selected is { } id) {
@@ -342,17 +361,17 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
                 }
             }
 
-            _models[(int)view] = model;
+            _formatted = model;
             _root = model;
             Surface.Model = model;
             Surface.PreferredWidths = model.PreferredWidths;
             Surface.SetDocument(null);
             Surface.ResetColumns();
-            Surface.Status = view == ObjectView.Formatted ? "PowerShell format view · loaded format files, display labels and calculated values" : "All readable object properties · snapshot on first visit";
+            Surface.Status = "PowerShell format view · loaded format files, display labels and calculated values";
         }
 
         _parents.Clear();
-        Surface.EnterAccepts = _options.PassThru;
+        Surface.EnterAccepts = _options.PassThru && view == ObjectView.Formatted;
         View = view;
         Surface.ActiveTab = (int)view;
         UpdateNavigation();
@@ -360,7 +379,12 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
     }
 
     private TableModel CreateModel(ObjectView view) {
-        var model = view == ObjectView.Formatted ? PowerShellObjectViews.Format(_objects, _options.Property) : ObjectSnapshot.Create(_objects, _options.Property);
+        var model = PowerShellObjectViews.Format(_objects, _options.Property);
+        ConfigureModel(model, view);
+        return model;
+    }
+
+    private void ConfigureModel(TableModel model, ObjectView view) {
         if (_options.ExcludeProperty is { } excluded) {
             for (int i = 0; i < model.Columns.Length; i++) {
                 model.Enabled[i] = !excluded.Contains(model.Columns[i], StringComparer.OrdinalIgnoreCase);
@@ -374,7 +398,7 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
         int Find(string name) {
             int index = Array.FindIndex(model.Columns, column => column.Equals(name, StringComparison.OrdinalIgnoreCase));
             if (index < 0 && view == _options.View) {
-                throw new ArgumentException($"Column '{name}' is not available in the {view} view. Use a displayed column label or choose -View Properties.");
+                throw new ArgumentException($"Column '{name}' is not available in the {view} view. Use a displayed column label or select it with -Property.");
             }
 
             return index;
@@ -391,12 +415,56 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
         model.Filter = _options.Filter;
         model.Descending = _options.Descending;
         model.Rebuild();
-        return model;
     }
 
     /// <inheritdoc cref="fullscreen.Hosting.IFullscreenApp.Tick"/>
-    public bool Tick() =>
-        !Surface.ExitRequested;
+    public bool Tick() {
+        if (View == ObjectView.Inspect && (_node ?? _inspection)?.Members == true) {
+            if (!ReferenceEquals(_memberPalette, Surface.Palette)) {
+                ObjectMembers.Style(Surface.Model, Surface.Palette);
+                _memberPalette = Surface.Palette;
+                Surface.Refresh();
+            }
+            if (_memberWidth != Surface.Bounds.Width) {
+                UpdateMemberWidths();
+                Surface.Refresh();
+            }
+        }
+        return !Surface.ExitRequested;
+    }
+
+    private void ShowInspection(NodeState node) {
+        var model = node.Models[1];
+        if (model is null) {
+            model = CreateNodeModel(node, ObjectView.Inspect, ReferenceEquals(node, _inspection) ? _options.Property : null);
+            if (ReferenceEquals(node, _inspection) && _options.View == ObjectView.Inspect) {
+                ConfigureModel(model, ObjectView.Inspect);
+            }
+            node.Models[1] = model;
+        }
+        Surface.Model = model;
+        Surface.PreferredWidths = model.PreferredWidths;
+        Surface.SetDocument(null);
+        Surface.ResetColumns();
+        if (node.Members) {
+            ObjectMembers.Style(model, Surface.Palette);
+            _memberPalette = Surface.Palette;
+            UpdateMemberWidths();
+        }
+    }
+
+    private void UpdateMemberWidths() {
+        _memberWidth = Surface.Bounds.Width;
+        int width = _memberWidth > 0 ? _memberWidth : 120;
+        int Column(int column, int maximum) =>
+            Math.Clamp(Surface.Model.Rows.Select(row => row.Cells[column].Length + 2).DefaultIfEmpty(8).Max(), 8, Math.Max(8, maximum));
+        Surface.PreferredWidths = [
+            Column(0, width / 8),
+            Column(1, width / 6),
+            Column(2, width / 5),
+            0
+        ];
+    }
     /// <inheritdoc/>
     public void Dispose() {
     }

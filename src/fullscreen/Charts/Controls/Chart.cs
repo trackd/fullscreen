@@ -64,6 +64,10 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             _interactive = value;
             Focusable = value;
             IsTabStop = value;
+            _inspection.IsVisible = value && ShowTooltips;
+            if (!value) {
+                ClearInspection();
+            }
         }
     }
 
@@ -78,7 +82,8 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     private long _dataVersion;
     private ChartSeriesStyle _primaryStyle = new();
     private ChartSeriesVersion[] _versions = [];
-    internal bool UseSixel => _exportingPixels || ChartPresenters.Supports(App, GraphKind);
+    internal bool PreferTerminalCells { get; set; }
+    internal bool UseSixel => _exportingPixels || !PreferTerminalCells && ChartPresenters.Supports(App, GraphKind);
     internal Rectangle PlotBounds => ContentPlotBounds;
     internal virtual bool UsesWidthForData => false;
     internal ChartPixelKey PixelKey {
@@ -122,7 +127,12 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         Annotations = new(this, nameof(Annotations));
         HorizontalAlignment = Align.Stretch;
         VerticalAlignment = Align.Stretch;
-        PixelInk = Palette.Accent;
+        _inspection.Content = new InspectionAnchor(this) {
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch
+        };
+        AttachChild(_inspection);
+        PixelInk = Palette.ChartBlue;
         PixelBackground = Palette.Background;
     }
 
@@ -153,7 +163,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
 
     private void UpdateAutomaticColors() {
         if (!_explicitColors) {
-            PixelInk = Palette.Accent;
+            PixelInk = Palette.ChartBlue;
             PixelBackground = Palette.Background;
         }
     }
@@ -350,6 +360,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         _ = SelectedIndex;
         _ = InspectionColumn;
         _ = Title;
+        MeasureInspection(constraints);
         return SizeHints.Flex(new(0, 0), new(48, 8), new(int.MaxValue, int.MaxValue), 1, 1, 1, 1);
     }
 
@@ -391,7 +402,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         if (ChartRadial.IsRadial(GraphKind)) {
             return PickRadial(rendered, x, y);
         }
-        if (ChartGrid.Supports(GraphKind) || ChartStackedArea.Supports(GraphKind)) {
+        if (ChartGrid.Supports(GraphKind) || ChartStackedArea.Supports(GraphKind) || GraphKind == GraphKind.HorizontalBars) {
             return PickGrid(rendered, x, y);
         }
         if (ChartMarket.Supports(GraphKind)) {
@@ -416,6 +427,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
                 continue;
             }
 
+            int boxRow = GraphKind == GraphKind.BoxPlot ? Array.FindIndex(rendered, visible => visible.SourceIndex == seriesIndex || ReferenceEquals(visible, series)) : 0;
             ChartPoint? previous = null;
             foreach (var point in series.Span) {
                 if (!point.Y.HasValue) {
@@ -438,6 +450,9 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
                 double center = GraphKind is GraphKind.Bars or GraphKind.ColumnLine ? columns.Center(px, range, plotBounds.Width) : Fraction(px, range.MinX, range.MaxX) * Math.Max(0, plotBounds.Width - 1);
                 double dx = center - (x - plotBounds.X);
                 double dy = distribution ? 0 : (1 - Fraction(py, range.MinY, range.MaxY)) * Math.Max(0, plotBounds.Height - 1) - (y - plotBounds.Y);
+                if (GraphKind == GraphKind.BoxPlot) {
+                    dy = Math.Min(plotBounds.Height - 1, boxRow * Math.Max(1, plotBounds.Height / rendered.Length) + plotBounds.Height / (rendered.Length * 2)) - (y - plotBounds.Y);
+                }
                 if (GraphKind == GraphKind.ColumnLine) {
                     dy = Math.Round(dy + y - plotBounds.Y) - (y - plotBounds.Y);
                 }
@@ -513,6 +528,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             return;
         }
 
+        ClearInspection();
         if (HandleFeaturePointer(e)) {
             return;
         }
@@ -541,32 +557,11 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     private Color DefaultSeriesColor(int index) =>
         AutomaticSeriesColor(Palette, PixelInk, GraphKind, index);
 
-    internal static bool UsesStackedPalette(GraphKind kind) =>
-        kind is GraphKind.StackedBars or GraphKind.StackedArea or GraphKind.PercentStackedArea or GraphKind.Marimekko;
+    internal static bool UsesCategoryColors(ChartDataSeries[] data, GraphKind kind) =>
+        kind is GraphKind.Bars or GraphKind.HorizontalBars && data.Length == 1 && data[0].Color is null;
 
-    internal static Color AutomaticSeriesColor(Themes.ThemePalette palette, Color ink, GraphKind kind, int index) {
-        if (index >= 0 && UsesStackedPalette(kind)) {
-            var primary = ink.ToRgb();
-            var purple = palette.Purple.ToRgb();
-            bool errorFirst = (primary.R - purple.R) * (primary.R - purple.R)
-                + (primary.G - purple.G) * (primary.G - purple.G)
-                + (primary.B - purple.B) * (primary.B - purple.B) < 10_000;
-            return (index % 5) switch {
-                0 => ink,
-                1 => errorFirst ? palette.Error : palette.Purple,
-                2 => errorFirst ? palette.Purple : palette.Warning,
-                3 => errorFirst ? palette.Warning : palette.Success,
-                _ => errorFirst ? palette.Success : palette.Error
-            };
-        }
-        return (index % 5) switch {
-            0 => ink,
-            1 => palette.Success,
-            2 => palette.Warning,
-            3 => palette.Purple,
-            _ => palette.Error
-        };
-    }
+    internal static Color AutomaticSeriesColor(Themes.ThemePalette palette, Color ink, GraphKind kind, int index) =>
+        index % Themes.ThemePalette.SeriesColorCount == 0 ? ink : palette.SeriesColor(index);
 }
 
 internal readonly record struct ChartPixelKey(

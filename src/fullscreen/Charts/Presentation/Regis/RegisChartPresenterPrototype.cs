@@ -59,7 +59,7 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
             Math.Clamp((int)Math.Round(x * 799d / columns), 0, 799);
         int ScreenY(int y) =>
             Math.Clamp((int)Math.Round(y * 479d / rows), 0, 479);
-        var windows = context.App.Root.EnumerateVisualsDepthFirst().Where(visual => visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)).Select(visual => visual is Popup { Content: { } content } ? content.Bounds : visual.Bounds).ToList();
+        var windows = context.App.Root.EnumerateVisualsDepthFirst().Where(visual => visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)).Select(TerminalOverlayBounds.Window).ToList();
         var debug = TerminalOverlayBounds.Debug(context.App);
         if (debug.Width > 0 && debug.Height > 0) {
             windows.Add(debug);
@@ -102,7 +102,7 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
                     continue;
                 }
 
-                var color = shape.Color ?? (chart.GraphKind == GraphKind.Heatmap ? ChartGrid.HeatColor(chart.PixelKey.Background, chart.PixelKey.Ink, shape.Shade)
+                var color = shape.Color ?? (chart.GraphKind == GraphKind.Heatmap ? chart.PixelKey.Palette.SequentialColor((Math.Clamp(shape.Shade, (byte)2, (byte)6) - 2) / 4f)
                     : shape.Shade > 0 ? Color.Mix(chart.PixelKey.Background, chart.PixelKey.Ink, (shape.Shade - 1) / 5f)
                     : data.ElementAtOrDefault(shape.Series)?.Color ?? Chart.AutomaticSeriesColor(chart.PixelKey.Palette, chart.PixelKey.Ink, chart.GraphKind, shape.Series));
                 var rgb = color.ToRgb();

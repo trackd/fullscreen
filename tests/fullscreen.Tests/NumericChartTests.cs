@@ -28,15 +28,18 @@ public sealed class NumericChartTests {
         int groups = grouped ? 2 : 1;
         int span = Math.Max(1, width / count - 1);
         for (int series = 0; series < groups; series++) {
-            byte color = grouped ? (byte)(2 + series) : (byte)5;
+            byte color = (byte)(2 + series);
             var runs = new List<int>();
             int length = 0;
             for (int x = 0; x <= width; x++) {
-                if (x < width && plot.Pixels[20 * width + x] == color) { length++; }
+                if (x < width && (grouped ? plot.Pixels[20 * width + x] == color : plot.Pixels[20 * width + x] >= 2)) { length++; }
                 else if (length > 0) { runs.Add(length); length = 0; }
             }
             Assert.HasCount(count, runs, "Every observation must keep its complete bar, including both edge groups.");
             int expectedWidth = span * (series + 1) / groups - span * series / groups;
+            if (grouped) {
+                expectedWidth -= 2 * Math.Min(Math.Max(0, (expectedWidth - 1) / 2), Math.Max(1, expectedWidth / 10));
+            }
             CollectionAssert.AreEqual(Enumerable.Repeat(expectedWidth, count).ToArray(), runs.ToArray());
         }
     }

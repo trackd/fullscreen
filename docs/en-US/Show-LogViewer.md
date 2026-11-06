@@ -44,15 +44,12 @@ fields and ISO timestamp prefixes are recognized; entries without a timestamp us
 their arrival time, and malformed JSON and unknown severities stay visible as
 plain entries.
 
-Filter with /, choose a minimum severity with L, bookmark entries with Space and
-show only bookmarks with B, and press Enter or I for the source and raw line. With
-Follow, new lines are read as they are written, and truncated or replaced files
-are detected. F toggles scrolling to new entries; moving the selection stops it.
-Q closes the viewer.
+Search with / or a column filter, choose minimum severity with L, and inspect
+the source and raw entry with Enter. Space bookmarks entries and B shows only
+bookmarks. F toggles following new entries; Q closes the viewer.
 
-Initial reads are limited to the last 8 MiB of each file, and lines longer than
-16 KiB characters are truncated. When old entries are discarded, their bookmarks
-are removed too.
+Supports following growing files and detecting rotation. Reads and retained
+entries are bounded; oversized lines are truncated.
 
 ## EXAMPLES
 
@@ -270,6 +267,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

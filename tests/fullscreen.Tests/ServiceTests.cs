@@ -109,7 +109,7 @@ public sealed class ServiceTests {
         Assert.AreEqual(1, copy.ServiceCount);
     }
     [TestMethod]
-    public void ServicesViewOnlyRequestsServicesAndRendersAtAllSupportedSizes() {
+    public void ServicesViewRequestsServicesAndHistorySummariesAndRendersAtAllSupportedSizes() {
         var surface = new MonitorSurface { View = MonitorView.Services };
         surface.Frame.ServiceCount = 1;
         surface.Frame.Services[0] = new("example", "Example service", "active", "loaded/running", null);
@@ -117,7 +117,8 @@ public sealed class ServiceTests {
             foreach (var size in new[] { (150, 36), (80, 24), (35, 12) }) {
                 surface.Minimal = minimal;
                 VisualSnapshotRenderer.Render(surface, size.Item1, size.Item2);
-                Assert.AreEqual(CollectorMetrics.Services, surface.RequiredMetrics);
+                Assert.AreEqual(CollectorMetrics.Services | CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu,
+                    surface.RequiredMetrics);
                 surface.OpenColumns();
                 Assert.IsFalse(surface.ColumnsOpen);
             }

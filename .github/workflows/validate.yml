@@ -46,7 +46,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Install build dependencies
+      - name: Check PowerShell version
         run: |
           $ErrorActionPreference = 'Stop'
           $manifest = Import-PowerShellDataFile ./module/fullscreen.psd1
@@ -54,7 +54,6 @@ jobs:
           if ($PSVersionTable.PSVersion -lt [version]$manifest.PowerShellVersion) {
               throw "The runner needs PowerShell $($manifest.PowerShellVersion) or newer."
           }
-          Install-Module InvokeBuild, Microsoft.PowerShell.PlatyPS, Pester -Repository PSGallery -Scope CurrentUser -Force -AllowClobber
 
       - name: Build and test
         run: |
@@ -74,8 +73,8 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           $ErrorActionPreference = 'Stop'
-          Install-Module Microsoft.PowerShell.PSResourceGet -MinimumVersion 1.1.0 -Repository PSGallery -Scope CurrentUser -Force -AllowClobber
-          Import-Module Microsoft.PowerShell.PSResourceGet -MinimumVersion 1.1.0
+          $env:PSModulePath = (Join-Path $PWD '.tools' 'Modules') + [IO.Path]::PathSeparator + $env:PSModulePath
+          Import-Module Microsoft.PowerShell.PSResourceGet -RequiredVersion 1.2.0
           New-Item -Path ./artifacts -ItemType Directory -Force | Out-Null
           Compress-PSResource -Path ./output -DestinationPath ./artifacts
 

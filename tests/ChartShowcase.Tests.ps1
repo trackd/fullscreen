@@ -91,6 +91,22 @@ Describe 'Chart showcase' {
         $layout.State.secondsPerChart | Should -Be 3
         $layout.State.currentChart | Should -Be 0
         $layout.State.slideStarted | Should -Be 0
+        $layout.Root.Children[1].Bind | Should -Be 'selectedDetails'
+        foreach ($page in $pages.Children) {
+            $page.Children[2].SelectionBind | Should -Be 'selectedPoint'
+        }
+        foreach ($kind in 'Gauge', 'RadialBars') {
+            $chart = ($pages.Children | Where-Object { $_.Children[2].GraphKind -eq $kind }).Children[2]
+            $values = @($layout.State[$chart.Bind])
+            $values.Count | Should -Be 4
+            $expected = if ($kind -eq 'Gauge') { '68,82,91,97' } else { '88,72,95,83' }
+            ($values.Load -join ',') | Should -Be $expected
+            foreach ($value in $values) {
+                $value.Load | Should -BeLessThan $chart.Maximum
+                $value.Load | Should -BeGreaterThan ($chart.Maximum / 2)
+            }
+        }
+        ($layout.State.resources.Load -join ',') | Should -Be '35,72,48,90'
         (Get-Command $example).Parameters['DefinitionOnly'].Aliases.Count | Should -Be 0
         foreach ($extension in 'json', 'psd1') {
             $path = Join-Path $TestDrive "showcase.$extension"
@@ -153,6 +169,7 @@ Describe 'Chart showcase' {
             [object[]]@($backend, $terminalOptions, $true))
         $appOptions = [Activator]::CreateInstance($uiAssembly.GetType('XenoAtom.Terminal.UI.TerminalAppOptions'))
         $appOptions.HostKind = [Enum]::Parse($appOptions.GetType().GetProperty('HostKind').PropertyType, 'Fullscreen')
+        $appOptions.EnableMouse = $true
         $presenter = $null
         if ($Sixel) {
             $presenter = [Activator]::CreateInstance([fullscreen.Charts.Chart].Assembly.GetType('fullscreen.Charts.SixelChartPresenter'),
@@ -201,11 +218,38 @@ Describe 'Chart showcase' {
                     $chart.Bounds.Height | Should -BeGreaterThan 4
                     $chart.Bounds.Bottom | Should -BeLessOrEqual $size[1]
                     $draw.Invoke($chart, [object[]]@($plot, 640, 320))
+                    if ($kind -in 'Bars', 'HorizontalBars', 'StackedBars') {
+                        $chart.ShowLegend | Should -BeTrue
+                        $pixels = $plot.GetType().GetField('_pixels', $flags).GetValue($plot)
+                        $lastColor = if ($kind -eq 'StackedBars') { 4 } else { 5 }
+                        foreach ($color in 2..$lastColor) {
+                            [Array]::IndexOf[byte]($pixels, [byte]$color, 0, (640 * 320)) |
+                                Should -BeGreaterOrEqual 0 -Because "$kind must paint each category or series in its own legend color"
+                        }
+                    }
                     $painted = $plot.GetType().GetField('_lastColumns', $flags).GetValue($plot) | Measure-Object -Maximum
                     $painted.Maximum | Should -BeGreaterThan 0 -Because "$kind must contain painted geometry, not only a Sixel palette header"
                     $payload = $encode.Invoke($encoder, @($plot))
                     $payload.Length | Should -BeGreaterThan 100
                     $payload | Should -Match ([regex]::Escape([string][char]27 + 'P'))
+                    if ($index -eq 0) {
+                        $mouse = [Activator]::CreateInstance($terminalAssembly.GetType('XenoAtom.Terminal.TerminalMouseEvent'))
+                        $mouse.Kind = [Enum]::Parse($mouse.GetType().GetProperty('Kind').PropertyType, 'Move')
+                        $mouse.Button = [Enum]::Parse($mouse.GetType().GetProperty('Button').PropertyType, 'None')
+                        $mouse.X = $chart.Bounds.X + 15
+                        $mouse.Y = $chart.Bounds.Y + 5
+                        $backend.PushEvent($mouse)
+                        $tooltipHost = $chart.EnumerateVisualsDepthFirst() |
+                            Where-Object { $_.GetType().Name -eq 'TooltipHost' } |
+                            Select-Object -First 1
+                        $shown = [System.Threading.SpinWait]::SpinUntil([Func[bool]] {
+                            & $renderTick
+                            $null -ne $tooltipHost.TooltipContent -and $null -ne $tooltipHost.TooltipContent.App
+                        }, 3000)
+                        $shown | Should -BeTrue -Because 'The chart tooltip must work with both native and Sixel rendering.'
+                        ($renderBuffer.GetValue($terminal).ToMarkupLines() -join "`n") | Should -Match 'Latency:'
+                        $hoverContent = $tooltipHost.TooltipContent
+                    }
                     $beforeOutput = $backend.GetOutText().Length
                     $app.State.slideStarted -= [long]([System.Diagnostics.Stopwatch]::Frequency * 3.1)
                     [System.Threading.Thread]::Sleep(20)
@@ -230,6 +274,9 @@ Describe 'Chart showcase' {
                         $emitted | Should -Not -Match ([regex]::Escape([string][char]27 + 'P0;1q'))
                     }
                     $app.Controls["chart_$kind"].App | Should -BeNullOrEmpty -Because 'The replaced page must detach its previous graphics registration.'
+                    if ($index -eq 0) {
+                        $hoverContent.App | Should -BeNullOrEmpty -Because 'Automatic transitions must close the previous chart tooltip.'
+                    }
                 }
             }
         }
@@ -277,5 +324,27 @@ Describe 'Chart showcase' {
         $reply.Close | Should -BeTrue
         $state.currentChart | Should -Be ($state.chartCount - 1)
         Should -Invoke Invoke-Tui -Exactly -Times 1
+    }
+
+    It 'Shows selected values, pauses for inspection and resumes playback' {
+        & $example -SecondsPerChart 5
+        $invocation = $capture[0]
+        $state = @{} + $invocation.Definition.State
+        $event = $invocation.OnEvent
+        $tick = $invocation.OnTick
+        $row = [pscustomobject]@{ Sample = 3; Latency = 64.5; Target = 50 }
+        $selection = [fullscreen.Custom.TuiEvent]::new('chart_Line', 'Selection', $row)
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($event, $selection, $state)
+        $state.paused | Should -BeTrue
+        $state.playback | Should -Be 'Paused - inspecting selection'
+        $state.selectedDetails | Should -Match 'Latency\s*:\s*64.5'
+        $state.selectedDetails | Should -Match 'Sample\s*:\s*3'
+        $state.slideStarted = 1
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($tick, [fullscreen.Custom.TuiEvent]::new('', 'Tick'), $state)
+        $state.currentChart | Should -Be 0
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($event, [fullscreen.Custom.TuiEvent]::new('pause', 'Click'), $state)
+        $state.paused | Should -BeFalse
+        $state.slideStarted | Should -BeGreaterThan 1
+        $state.playback | Should -Be 'Playing - 5 seconds per chart'
     }
 }

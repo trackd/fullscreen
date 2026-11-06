@@ -67,6 +67,7 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
         _team = team ?? "";
         _pageSize = pageSize;
         _storyType = storyType;
+        _workItemType = storyType;
     }
 
     private static string E(string text) =>
@@ -131,17 +132,34 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
         }
 
         if (view == 0) {
+            await EnsureTeam(token).ConfigureAwait(false);
             var boards = await Get(TeamApi("boards"), token).ConfigureAwait(false);
+            if (P(boards, "value").ValueKind != JsonValueKind.Array) {
+                throw new InvalidOperationException("Azure DevOps did not return the team's boards.");
+            }
+            _boards = [.. Values(boards).Where(board => S(board, "id").Length > 0).Select(board => board.Clone())];
+            if (!_boards.Any(board => S(board, "id") == _landingBoardId)) {
+                var levels = await Get(TeamApi("backlogs"), token).ConfigureAwait(false);
+                if (P(levels, "value").ValueKind != JsonValueKind.Array) {
+                    throw new InvalidOperationException("Azure DevOps did not return the team's backlog levels.");
+                }
+                string requirement = S(Values(levels).FirstOrDefault(level => S(level, "type") == "requirement"), "name");
+                var selected = _boards.FirstOrDefault(board => S(board, "name").Equals(requirement, StringComparison.OrdinalIgnoreCase));
+                if (selected.ValueKind == JsonValueKind.Undefined) {
+                    selected = _boards.FirstOrDefault(board => S(board, "name").Equals("Stories", StringComparison.OrdinalIgnoreCase));
+                }
+                _landingBoardId = S(selected.ValueKind == JsonValueKind.Undefined ? _boards.FirstOrDefault() : selected, "id");
+            }
             return new(
                 [
                     "Board",
                     "ID"
                 ],
-                [..Values(boards).Skip(page * _pageSize).Take(_pageSize).Select(x => new DeveloperItem(S(x, "id"), [
+                [.._boards.Where(board => S(board, "id") == _landingBoardId).Select(x => new DeveloperItem(S(x, "id"), [
                     S(x, "name"),
                     S(x, "id")
                 ], x.Clone()))],
-                "Team boards · A opens board cards"
+                "Board level · " + BoardLevelLabel + " · L choose level · Enter opens cards · U dashboard analytics"
             );
         }
 
@@ -165,7 +183,7 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
                     "Author",
                     "Source",
                     "Target",
-                    "Draft"
+                    "State"
                 ],
                 [..Values(prs).Select(x => new DeveloperItem(
                     S(x, "pullRequestId"),
@@ -176,7 +194,8 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
                         Identity(P(x, "createdBy")),
                         S(x, "sourceRefName"),
                         S(x, "targetRefName"),
-                        S(x, "isDraft")
+                        DeveloperStatus.PullRequestState(S(x, "status"), S(x, "isDraft") == "True",
+                            S(x, "status") == "completed", S(x, "mergeStatus"))
                     ],
                     x.Clone()
                 ))],
@@ -235,7 +254,10 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
     }
 
     private async Task<DeveloperPage> WorkItems(int view, int page, CancellationToken token) {
-        if (view is 2 or 3 && page == 0) {
+        if (view == 1) {
+            await LoadWorkItemTypes(token).ConfigureAwait(false);
+        }
+        if (view is 1 or 2 or 3 && page == 0) {
             await LoadIterations(token).ConfigureAwait(false);
         }
         if (!_areasLoaded && (_team.Length != 0 || _board is not null)) {
@@ -247,7 +269,7 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
 
         string where = "[System.TeamProject] = @project";
         string? iteration = _iterationSelection ?? _currentIteration;
-        if (view is 2 or 3 && !string.IsNullOrEmpty(iteration)) {
+        if (view is 1 or 2 or 3 && !string.IsNullOrEmpty(iteration)) {
             where += " AND [System.IterationPath] = " + Q(iteration);
         }
         if (_mine) {
@@ -273,6 +295,9 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
         if (view == 1 && _boardTypes.Length != 0) {
             where += " AND [System.WorkItemType] IN (" + string.Join(",", _boardTypes.Select(Q)) + ")";
         }
+        else if (view == 1 && _workItemType is not null) {
+            where += " AND [System.WorkItemType] = " + Q(_workItemType);
+        }
 
         if (page == 0) {
             foreach (var key in _cursors.Keys.Where(x => x.View == view).ToArray()) {
@@ -297,16 +322,19 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
         ).ConfigureAwait(false);
         int[] ids = [.. Values(query, "workItems").Select(x => Number(x, "id"))];
         if (ids.Length == 0) {
-            return new(WorkColumns, [], "No work items in this page." + (view is 2 or 3 ? " · " + SprintLabel + " · I choose sprint" : ""));
+            return new(WorkColumns, [], "No work items in this page. · " +
+                (view == 1 ? (_board is null ? WorkItemTypeLabel : "Board · " + _board) + " · T type · " : "") +
+                SprintLabel + " · I choose sprint / All sprints");
         }
 
         _cursors[(view, page + 1)] = ids[^1];
-        var rows = await LoadWorkItemRows(ids, _boardColumn, token, S(query, "asOf")).ConfigureAwait(false);
+        var rows = await LoadWorkItemRows(ids, view == 1 ? _boardColumn : "System.BoardColumn", token, S(query, "asOf")).ConfigureAwait(false);
         return new(
             WorkColumns,
             rows,
             (_board is null ? "Project work items" : "Board · " + _board) +
-            (view is 2 or 3 ? " · " + SprintLabel : "") + " · descending ID · C columns · / filters",
+            (view == 1 && _board is null ? " · " + WorkItemTypeLabel + " · T type" : "") +
+            " · " + SprintLabel + " · I sprint / All sprints · descending ID · C columns · / filters",
             WorkWidths
         );
     }
@@ -363,6 +391,7 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
     ];
 
     private async Task LoadIterations(CancellationToken token) {
+        await EnsureTeam(token).ConfigureAwait(false);
         var iterations = await Get(TeamApi("teamsettings/iterations"), token).ConfigureAwait(false);
         _iterations = [.. Values(iterations).Where(iteration => S(iteration, "path").Length > 0)
             .Select(iteration => (S(iteration, "name"), S(iteration, "path")))];
@@ -376,7 +405,7 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
 
     internal DeveloperOperation[] SprintOperations(int view) {
         DeveloperOperation Select(string label, string? path) => new(label,
-            "Filter stories and tasks by the selected team sprint.", (_, _) => {
+            "Filter work items, stories and tasks by the selected team sprint. Backlog remains across all sprints.", (_, _) => {
                 _iterationSelection = path;
                 _cursors.Clear();
                 return Task.FromResult("Sprint changed");
@@ -491,8 +520,8 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
             ) =>
             {
                 var detail = await Get(TeamApi("boards/" + E(item.Key)), token).ConfigureAwait(false);
-                _boardColumns = [.. Values(detail, "columns").Select(column => S(column, "name")).Where(name => name.Length > 0)];
-                _boardTypes = [.. Values(detail, "columns")
+                string[] columns = [.. Values(detail, "columns").Select(column => S(column, "name")).Where(name => name.Length > 0)];
+                string[] types = [.. Values(detail, "columns")
                     .SelectMany(column => {
                         var mappings = P(column, "stateMappings");
                         return mappings.ValueKind == JsonValueKind.Object
@@ -502,16 +531,27 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
                     .Concat(Values(detail, "workItemTypes").Select(type => S(type, "name")))
                     .Where(type => type.Length > 0)
                     .Distinct(StringComparer.OrdinalIgnoreCase)];
-                if (_boardTypes.Length == 0) {
+                var settings = await Get(TeamApi("teamsettings"), token).ConfigureAwait(false);
+                string bugs = S(settings, "bugsBehavior");
+                if (bugs is not ("asRequirements" or "asTasks" or "off")) {
+                    throw new InvalidOperationException("Azure DevOps did not return the team's bug behavior.");
+                }
+                if (bugs != "asRequirements") {
+                    var category = await Get(Api("wit/workitemtypecategories/Microsoft.BugCategory"), token).ConfigureAwait(false);
+                    if (P(category, "workItemTypes").ValueKind != JsonValueKind.Array) {
+                        throw new InvalidOperationException("Azure DevOps did not return the process's bug types.");
+                    }
+                    var bugTypes = Values(category, "workItemTypes").Select(type => S(type, "name")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    types = [.. types.Where(type => !bugTypes.Contains(type))];
+                }
+                if (types.Length == 0) {
                     throw new InvalidOperationException("This board has no configured work-item type mappings in its columns.");
                 }
 
-                _boardColumn = S(P(P(detail, "fields"), "columnField"), "referenceName");
-                if (_boardColumn.Length == 0)
-                {
-                    _boardColumn = "System.BoardColumn";
-                }
-
+                string field = S(P(P(detail, "fields"), "columnField"), "referenceName");
+                _boardColumn = field.Length == 0 ? "System.BoardColumn" : field;
+                _boardColumns = columns;
+                _boardTypes = types;
                 _board = S(board, "name");
                 _cursors.Clear();
                 return "Board opened";
@@ -538,22 +578,18 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
         if (view == 6) {
             actions.AddRange(_backlogTypes.Select(type => Create("Create " + type, type, null)));
         }
+        else if (view == 1 && (_boardTypes.Length > 0 || _workItemType is not null)) {
+            actions.AddRange((_boardTypes.Length > 0 ? _boardTypes : [_workItemType!])
+                .Select(type => Create("Create " + type, type, null)));
+        }
         else {
             actions.Add(Create("Create " + _storyType, _storyType, null));
             actions.Add(Create("Create task", "Task", null));
         }
-        if (view != 6 && _board is not null) {
-            actions.Add(new("Show all work items", "Clear the selected board type filter.", (_, _) => {
-                _board = null;
-                _boardTypes = [];
-                _boardColumns = [];
-                _boardColumn = "System.BoardColumn";
-                if (_team.Length == 0) {
-                    _areas = [];
-                    _areasLoaded = false;
-                    _defaultArea = "";
-                }
-
+        if (view == 1 && _board is not null) {
+            actions.Add(new("Show all work items", "Clear the selected board and type filters; the sprint filter remains unchanged.", (_, _) => {
+                ClearBoardFilter(clearTeamScope: true);
+                _workItemType = null;
                 _cursors.Clear();
                 return Task.FromResult("Board filter cleared");
             }, ReadOnly: true, TargetView: 1));
@@ -565,7 +601,7 @@ public sealed partial class AzureDevOpsBackend : IDeveloperBackend, IDisposable 
             actions.Add(Create("Add child task", "Task", item.Key, P(state, "fields")));
             actions.Add(Edit("Rename", "System.Title", "Title", item, revision));
             actions.Add(Edit("Change state", "System.State", "State (exact process state name)", item, revision));
-            if (view != 6 && _board is not null) {
+            if (view == 1 && _board is not null) {
                 actions.Add(Edit(
                     "Move to board column",
                     _boardColumn,

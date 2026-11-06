@@ -37,11 +37,6 @@ the theme), Bold for text labels, HorizontalAlignment and VerticalAlignment
 (Start, Center, End or Stretch). The optional Spectre control binds a runtime
 IRenderable supplied through Invoke-Tui State; fullscreen does not bundle Spectre.
 
-Flamegraph Chart nodes support FlameFrameRows (1-8 terminal rows per depth,
-default 2). Frame height is independent of inclusive sample width; use 1 for
-compact deep profiles or larger values for readability. Settings/export and
-source picking use the same depth geometry.
-
 ## EXAMPLES
 
 ### Example 1: Add a live graph to a custom TUI

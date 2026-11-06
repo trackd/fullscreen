@@ -71,7 +71,8 @@ public abstract class ShowDeveloperCommand : FullscreenCommand {
     /// <param name="create">The factory used to create a backend.</param>
     /// <param name="view">The resource or monitor view index.</param>
     /// <param name="errorId">The stable identifier attached to the reported PowerShell error.</param>
-    protected void Run(Func<string, CancellationToken, IDeveloperBackend> create, int view, string errorId) {
+    /// <param name="excludeTabs">Resource tabs hidden from the UI and never loaded.</param>
+    protected void Run(Func<string, CancellationToken, IDeveloperBackend> create, int view, string errorId, string[]? excludeTabs = null) {
         if (PipelineStopToken.IsCancellationRequested) {
             return;
         }
@@ -95,7 +96,8 @@ public abstract class ShowDeveloperCommand : FullscreenCommand {
                 view,
                 RefreshInterval,
                 ReadOnly.IsPresent,
-                Minimal.IsPresent
+                Minimal.IsPresent,
+                excludeTabs
             );
             FullscreenHost.Run(app, PipelineStopToken, theme, Minimal.IsPresent);
         }

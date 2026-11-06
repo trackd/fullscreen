@@ -21,7 +21,7 @@ Charts pipeline objects interactively and lets you change fields and graph types
 
 ```
 Out-Chart [[-InputObject] <psobject[]>] [-XProperty <Object>] [-YProperty <Object[]>]
- [-GraphType <GraphKind>] [-SeriesRole <ChartSeriesRole[]>] [-ShowLegend] [-Minimum <double>] [-Maximum <double>] [-ReversalAmount <double>] [-ChartRenderer <ChartRenderer>] [-Title <string>] [-MaximumCount <int>] [-PassThru] [-Theme <Object>]
+ [-GraphType <GraphKind>] [-SeriesRole <ChartSeriesRole[]>] [-ShowLegend] [-ShowTooltips] [-EnableZoom] [-Minimum <double>] [-Maximum <double>] [-ReversalAmount <double>] [-ChartRenderer <ChartRenderer>] [-Title <string>] [-MaximumCount <int>] [-PassThru] [-Theme <Object>]
  [-FrameIdProperty <string>] [-ParentIdProperty <string>] [-FrameNameProperty <string>] [-FlameReverse] [-FlameFrameRows <int>]
  [-StartProperty <string>] [-EndProperty <string>] [-TaskNameProperty <string>] [-ProgressProperty <string>]
  [-GroupBy <Object>] [-Aggregate <ChartAggregate>] [-LowerProperty <Object>] [-UpperProperty <Object>]
@@ -32,166 +32,31 @@ Out-Chart [[-InputObject] <psobject[]>] [-XProperty <Object>] [-YProperty <Objec
 
 ```
 Out-Chart -Nodes <psobject[]> -Edges <psobject[]> [-GraphType <GraphKind>]
- [-ChartRenderer <ChartRenderer>] [-Title <string>] [-ShowLegend] [-PassThru]
+ [-ChartRenderer <ChartRenderer>] [-Title <string>] [-ShowLegend] [-ShowTooltips] [-EnableZoom] [-PassThru]
  [-Configuration <string>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
 
-Opens an interactive chart of the original pipeline objects. Choose X/Y fields,
-graph type and Top/Bottom/First/Last filters from the menu. Both axis parameters
-accept property names or calculated properties such as
-@{ Name = 'MB'; Expression = { $_.WorkingSet64 / 1MB } }; Custom… opens the same
-editor in the UI. Sixel is automatic, with terminal-cell fallback.
+Explore pipeline objects or numeric values in an interactive chart. Choose
+fields, graph type, filters and presentation settings from the menus. Charts
+retain their original records for inspection. Graphics rendering falls back to
+terminal cells when unavailable.
 
-`FlowChart` and `NetworkDiagram` instead take **separate** `-Nodes` and `-Edges`
-collections. Nodes have unique ordinal NodeId, optional Name (defaults to NodeId)
-and Shape (Auto, Process, Decision or Terminal). Edges reference SourceId and
-TargetId and optionally contain Label and Boolean Directed (default true).
-FlowChart requires directed edges and uses top-to-bottom ranked layout, with
-cyclic groups in the same rank and return/long connections routed outside node
-columns. NetworkDiagram uses a deterministic bounded spring layout and allows
-mixed directed/undirected edges. Neither uses profiling parent relationships,
-numeric weights, timeline axes or row aggregation.
+Hover for values, click to select, and press Enter or double-click to inspect.
+T opens the data table. Wheel zoom and keyboard zoom/pan are disabled by default;
+use `-EnableZoom` or enable zoom in the axes/view editor to opt in. Where supported,
+Shift-drag selects a range. Space pauses refresh; the graph menu provides
+axis, series, export and configuration options.
 
-Cycles, isolated nodes, self-loops and parallel edges retain their identities.
-Click painted nodes, connectors or connection labels; Enter inspects the original
-record. Left/Right/Home/End navigate nodes followed by edges. Empty space does
-not select nearest data. PassThru returns the original node records followed by
-edge records on acceptance. The graph menu switches between compatible diagram
-kinds and supports existing export/configuration actions. Settings contain
-presentation, not the node/edge data: supply both collections again when loading.
-ReGIS uses cell fallback; SVG is static and PNG is plot-only. Diagrams fit the
-viewport, with clipped labels in constrained sizes; numeric zoom/pan/overlays,
-pipeline InputObject, refresh and row filters are not supported. Maximum size is
-256 nodes and 4096 edges; this is not a replacement for Graphviz's advanced
-crossing-minimization or interactive diagram editing.
+Numeric charts support multiple series, distributions and specialized layouts.
+Flamegraphs use frame/parent records with exclusive self weights; Gantt charts
+use task start/end instants. FlowChart and NetworkDiagram use separate node and
+edge collections. See GraphType, the associated input parameters and examples
+for each format.
 
-Sixel contains graphics pixels only. Diagram labels remain ordinary terminal
-text in reserved cells: the presenter omits those pixels and uses transparent
-Sixel background mode (P2=1). This is not protocol-native text or a portable
-text-over-image layer. Use `-ChartRenderer Native` if a terminal does not preserve
-these cells reliably. SVG can layer real text independently; PNG contains only
-the plot geometry.
-
-Multiple Y properties produce multiple lines (`Line`), overlaid areas (`Area`)
-or grouped columns (`Bars`). `ColumnLine` combines columns for the first selected
-Y property and lines for the remaining properties, all on one shared Y axis.
-Use comparable units. `-SeriesRole` or Graph / Series styles overrides individual
-roles. The shared legend wraps above the plot and toggles series on click;
-`-ShowLegend:$false` hides it. Narrow/short layouts summarize overflow rather
-than covering the plot.
-Multi-series is selected by the data (`-YProperty Actual, Target, Forecast`),
-not a separate MultiLine/MultiArea graph type. Line, Area and Bars already
-supported multiple series; this batch adds mixed roles, shared responsive legends
-and aligned grouped columns for differing series lengths.
-
-StackedBars, Marimekko and stacked areas use a theme-based categorical color
-cycle that separates the first adjacent components instead of pairing primary
-cyan with success-green. Subdued palettes can use the error hue before purple
-for stronger separation. Legend and band colors share this selection, and
-explicit series style colors still take precedence. Hiding a series
-does not renumber its original color identity.
-
-`StackedArea` instead adds nonnegative components from zero.
-`PercentStackedArea` normalizes visible components at each sample to a fixed
-0-100 percent Y axis. Both require equal-length series with identical finite,
-strictly increasing X coordinates. Missing components gap the whole stack and
-adjacent interpolated intervals; they are never converted to zero. A zero-total
-sample is blank in percent mode because no proportions are defined.
-Hiding a series recomputes composition for the remaining visible series.
-Numeric X zoom/pan clips crossing intervals without discarding their endpoints;
-percent mode does not allow Y limits or vertical zoom/pan. Y must be linear and
-X cannot be logarithmic. Clicks return the nearest endpoint of a painted interval
-with the original source row and raw component value, not an invented interpolated
-record; empty space is not selectable. Ordinary `Area` and signed `StackedBars`
-retain their existing behavior.
-
-`Waterfall` uses one Y property as ordered signed increments from zero.
-Bars float between cumulative endpoints; connectors show the running total.
-Missing rows leave a gap without adding zero, and zero remains a flat selectable
-bar. No total/subtotal rows are generated. `Heatmap` is the existing matrix mode:
-Y properties are matrix rows and input categories are columns. Unequal lengths
-leave missing tails. Its five-step shared color scale supports signed values;
-Minimum/Maximum set color bounds, with endpoint colors for out-of-range values.
-Blank cells are missing, not zero. Numeric category coordinates must be strictly
-increasing and aligned between series; labels can repeat when using input order.
-Click only painted bars/cells to inspect the original row; empty space does not
-select nearest data.
-
-`Marimekko` uses nonnegative Y properties as stacked components. Category widths
-encode observed totals; segment heights encode each component's percentage of
-its category, from 0 to 100. Missing segments contribute no observed amount;
-zero-total categories have no area. Negative values are rejected.
-`Kagi` uses one positive closing-price series in strictly increasing time/input
-order. `-ReversalAmount` is a fixed amount in price units, default 1; equality
-triggers reversal, smaller retracements are omitted. A new event column appears
-only on reversal, not every time interval. Thick green yang changes to thin red
-yin below the previous waist; yin changes to yang above the previous shoulder.
-Missing prices break the path. Click a painted segment for the original price
-row that caused it, not an interpolated price. Percentage/ATR reversals and OHLC
-high/low processing are not implemented. Both modes use intrinsic horizontal
-spacing, disable viewport navigation/coordinate overlays, and fall back to cells
-for ReGIS. Marimekko does not accept numeric bounds; Kagi bounds apply to prices.
-
-`Flamegraph` takes frame records, not stack strings or ordinary numeric series.
-FrameId is unique; ParentId is null/empty for roots and otherwise references
-another row. IDs are compared ordinally after invariant string conversion.
-One Y property supplies finite nonnegative **exclusive self weight** (default
-Weight); inclusive width is the node's self weight plus all descendants.
-Do not supply inclusive profiling weights, which would double-count descendants.
-Optional FrameNameProperty supplies function names; otherwise IDs are displayed.
-Equal sibling names and their matching descendant prefixes are aggregated.
-Click selects the first original record contributing to the frame; details show
-self/inclusive weights and the contributing row count. The original records are
-retained. Zero-only trees have no painted frames; invalid parents, duplicate IDs,
-cycles, missing/negative/nonfinite weights and overflowing totals are rejected.
-Input order need not be parent-first. Limits are 1,000,000 rows and 1,024 depths.
-Roots appear at the bottom; `-FlameReverse` puts roots at the top.
-Each depth occupies `FlameFrameRows` terminal rows (default 2, range 1-8),
-converted to the actual cell pixel height in raster output. Graph / Flamegraph
-frame rows changes it live; use 1 for compact deep profiles or 3-4 for larger
-frames. Shallow profiles leave empty space rather than stretching to fill height.
-Clipped deeper levels remain accessible through subtree focus.
-Call paths are sorted alphabetically: horizontal position is stack population,
-not time. Warm theme colors distinguish frames; colors do not encode duration.
-Click zooms into a frame's subtree horizontally and hover shows source details.
-F also focuses a selected frame, U moves to its parent, 0 returns to all roots,
-and R reverses depth direction. Focus makes deeper clipped levels accessible.
-Press / to search function names by case-insensitive substring; matches are
-highlighted and the legend reports whole-profile sample percentage, counting
-nested matching frames only once. Apply an empty search to clear highlighting.
-Blank self-weight space does not select a nearest frame. Numeric axis bounds,
-grouping, partial row filters and coordinate overlays are unsupported.
-ReGIS falls back to cells. SVG/Sixel/cells include labels when frames are wide
-enough; plot-only PNG preserves frame geometry/colors without text labels.
-Exclusive self samples precede child paths, matching sorted folded-stack prefix
-ordering. Raster/SVG corners round by at most two pixels; narrow tips reflect
-their true inclusive weights and discrete pixel resolution, not smoothed widths.
-
-Click a point to select it; double-click or press D/Enter for its properties.
-`Gantt` uses separate task rows with absolute Start/End instants and printable
-Task labels. Override fields with StartProperty, EndProperty and TaskNameProperty;
-do not supply XProperty/YProperty. DateTimeOffset, UTC DateTime and ISO 8601 text
-with Z/explicit offset are accepted; timezone-free dates and numeric durations
-are rejected. All displayed time is UTC. Input order defines independent lanes,
-so overlapping tasks remain distinct. End must not precede Start; equality is a
-selectable `*` milestone. Optional ProgressProperty holds a fraction from 0 to 1:
-the green portion is completed, null is unknown, and zero is known no progress.
-Each task has a label row and an interval row. Up/Down/PageUp/PageDown scroll
-lanes, wheel/+/- zoom time, brackets pan, and 0 resets. Click only an interval
-to select its original object; empty space and labels do not pick nearest data.
-Shift-drag/PassThru includes every task intersecting the selected time interval.
-Grouping, dependencies, resource scheduling, Y bounds and coordinate overlays
-are not implemented. ReGIS falls back to cells; PNG is plot-only.
-
-T opens the filtered data table. Wheel zooms, brackets pan, Shift-drag selects
-a range; Space pauses refresh. Chart settings include axes, series and export.
-The bottom footer shows the current GraphType and follows graph-menu changes,
-including in Minimal mode.
-
-With -PassThru, Q/F10 returns the current filtered objects in view order;
-Escape cancels. Without -PassThru, the viewer produces no pipeline output.
+With PassThru, Q or F10 accepts the current filtered objects; Escape cancels.
+Otherwise the viewer produces no pipeline output.
 
 ## EXAMPLES
 
@@ -267,6 +132,10 @@ Out-Chart -Refresh {
 ```
 
 Refresh runs on the UI thread; keep the script quick. Space pauses/resumes.
+Unchanged, reused PowerShell records containing only scalar note properties
+reuse their existing chart data. Replacement objects, calculated expressions,
+adapted getters and nested mutable values retain conservative refresh behavior
+so inspection sources and externally computed values do not become stale.
 Opening the data table freezes refresh until it closes. Applying a table subset
 or selecting a range pauses refresh for stable inspection.
 
@@ -592,7 +461,7 @@ $tasks | Out-Chart -GraphType Gantt -ProgressProperty Progress -ShowLegend -Titl
 
 Input rows keep separate lanes. Completed fractions color the left portion of
 each interval; Release is a zero-duration milestone. Use Up/Down to scroll tasks,
-wheel to zoom time, and click an interval then D to inspect the original record.
+wheel to zoom time when `-EnableZoom` is set, and click an interval then D to inspect the original record.
 
 ### Example 20: Draw a flow with separate nodes and connections
 
@@ -744,19 +613,25 @@ leave gaps rather than inventing shares. Inspection still returns raw counts.
 
 Separate diagram node records with unique NodeId, optional Name and Shape
 (Auto, Process, Decision or Terminal). Name defaults to NodeId. Used together
-with Edges; GraphType defaults to FlowChart in this parameter set.
+with Edges; GraphType defaults to FlowChart in this parameter set. Accepts a
+`Nodes` property from pipeline records; collections from successive records are
+combined, while an explicitly supplied collection is included only once.
+Supply `-Edges` explicitly when piping `Nodes` properties to select the Diagram
+parameter set rather than the default whole-object pipeline binding.
+Alias `Vertices` also works for named arguments and property-name pipeline binding.
 
 ```yaml
 Type: System.Management.Automation.PSObject[]
 DefaultValue: None
 SupportsWildcards: false
-Aliases: []
+Aliases:
+- Vertices
 ParameterSets:
 - Name: Diagram
   Position: Named
   IsRequired: true
   ValueFromPipeline: false
-  ValueFromPipelineByPropertyName: false
+  ValueFromPipelineByPropertyName: true
   ValueFromRemainingArguments: false
 ```
 
@@ -764,25 +639,34 @@ ParameterSets:
 
 Separate diagram edge records with SourceId, TargetId, optional Label and Boolean
 Directed (default true). References must identify existing Nodes. Empty edges
-are valid for isolated nodes.
+are valid for isolated nodes. Accepts an `Edges` property from pipeline records;
+collections from successive records are combined.
+Supply `-Nodes` explicitly when piping `Edges` properties to select the Diagram
+parameter set.
+Aliases `Links` and `Connections` also work for named arguments and property-name
+pipeline binding.
 
 ```yaml
 Type: System.Management.Automation.PSObject[]
 DefaultValue: None
 SupportsWildcards: false
-Aliases: []
+Aliases:
+- Links
+- Connections
 ParameterSets:
 - Name: Diagram
   Position: Named
   IsRequired: true
   ValueFromPipeline: false
-  ValueFromPipelineByPropertyName: false
+  ValueFromPipelineByPropertyName: true
   ValueFromRemainingArguments: false
 ```
 
 ### -InputObject
 
-Complete objects to chart. Accepts pipeline input or an array.
+Complete objects to chart. Accepts pipeline input or an array, with property-name
+binding enabled for `InputObject`. PowerShell's normal binding precedence applies:
+direct whole-object pipeline binding takes precedence over property-name binding.
 
 ```yaml
 Type: System.Management.Automation.PSObject[]
@@ -794,7 +678,7 @@ ParameterSets:
   Position: 0
   IsRequired: false
   ValueFromPipeline: true
-  ValueFromPipelineByPropertyName: false
+  ValueFromPipelineByPropertyName: true
   ValueFromRemainingArguments: false
 ```
 
@@ -896,13 +780,58 @@ ParameterSets:
 
 ### -ShowLegend
 
-Display the wrapping, clickable series legend above the plot.
+Display the wrapping, clickable legend above the plot. Single-series Bars and
+HorizontalBars use a different theme color per category, with matching category
+legend entries that select the original row. Grouped and stacked bars retain
+per-series colors and visibility toggles. An explicit series color keeps
+single-series bars uniform.
 The object viewer shows it by default; use `-ShowLegend:$false` to hide it,
 including a legend restored from configuration.
 
 ```yaml
 Type: System.Management.Automation.SwitchParameter
 DefaultValue: None
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+```
+
+### -ShowTooltips
+
+Show point details after a 200 ms hover. Enabled by default; use
+`-ShowTooltips:$false` to disable, including tooltips restored from configuration.
+Click selection and Enter inspection remain available.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: None
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+```
+
+### -EnableZoom
+
+Opt in to mouse-wheel zoom, +/- zoom, and bracket-key panning on supported numeric
+charts. Disabled by default so embedded charts leave wheel input to their parent
+scroll viewer. Selection, hover, and Shift-drag range selection remain available.
+Use `-EnableZoom:$false` to disable zoom restored from a configuration file.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
 SupportsWildcards: false
 Aliases: []
 ParameterSets:
@@ -1343,6 +1272,19 @@ ParameterSets:
 ### -Theme
 
 Built-in theme name or custom palette, as supported by the other fullscreen apps.
+Use `(Get-FullscreenTheme Monokai).Colors` to inspect or copy all editable colors.
+Partial hashtables inherit unspecified colors from Base (Default when omitted):
+
+`-Theme @{ Base = 'Monokai'; ChartBlue = '#58d5e6'; ChartGrid = '#555555' }`
+
+Eight series colors repeat in order: ChartBlue, ChartOrange, ChartPurple, ChartGreen, ChartCyan, ChartRed, ChartYellow, ChartPink.
+Explicit series colors take precedence. Success, Warning, and Error remain status colors, not automatic series colors.
+ChartGrid, ChartAxis, and ChartLabel control lines, axes, and labels.
+Heatmap shades interpolate between ChartSequentialLow and ChartSequentialHigh.
+Gauge colors interpolate through ChartPositive, ChartNeutral, and ChartNegative as load increases.
+The gauge uses 16 precomputed color steps along the arc; RadialBars retains one solid series color per ring.
+All color overrides accept #RGB or #RRGGBB hex strings; setting one does not change the other roles.
+Syntax colors for the embedded object inspector are also editable; see Get-FullscreenTheme for the complete role list.
 
 ```yaml
 Type: System.Object

@@ -13,10 +13,10 @@ Import-Module $ModulePath -Force
 $definition = New-TuiDefinition
 $theme = switch ($ThemeCase) {
     Name { 'Monokai' }
-    Hashtable { @{ Base = 'Dark Modern'; Accent = '#123' } }
+    Hashtable { @{ Base = 'Dark Modern'; Accent = '#123'; ChartBlue = '#456'; Keyword = '#789'; Operator = '#abc' } }
     Palette { (Get-FullscreenTheme Monokai).Colors }
-    Ordered { [ordered]@{ Accent = '#abcdef' } }
-    PSCustomObject { [pscustomobject]@{ Base = 'Monokai'; Accent = '#123' } }
+    Ordered { [ordered]@{ Accent = '#abcdef'; ChartSequentialHigh = '#123456'; DefaultToken = '#654321' } }
+    PSCustomObject { [pscustomobject]@{ Base = 'Monokai'; Accent = '#123'; Command = '#456'; Variable = '#789' } }
 }
 $failure = $null
 try { $null = Invoke-Tui -Definition $definition -Theme $theme -ErrorAction Stop }

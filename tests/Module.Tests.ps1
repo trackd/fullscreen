@@ -86,8 +86,21 @@ Describe 'Module exports and packaging' {
         foreach ($name in 'Session', 'ComputerName', 'RefreshRate', 'Tree', 'Column', 'ExcludeColumn', 'NetworkColumn', 'ExcludeNetworkColumn', 'GpuColumn', 'ExcludeGpuColumn') {
             $command.Parameters.ContainsKey($name) | Should -BeTrue
         }
+
         $command.Parameters['Tree'].ParameterType | Should -Be ([switch])
         [Enum]::GetNames($command.Parameters['Column'].ParameterType.GetElementType()) | Should -Contain 'CpuTime'
+    }
+
+    It 'Completes Azure tab exclusions and rejects hiding all pages before authenticating' {
+        $command = Get-Command fullscreen\Show-AzureDevOpsManager
+        $command.Parameters['ExcludeTab'].ParameterType | Should -Be ([string[]])
+        $line = 'Show-AzureDevOpsManager -ExcludeTab '
+        $completionNames = [Management.Automation.CommandCompletion]::CompleteInput($line, $line.Length, $null).CompletionMatches.ListItemText
+        foreach ($name in 'Boards', 'WorkItems', 'Stories', 'Tasks', 'Backlog', 'PullRequests', 'Pipelines') {
+            $completionNames | Should -Contain $name
+        }
+        { Show-AzureDevOpsManager -Organization fixture -Project fixture -ExcludeTab Boards,WorkItems,Stories,Tasks,Backlog,PullRequests,Pipelines -ErrorAction Stop } |
+            Should -Throw '*At least one tab must remain visible*'
     }
 
     It 'Retains the file manager path, selection and navigation parameters' {

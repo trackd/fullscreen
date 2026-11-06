@@ -32,11 +32,7 @@ None.
 
 Reads versioned layout JSON or a .psd1 PowerShell data file into a plain PowerShell
 object suitable for editing, Invoke-Tui, the designer or Export-TuiDefinition.
-PSD1 files contain one literal hashtable and are read using PowerShell's safe AST
-evaluator, without invoking code. Comments and multiline strings are supported.
-fullscreen applies its own 1 MiB, 100000 syntax-node and document bounds rather
-than the built-in reader's default small key-count limit.
-Applies the same schema and size limits as Invoke-Tui.
+Validates the layout using the same schema and size limits as Invoke-Tui.
 Does not open a terminal or execute handlers.
 
 ## EXAMPLES

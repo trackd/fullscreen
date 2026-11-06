@@ -18,7 +18,8 @@ public static partial class ThemeCatalog {
         uint Success,
         uint Warning,
         uint Error,
-        uint Purple
+        uint Purple,
+        uint[] Colors
     );
     /// <summary>Gets the available built-in theme names.</summary>
     public static IEnumerable<string> Names {
@@ -54,7 +55,8 @@ public static partial class ThemeCatalog {
                     Rgb(entry.Success),
                     Rgb(entry.Warning),
                     Rgb(entry.Error),
-                    Rgb(entry.Purple)
+                    Rgb(entry.Purple),
+                    colors: Array.ConvertAll(entry.Colors, Rgb)
                 );
             }
         }
@@ -74,7 +76,7 @@ public static partial class ThemeCatalog {
         foreach (DictionaryEntry entry in values) {
             if (entry.Key is not string key || !IsKey(key)) {
                 throw new ArgumentException(
-                    $"Unknown theme key '{entry.Key}'. Use Name, Base, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error or Purple.",
+                    $"Unknown theme key '{entry.Key}'. Use Name, Base, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error, Purple, {string.Join(", ", ThemePalette.RoleNames)}.",
                     nameof(values)
                 );
             }
@@ -97,6 +99,10 @@ public static partial class ThemeCatalog {
         basis.Muted.TryGetForeground(out var muted);
         basis.Selected.TryGetBackground(out var selection);
         basis.Selected.TryGetForeground(out var selectedText);
+        var colors = new Color[ThemePalette.RoleNames.Length];
+        for (int i = 0; i < colors.Length; i++) {
+            colors[i] = Pick(ThemePalette.RoleNames[i], basis.RoleColor(i));
+        }
         return new(
             overrides.GetValueOrDefault("Name", "Custom"),
             Pick("Background", basis.Background),
@@ -109,7 +115,8 @@ public static partial class ThemeCatalog {
             Pick("Success", basis.Success),
             Pick("Warning", basis.Warning),
             Pick("Error", basis.Error),
-            Pick("Purple", basis.Purple)
+            Pick("Purple", basis.Purple),
+            colors: colors
         );
         Color Pick(
             string key,
@@ -125,7 +132,7 @@ public static partial class ThemeCatalog {
         or "SUCCESS"
         or "WARNING"
         or "ERROR"
-        or "PURPLE";
+        or "PURPLE" || ThemePalette.RoleNames.Contains(key, StringComparer.OrdinalIgnoreCase);
     private static Color Rgb(uint rgb) =>
         Color.Rgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
     private static Color Parse(string value, string key) {

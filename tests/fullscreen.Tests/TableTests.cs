@@ -11,6 +11,59 @@ namespace fullscreen.Tests;
 [TestClass]
 public sealed class TableTests {
     [TestMethod]
+    public void ColumnSearchCombinesWithGlobalFilterAndRebuildsWhenColumnFiltersChange() {
+        var model = new TableModel(["Source", "Message"]) { SortColumn = 0 };
+        model.Rows.Add(new(1, "one", ["worker", "Timeout"], ["worker", "Timeout"]));
+        model.Rows.Add(new(2, "two", ["server", "Timeout"], ["server", "Timeout"]));
+        model.Rows.Add(new(3, "three", ["worker", "Started"], ["worker", "Started"]));
+        model.ColumnFilters[0] = "WORK";
+        model.Filter = "time";
+        model.Rebuild();
+        Assert.AreEqual(1L, Assert.ContainsSingle(model.Visible).Id);
+        model.Filter = "timeout";
+        model.Narrow();
+        Assert.AreEqual(1L, Assert.ContainsSingle(model.Visible).Id);
+        model.ColumnFilters[0] = "SERV";
+        model.Narrow();
+        Assert.AreEqual(2L, Assert.ContainsSingle(model.Visible).Id);
+        model.ColumnFilters.Clear();
+        model.Narrow();
+        Assert.HasCount(2, model.Visible);
+        model.Filter = "regex:^started$";
+        model.Rebuild();
+        Assert.AreEqual(3L, Assert.ContainsSingle(model.Visible).Id);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task ColumnFilterEditorIsTextOnlyAndInspectWrapsWithinTheDialog() {
+        var model = new TableModel(["Source", "Message"]);
+        string raw = string.Join(' ', Enumerable.Repeat("long log entry", 50));
+        model.Rows.Add(new(1, "one", ["worker", "Timeout"], ["worker", "Timeout"], "source.log\n\n" + raw));
+        model.Rows.Add(new(2, "two", ["server", "Timeout"], ["server", "Timeout"]));
+        model.Rebuild();
+        var surface = new TableSurface(model, "Logs") { ColumnFiltering = true };
+        await using var ui = new DesignerUxTests.UiSession(surface, () => { }, 80, 24);
+        ui.App.Focus(surface);
+        ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Right, 4, 3,
+            () => ui.App.Root.EnumerateVisualsDepthFirst().OfType<XenoAtom.Terminal.UI.Controls.TextBox>().Any());
+        var input = Assert.ContainsSingle(ui.App.Root.EnumerateVisualsDepthFirst().OfType<XenoAtom.Terminal.UI.Controls.TextBox>());
+        var filterDialog = Assert.ContainsSingle(ui.App.Root.EnumerateVisualsDepthFirst().OfType<XenoAtom.Terminal.UI.Controls.Dialog>());
+        Assert.IsFalse(filterDialog.EnumerateVisualsDepthFirst().OfType<XenoAtom.Terminal.UI.Controls.TextBlock>()
+            .Any(block => block.Text is "worker" or "server"));
+        input.Text = "work";
+        ui.Key(TerminalKey.Enter, () => model.ColumnFilters.Count == 1);
+        Assert.AreEqual(1L, Assert.ContainsSingle(model.Visible).Id);
+        ui.App.Focus(surface);
+        ui.Key(TerminalKey.Enter, () => ui.App.Root.EnumerateVisualsDepthFirst().OfType<XenoAtom.Terminal.UI.Controls.Paragraph>().Any());
+        var paragraph = Assert.ContainsSingle(ui.App.Root.EnumerateVisualsDepthFirst().OfType<XenoAtom.Terminal.UI.Controls.Paragraph>());
+        var dialog = Assert.ContainsSingle(ui.App.Root.EnumerateVisualsDepthFirst().OfType<XenoAtom.Terminal.UI.Controls.Dialog>());
+        Assert.IsTrue(paragraph.Wrap);
+        Assert.IsLessThanOrEqualTo(dialog.Bounds.Width, paragraph.Bounds.Width);
+        Assert.IsGreaterThan(3, paragraph.Bounds.Height, "The raw log must occupy wrapped rows, not one overflowing line.");
+    }
+
+    [TestMethod]
     public void RegexAndWildcardFiltersAreCaseInsensitiveAndInvalidPatternsAreRecoverable() {
         var model = new TableModel(["Message"]);
         model.Rows.Add(new(1, "error", ["ERROR 42"], ["ERROR 42"]));

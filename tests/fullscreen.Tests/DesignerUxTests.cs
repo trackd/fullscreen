@@ -69,6 +69,12 @@ public sealed class DesignerUxTests {
             _backend.PushEvent(new TerminalMouseEvent { Kind = kind, Button = button, X = x, Y = y, Modifiers = modifiers });
             Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return observed(); }, 3000), $"Mouse input did not reach the expected state. Focus={App.FocusedElement?.GetType().Name}, output={Output[^Math.Min(Output.Length, 1600)..]}");
         }
+        public void Wheel(int x, int y, int delta, Func<bool> observed, TerminalModifiers modifiers = default) {
+            _backend.PushEvent(new TerminalMouseEvent { Kind = TerminalMouseKind.Wheel, X = x, Y = y, WheelDelta = delta, Modifiers = modifiers });
+            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return observed(); }, 3000),
+                "Wheel input did not reach the expected state. " + string.Join("; ", App.Root.EnumerateVisualsDepthFirst().OfType<ScrollViewer>()
+                    .Select(view => $"bounds={view.Bounds}, offset={view.VerticalOffset}, viewport={view.ViewportHeight}, content={view.Content?.Bounds}")));
+        }
         public void Activate(Visual target, Func<bool> observed) {
             Tick();
             Assert.IsGreaterThan(0, target.Bounds.Width);

@@ -50,12 +50,6 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
     [ValidateRange(100, 60000)]
     public int SampleInterval { get; set; } = 1000;
 
-    /// <summary>Keep CPU, memory, network and GPU dashboard histories current while viewing other tabs,
-    /// including in minimal mode. Uses SampleInterval and stops while paused. Adds sampling cost and
-    /// remote traffic; does not collect hidden services, sessions or extra per-process counters.</summary>
-    [Parameter]
-    public SwitchParameter BackgroundSampling { get; set; }
-
     /// <summary>Initial case-insensitive name, PID or username substring. Press / to edit and Enter to
     /// finish. Escape clears the search and active table&apos;s column filters; Ctrl+U clears only the
     /// search text and keeps editing when the search is open. Header dropdown filters combine with this
@@ -202,8 +196,7 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
                 ExcludeNetworkColumn,
                 GpuColumn,
                 ExcludeGpuColumn,
-                Minimal.IsPresent,
-                backgroundSampling: BackgroundSampling.IsPresent
+                Minimal.IsPresent
             );
             app.GraphType = GraphType;
             FullscreenHost.Run(app, PipelineStopToken, ResolveTheme(), Minimal.IsPresent, ChartRenderer);

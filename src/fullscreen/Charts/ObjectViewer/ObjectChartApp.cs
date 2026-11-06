@@ -471,27 +471,35 @@ internal sealed partial class ObjectChartApp : IFullscreenApp {
         dialog.Show();
     }
 
+    private IReadOnlyList<PSObject>? _pendingObjects;
     public bool Tick() {
         if (Surface.ExitRequested || _token.IsCancellationRequested) {
             return false;
         }
 
-        if (!Paused && !HasDataOverlay && RefreshSource is not null
-            && _clock.GetElapsedTime(_lastRefresh).TotalMilliseconds >= RefreshInterval) {
-            _lastRefresh = _clock.GetTimestamp();
-            try {
-                ReplaceObjects(RefreshSource());
+        try {
+            if (!Paused && !HasDataOverlay && RefreshSource is not null
+                && _clock.GetElapsedTime(_lastRefresh).TotalMilliseconds >= RefreshInterval) {
+                _lastRefresh = _clock.GetTimestamp();
+                _pendingObjects = RefreshSource();
             }
-            catch (PipelineStoppedException) {
-                throw;
+            if (!Paused && _pendingObjects is not null && !HasDataOverlay
+                && (Surface.App is { } app ? Custom.TuiComponentHost.IsVisibleWithin(Surface, app.Root) : Surface.Parent is null)) {
+                var pending = _pendingObjects;
+                _pendingObjects = null;
+                ReplaceObjects(pending);
             }
-            catch (OperationCanceledException) when (_token.IsCancellationRequested) {
-                throw;
-            }
-            catch (Exception failure) {
-                Paused = true;
-                Surface.ShowMessage("Refresh paused: " + failure.Message);
-            }
+        }
+        catch (PipelineStoppedException) {
+            throw;
+        }
+        catch (OperationCanceledException) when (_token.IsCancellationRequested) {
+            throw;
+        }
+        catch (Exception failure) {
+            _pendingObjects = null;
+            Paused = true;
+            Surface.ShowMessage("Refresh paused: " + failure.Message);
         }
 
         return true;

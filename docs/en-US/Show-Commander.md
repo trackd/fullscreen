@@ -31,9 +31,7 @@ fmc
 
 Browse two independent directory panes with Tab, arrows or hjkl. F3 opens a text or Markdown viewer; F4 toggles minimal mode. F5/F6 copy or move to the opposite pane, F7 creates folders and F8 moves items to recoverable .fullscreen-trash folders. Delete permanently removes selected files or directory contents after confirmation, with Cancel focused by default. F9 also offers permanent delete; F10/Q closes the app. Right-click an item for a menu of these actions. Transfers never overwrite destinations. Unix copy preserves permission bits. File operations are confirmed in the UI. No shell commands are run. The default palette is classic blue; Theme can override it.
 
-Press F12 to toggle the diagnostic overlay (frame timings, repaint work, host
-output and keyboard focus). F12 works in minimal mode and while dialogs are open.
-Press it again to hide diagnostics.
+Press F12 to toggle diagnostics.
 
 ## EXAMPLES
 
@@ -199,6 +197,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Omitting Theme selects the classic blue Commander palette. Explicit Default uses the normal fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

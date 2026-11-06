@@ -85,6 +85,7 @@ public partial class Chart {
         }
 
         var columns = new ChartColumns(data, GraphKind);
+        bool categoryColors = UsesCategoryColors(data, GraphKind);
         for (int draw = 0; draw < data.Length * (GraphKind == GraphKind.ColumnLine ? 2 : 1); draw++) {
             int seriesIndex = draw % data.Length;
             var series = data[seriesIndex];
@@ -149,6 +150,9 @@ public partial class Chart {
                 }
 
                 int x = GraphKind is GraphKind.Bars or GraphKind.ColumnLine ? columns.Center(point.X, range, width) : X(point.X), y = Y(point.Y.Value);
+                if (categoryColors) {
+                    ink = Palette.Body.WithForeground(DefaultSeriesColor(point.Index));
+                }
                 if (kind == GraphKind.Bars) {
                     var bounds = columns.Bounds(seriesIndex, point.X, range, width);
                     for (int column = bounds.X; column < bounds.Right; column++) {

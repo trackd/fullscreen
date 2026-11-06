@@ -159,15 +159,15 @@ public sealed class MonitorCapabilityTests {
         var frame = new CollectorFrame { Capabilities = CollectorCapabilities.ProcessOwner | capability };
         var surface = new MonitorSurface { View = MonitorView.Users, Frame = frame, IncludeUserProcesses = true };
         surface.Model.Sort = sort;
-        const CollectorMetrics baseline = CollectorMetrics.Users | CollectorMetrics.Processes | CollectorMetrics.Owners;
+        const CollectorMetrics summaries = CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu;
+        const CollectorMetrics baseline = summaries | CollectorMetrics.Users | CollectorMetrics.Processes | CollectorMetrics.Owners;
         Assert.AreEqual(baseline | metric, surface.RequiredMetrics);
         frame.Capabilities &= ~capability;
         Assert.AreEqual(baseline, surface.RequiredMetrics);
         frame.Capabilities = CollectorCapabilities.ProcessOwner | capability;
         surface.IncludeUserProcesses = false;
-        Assert.AreEqual(CollectorMetrics.Users, surface.RequiredMetrics);
+        Assert.AreEqual(summaries | CollectorMetrics.Users, surface.RequiredMetrics);
         surface.IncludeUserProcesses = true;
-        surface.BackgroundSampling = true;
         Assert.AreEqual(baseline | metric | CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu,
             surface.RequiredMetrics);
     }

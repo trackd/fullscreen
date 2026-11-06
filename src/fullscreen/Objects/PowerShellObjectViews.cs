@@ -10,10 +10,8 @@ namespace fullscreen.Objects;
 public enum ObjectView {
     /// <summary>Shows the formatted view.</summary>
     Formatted = 0,
-    /// <summary>Shows the expanded view.</summary>
-    Expanded = 1,
-    /// <summary>Shows the properties view.</summary>
-    Properties = Expanded,
+    /// <summary>Inspects object members, collection items, or dictionary entries.</summary>
+    Inspect = 1,
     /// <summary>Shows the json view.</summary>
     Json = 2
 }

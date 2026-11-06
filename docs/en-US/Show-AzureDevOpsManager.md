@@ -19,7 +19,7 @@ Browse Azure DevOps boards, work items and development activity in a fullscreen 
 
 ```
 Show-AzureDevOpsManager [[-Path] <string>] -Organization <string> -Project <string> [-Team <string>]
- [-TenantId <string>] [-View <AzureDevOpsView>] [-StoryType <string>] [-ReadOnly]
+ [-TenantId <string>] [-View <AzureDevOpsView>] [-ExcludeTab <string[]>] [-StoryType <string>] [-ReadOnly]
  [-RefreshInterval <int>] [-PageSize <int>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
 ```
 
@@ -30,66 +30,34 @@ fado
 
 ## DESCRIPTION
 
-Opens Azure DevOps Boards, Work items, Stories, Tasks, Pull requests,
-Pipelines and Backlog in a fullscreen terminal app. Tabs load when first opened. Lists use
-the full width by default; click Preview or press V to show a resizable detail
-pane. The command bar provides actions, view options, refresh and sprint selection.
-Buttons share rows and wrap to fit narrower terminals.
+Browse Azure DevOps boards, work items, backlogs, pull requests and pipelines in
+a fullscreen terminal app. Inspect linked work items, use Kanban boards, review
+pull requests, and monitor pipeline jobs, logs and artifacts. Actions are
+confirmed before changes are sent.
 
-Enter opens a work item with its fields, description, acceptance criteria,
-discussion (latest 50 comments), attachments and linked items. Parent, child and
-related work items open inside the app, with a Back button to return. Details
-open in a unified, scrollable layout with wrapped text and grouped actions. Wider
-windows place the description beside the item fields. In preview mode, drag the
-divider or press Shift+Left/Right to resize the panes.
+Work items, Stories and Tasks start in the team's current sprint. Use Sprint to
+choose another or All sprints, and Type to include Features, Epics or other work
+item types. Backlog spans all sprints and starts in the team's planning order.
+Board and backlog level selectors use the team's configured levels.
 
-Stories and Tasks default to the team's current sprint. Click Sprint or press I
-to choose another sprint or All sprints; the selection applies to both tabs.
-If no current sprint is configured, all items are shown with an explicit notice.
+Boards provides a sprint dashboard. Sprint review shows current estimates,
+hours and capacity; Boards analytics adds historical cumulative flow and
+snapshot-based velocity, which may differ from the web velocity widget.
+Historical charts require Azure DevOps Analytics access; the dashboard and
+sprint review do not.
 
-Enter on a board opens its Kanban columns, filtered by the board's work item
-types and team area paths. K shows the current list as a Kanban board; select a
-card to inspect or move it. M or **Filter list: assigned to me** returns to the list
-and filters by your signed-in identity; it does not assign or change a work item.
-Use **Assign** to change an item's assignee.
-/ filters the loaded page, C chooses columns, G groups, brackets change page
-and F5 refreshes.
+Charts prefer Sixel when supported, with terminal cells as a fallback. Dashboard
+and sprint-review summaries use separate colored bars with matching legends;
+velocity uses grouped bars. The wheel scrolls the containing page rather than
+zooming a chart.
 
-Press A or right-click for actions: create stories and tasks, add child tasks,
-rename, assign, change state, plan into an iteration, set area, priority or remaining hours, edit descriptions and tags, and
-add comments. Changes are confirmed before saving and are rejected if the work
-item changed since it was displayed; Azure DevOps process rules still apply.
+Enter opens details, V toggles preview, A opens actions, / filters the loaded
+page and F5 refreshes. Pipeline monitors follow published logs, which may lag
+behind the live console, and can download artifacts as ZIP files.
 
-The Backlog tab shows the team's configured backlog levels, including portfolio
-levels such as Features and Epics, in Azure DevOps planning order across all
-sprints. Click Backlog level or press L to switch levels. Create the work-item
-types configured for that level, inspect items, add child tasks, or use the same
-confirmed edit and planning actions. Column sorting changes only the display,
-not the team's backlog order.
-
-Pull request details show reviewers, discussion and changed file names. After
-inspection, use Actions to comment, approve, approve with suggestions, wait for
-the author, reject or reset your vote. A source or target change requires a fresh
-inspection. Open in browser shows the full diff and supports inline review.
-Pipeline runs show status, job and step durations and artifacts with browser links.
-
-Click Sprint review or press U from a work-item or backlog tab to review a team
-sprint. Choose a sprint inside the review. Totals cover all its work-item types
-and pages in the team's area paths, ignoring list and assignee filters. The review
-shows completed/not-completed work, workflow states, estimates by type and recorded
-completed/remaining hours. Missing estimates and hours are identified by their coverage;
-unrecognized workflow states are reported, not assumed complete.
-
-Sprint review is a current snapshot, not historical velocity or burndown. Removed-state
-items are counted separately; items moved out of the sprint and changes in scope since
-the sprint started require historical Azure DevOps Analytics data. No separate Analytics
-OData connection is used. Pipeline **Run summary** remains a result chart of the current
-filtered page only.
-
-Requires Azure CLI (az) with the azure-devops extension on PATH. The app reuses
-your Azure CLI sign-in and opens browser sign-in before starting when needed;
-Ctrl+C cancels sign-in. Personal access tokens are not supported. The cmdlet
-writes no pipeline output. Press F12 to toggle the diagnostic overlay.
+Requires Azure CLI (az) with the azure-devops extension. Uses your CLI identity
+and prompts for browser sign-in when needed. Personal access tokens are not
+supported. Produces no pipeline output.
 
 ## EXAMPLES
 
@@ -359,6 +327,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.
@@ -398,6 +369,38 @@ ParameterSets:
   ValueFromRemainingArguments: false
 DontShow: false
 AcceptedValues: []
+HelpMessage: ''
+```
+
+### -ExcludeTab
+
+Hide selected resource pages without loading them. Valid names are Boards,
+WorkItems, Stories, Tasks, Backlog, PullRequests and Pipelines, with tab completion.
+For example, `-ExcludeTab Tasks` hides a view that is empty for teams using only
+stories. At least one tab must remain visible. If View names an excluded tab,
+the first visible tab is selected instead.
+
+```yaml
+Type: System.String[]
+DefaultValue: '[]'
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues:
+- Boards
+- WorkItems
+- Stories
+- Tasks
+- Backlog
+- PullRequests
+- Pipelines
 HelpMessage: ''
 ```
 

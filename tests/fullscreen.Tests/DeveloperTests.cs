@@ -162,6 +162,38 @@ public sealed partial class DeveloperTests {
         Assert.Contains("main · push · ci-bot", workflowDetail);
         Assert.Contains("https://github.com/owner/repo/actions/runs/9", workflowDetail);
     }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task GitHubManagerWiresStatusColorsForRunsStepsWorkflowsAndPullRequests() {
+        using var app = new DeveloperApp(new GitHubBackend(Path.GetTempPath(), "owner/repo", new GitHubFixtureRunner()), initialView: 2);
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 120, 35);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy && app.Surface.Model.Rows.Count > 0; }, 5000));
+        var row = app.Surface.Model.Current!;
+        Assert.AreEqual(app.Surface.Palette.Success, app.Surface.RowAccent!(row));
+        Assert.AreEqual(app.Surface.Palette.Success, app.Surface.CellAccent!(row, 3));
+        Assert.IsNull(app.Surface.CellAccent(row, 1));
+        ui.App.Focus(app.Surface);
+        ui.Key(TerminalKey.Enter, () => ui.App.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Tables.TableSurface>().Any(surface => surface != app.Surface && surface.Model.Rows.Count == 3));
+        var monitor = ui.App.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Tables.TableSurface>().Single(surface => surface != app.Surface);
+        Assert.AreEqual(app.Surface.Palette.Error, monitor.CellAccent!(monitor.Model.Rows[2], 2));
+        Assert.AreEqual(app.Surface.Palette.Error, app.Surface.DocumentAccent!("  ✗ failure  2. Test"));
+        Assert.IsTrue(app.Surface.Palette.TableMuted.TryGetForeground(out var muted));
+        Assert.AreEqual(muted, app.Surface.DocumentAccent("  ○ skipped  3. Publish"));
+        ui.Key(TerminalKey.Backspace, () => !ui.App.Root.EnumerateVisualsDepthFirst().OfType<fullscreen.Tables.TableSurface>().Any(surface => surface != app.Surface));
+        app.SwitchView(3);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy && app.Surface.Model.Rows.Count > 0; }, 5000));
+        ui.App.Focus(app.Surface);
+        ui.Key(TerminalKey.Enter, () => ui.Output.Contains("RECENT RUNS", StringComparison.Ordinal));
+        Assert.AreEqual(app.Surface.Palette.Success, app.Surface.DocumentAccent("✓ success  Add tests"));
+        app.SwitchView(1);
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy && app.Surface.Model.Rows.Count > 0; }, 5000));
+        row = app.Surface.Model.Current!;
+        Assert.AreEqual("Open", row.Cells[3]);
+        Assert.AreEqual(app.Surface.Palette.Success, app.Surface.CellAccent(row, 3));
+        Assert.AreEqual(app.Surface.Palette.Purple, app.Surface.DocumentAccent("State: Merged"));
+    }
+
     [TestMethod]
     public async Task GitHubCommentsPreserveQuotesAndNewlinesAndUsesSelectedHost() {
         var runner = new GitHubFixtureRunner();
@@ -205,6 +237,26 @@ public sealed partial class DeveloperTests {
     }
 
     private static readonly int[] expected = [0];
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task PeriodicRefresh_RetainsUnchangedModelAndAppliesExternalChanges() {
+        var data = new UiFixtureBackend();
+        using var app = new DeveloperApp(data, minimal: true);
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick());
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy; }, 5000));
+        var model = app.Surface.Model;
+        var refresh = typeof(DeveloperApp).GetField("_lastRefresh", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        refresh.SetValue(app, 0L);
+        ui.Tick();
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return data.Loaded.Count >= 2 && !app.Busy; }, 5000));
+        Assert.AreSame(model, app.Surface.Model);
+        data.Context = "externally changed";
+        refresh.SetValue(app, 0L);
+        ui.Tick();
+        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return !app.Busy && !ReferenceEquals(model, app.Surface.Model); }, 5000));
+        Assert.AreEqual("externally changed", app.Surface.Model.Rows[0].Cells[0]);
+    }
 
     [TestMethod]
     [DoNotParallelize]
@@ -399,6 +451,7 @@ public sealed partial class DeveloperTests {
                 response = JsonSerializer.Serialize(new {
                     jobs = new[] {
                         new {
+                            id = 2,
                             name = "build",
                             status = "completed",
                             conclusion = "failure",
@@ -412,7 +465,14 @@ public sealed partial class DeveloperTests {
                         }
                     }
                 });
-            }            else if (path.Contains("/artifacts?", StringComparison.Ordinal)) {
+            }
+            else if (path.EndsWith("actions/jobs/2/logs", StringComparison.Ordinal)) {
+                response = "Compile\nTest\nbuild output";
+            }
+            else if (path.EndsWith("actions/jobs/2", StringComparison.Ordinal)) {
+                response = """{"status":"completed"}""";
+            }
+            else if (path.Contains("/artifacts?", StringComparison.Ordinal)) {
                 response = JsonSerializer.Serialize(new { artifacts = new[] { new { name = "release-bundle", size_in_bytes = 1024, expired = false, archive_download_url = "https://api.github.com/repos/owner/repo/actions/artifacts/3/zip" } } });
             }
             else if (path.EndsWith("actions/runs/9", StringComparison.Ordinal)) {

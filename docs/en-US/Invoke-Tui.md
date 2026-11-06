@@ -38,49 +38,26 @@ ftui
 
 ## DESCRIPTION
 
-Runs a custom terminal app from a layout definition. The layout can be a
-hashtable, a PSCustomObject, or a PSD1/JSON file created with New-TuiDefinition,
-Export-TuiDefinition or Show-TuiDesigner. Layouts are data only; behavior comes
-from the script blocks you pass to the cmdlet.
+Run a custom terminal app from a layout created with New-TuiDefinition,
+Export-TuiDefinition or Show-TuiDesigner. Layouts contain data, not executable
+handlers; behavior comes from the script blocks passed to this command.
 
-Bind connects controls to keys in the shared State dictionary. Inputs, checkboxes,
-selects and numeric controls update their bound key; text, Code, Image and
-progress controls display it. Lists, trees and grids show a bound collection and
-publish the selected item to the key named by SelectionBind. Replace a collection
-in State to refresh it. Native widget settings go in Options; Get-TuiControl lists
-each control's accepted properties, types and choices.
+Controls bind to the shared State dictionary. Inputs update their bound values;
+lists, grids and charts publish selections through SelectionBind. Replace bound
+collections to refresh their contents. Get-TuiControl describes each control's
+properties, options and events.
 
-For object-bound ErrorBars, set YProperty to the point-estimate field and
-LowerProperty/UpperProperty to the optional bound fields. Bounds remain in the
-source units and are preserved in saved definitions.
+Charts prefer Sixel when supported and otherwise render terminal cells. Wheel zoom
+and keyboard zoom/pan are disabled by default; set `EnableZoom = $true` on a Chart
+to opt in, including scalar-bound history charts. Embedded charts otherwise leave
+the wheel to their surrounding scroll viewer.
+Single-series Bars and HorizontalBars automatically color each category and show
+matching category legends. Grouped and stacked bars retain per-series colors;
+explicit series colors take precedence.
 
-Set the root control's VerticalAlignment to Stretch for a full-height layout
-with independently scrolling panes. Other root alignments allow the whole layout
-to scroll vertically when it exceeds the terminal height.
-Set the returned definition's Title to an empty string when the layout provides
-its own heading. FTable and FLogView show an independent scrollbar when their
-rows exceed the available pane height.
-
-Dialog, Popup, CommandPalette, Toast and SearchReplacePopup open when their
-boolean Bind key is true and reset it to false when closed. Target names a Popup
-anchor or ToastHost; SearchReplacePopup requires Target to name a LogControl.
-DataGridControl is read-only by default. With Options.ReadOnly = $false, Edit
-events contain Original and a Values dictionary; apply the edit in your handler.
-
-OnEvent, OnTick and Handler entries run on the UI thread. Each can change State
-directly or return one hashtable with State updates, Close and an optional Value.
-Keep callbacks short, do not write to the host, and run long work in a background
-job (see the BackgroundJob.ps1 example).
-
-When the app closes, Invoke-Tui returns the final State, Value, Cancelled and
-LastEvent. A Close button or reply closes successfully; F10, unhandled Escape or
-cancellation marks the result cancelled. Tab and Shift-Tab move focus; multiline
-inputs keep Enter for new lines. Set TabTitle on a tab page to show a caption
-other than its Id. Press F12 to toggle the diagnostic overlay.
-
-Spectre controls display a renderable kept in State and bound by name; only the
-name is saved in the layout. Styled text is shown, but interactive Spectre prompts
-and live displays are not supported, and output is limited to 1 MiB.
+Handlers run on the UI thread and can update State or request that the app close.
+Keep callbacks short, avoid host output, and use background jobs for long work.
+When the app closes, the command returns State, Value, Cancelled and LastEvent.
 
 ## EXAMPLES
 
@@ -323,6 +300,9 @@ Built-in theme name or hashtable of palette colors.
 Tab completes built-in names.
 Default preserves the current fullscreen colors.
 Hashtable keys: Base (built-in name, default Default), Name, Background, Foreground, Panel, Muted, Accent, Selection, SelectedText, Success, Warning, Error and Purple.
+Individual syntax and chart colors can also be overridden; unspecified colors inherit from Base.
+For example: `-Theme @{ Base = 'Monokai'; Keyword = '#ff79c6'; ChartBlue = '#58d5e6' }`.
+Use `(Get-FullscreenTheme Monokai).Colors` to discover all editable keys. See Get-FullscreenTheme for the syntax, series, grid/axis/label and ramp roles.
 Colors accept #RGB or #RRGGBB.
 Get-FullscreenTheme returns editable Colors hashtables.
 Theme files are not supported.

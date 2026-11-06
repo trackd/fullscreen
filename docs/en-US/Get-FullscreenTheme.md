@@ -34,6 +34,16 @@ Lists built-in palette names and a Colors hashtable for each. The default table 
 Copy or edit Colors and pass it to any interactive cmdlet with Theme.
 Returns plain PowerShell objects and opens no terminal.
 
+Colors includes independent UI/status, syntax, and chart roles. Syntax roles are DefaultToken, Comment, Keyword, String, Operator, Variable, Command, Parameter, Type, Number, Property, Function, and Punctuation.
+Property and Function distinguish member names rather than sharing a single member color. Command is for shell commands; Function is for method/function declarations.
+Chart series use ChartBlue, ChartOrange, ChartPurple, ChartGreen, ChartCyan, ChartRed, ChartYellow, and ChartPink, repeating after eight series. Explicit series colors still take precedence.
+ChartGrid, ChartAxis, and ChartLabel control chart furniture. ChartSequentialLow/ChartSequentialHigh control heatmaps; ChartNegative/ChartNeutral/ChartPositive control the diverging gauge ramp.
+Success, Warning, and Error retain their status meaning, including gains/losses and pass/fail.
+
+Built-in syntax colors come from the original VS Code themes, including inherited token and semantic-token colors.
+Chart colors use theme chart entries, then theme ANSI entries, then VS Code's registered defaults. Transparent chart lines are composited onto the background; ramp endpoints are derived from those colors.
+All roles accept individual #RGB or #RRGGBB overrides. A partial hashtable inherits unspecified roles from Base (Default when omitted) without changing the built-in.
+
 ## EXAMPLES
 
 ### Example 1: List built-in themes
@@ -50,9 +60,12 @@ Colors is a native hashtable; editing it does not mutate the built-in.
 
 ```powershell
 $colors = (Get-FullscreenTheme -Name Monokai).Colors
-$colors.Accent = '#58d5e6'
+$colors.ChartBlue = '#58d5e6'
+$colors.Keyword = '#ff79c6'
 Show-SystemMonitor -Theme $colors
 ```
+
+For a partial override, use `-Theme @{ Base = 'Monokai'; ChartBlue = '#58d5e6' }`.
 
 ### Example 3: Find light themes
 

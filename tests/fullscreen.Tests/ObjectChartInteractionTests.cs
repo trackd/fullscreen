@@ -146,6 +146,38 @@ public sealed class ObjectChartInteractionTests {
             Tick();
             Assert.DoesNotContain("\x1bP0;1q", backend.GetOutText()[afterRefresh..],
                 "A static chart needs only one startup recovery, not continuous repainting.");
+            var plotBounds = chart.Surface.Plot.PlotBounds;
+            int beforeHover = backend.GetOutText().Length;
+            backend.PushEvent(new TerminalMouseEvent {
+                Kind = TerminalMouseKind.Move, Button = TerminalMouseButton.None,
+                X = plotBounds.X + plotBounds.Width / 2, Y = plotBounds.Y + plotBounds.Height / 2
+            });
+            var tooltip = chart.Surface.Plot.EnumerateVisualsDepthFirst().OfType<TooltipHost>().Single();
+            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return tooltip.TooltipContent?.App is not null; }, 2000));
+            string hoverFrame = backend.GetOutText()[beforeHover..];
+            int hoverStart = hoverFrame.LastIndexOf("\x1bP0;1q", StringComparison.Ordinal);
+            Assert.IsGreaterThanOrEqualTo(0, hoverStart, "Hover must retain the chart graphics command.");
+            int hoverEnd = hoverFrame.IndexOf("\x1b\\", hoverStart, StringComparison.Ordinal) + 2;
+            var hoverRaster = SixelTests.Decode(hoverFrame[hoverStart..hoverEnd]);
+            Assert.IsTrue(hoverRaster.Pixels.Any(pixel => pixel > 1), "The tooltip must not make the entire chart disappear.");
+            var tooltipWindow = tooltip.TooltipContent!.Parent!;
+            var paintedBounds = (XenoAtom.Terminal.UI.Geometry.Rectangle)tooltipWindow.GetType()
+                .GetField("_popupRect", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(tooltipWindow)!;
+            Assert.AreEqual(paintedBounds, TerminalOverlayBounds.Window(tooltipWindow),
+                "Reserve exactly the tooltip surface, including its padding and border, not the full-screen wrapper.");
+            var tooltipCovered = ChartClipping.Intersect(plotBounds, paintedBounds);
+            Assert.IsGreaterThan(0, tooltipCovered.Width);
+            Assert.IsGreaterThan(0, tooltipCovered.Height);
+            for (int y = (tooltipCovered.Y - plotBounds.Y) * metrics.CellPixelHeight; y < (tooltipCovered.Bottom - plotBounds.Y) * metrics.CellPixelHeight; y++) {
+                int x = (tooltipCovered.X - plotBounds.X) * metrics.CellPixelWidth;
+                Assert.AreEqual(-1, hoverRaster.Pixels.AsSpan(y * hoverRaster.Width + x, tooltipCovered.Width * metrics.CellPixelWidth).IndexOfAnyExcept((byte)0),
+                    "Chart pixels must not overpaint the tooltip border, padding or content.");
+            }
+            var hoverContent = tooltip.TooltipContent;
+            beforeHover = backend.GetOutText().Length;
+            backend.PushEvent(new TerminalMouseEvent { Kind = TerminalMouseKind.Move, Button = TerminalMouseButton.None, X = 0, Y = 0 });
+            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return hoverContent.App is null; }, 2000));
+            Assert.Contains("\x1bP0;1q", backend.GetOutText()[beforeHover..], "Leaving the chart restores pixels formerly under the tooltip.");
             int beforeClick = backend.GetOutText().Length;
             backend.PushEvent(new TerminalMouseEvent {
                 Kind = TerminalMouseKind.Down,

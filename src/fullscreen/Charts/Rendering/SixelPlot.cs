@@ -6,7 +6,9 @@ internal sealed partial class SixelPlot {
     private byte[] _pixels = [];
     private byte[] _planes = [];
     private int[] _firstColumns = [], _lastColumns = [];
-    internal const int InkColors = 6;
+    internal const int InkColors = Themes.ThemePalette.SeriesColorCount + 1;
+    internal const int MaximumInkColors = Themes.ThemePalette.GaugeColorCount + 1;
+    internal int ColorCount { get; private set; } = InkColors;
     private double[] _observations = [];
     private readonly int[] _bins = new int[32];
     private Color _ink, _background;
@@ -15,13 +17,13 @@ internal sealed partial class SixelPlot {
     public int Height { get; private set; }
     public ReadOnlySpan<byte> Pixels =>
         _pixels.AsSpan(0, Width * Height);
-    public Color[] Palette { get; } = new Color[7];
+    public Color[] Palette { get; } = new Color[MaximumInkColors + 1];
     internal int BandCount => (Height + 5) / 6;
 
-    internal ReadOnlySpan<byte> Plane(int band,int color) =>
-        _planes.AsSpan((band * InkColors + color - 1) * Width, Width);
+    internal ReadOnlySpan<byte> Plane(int band, int color) =>
+        _planes.AsSpan((band * ColorCount + color - 1) * Width, Width);
     internal (int First, int Last) Columns(int band, int color) {
-        int index = band * InkColors + color - 1;
+        int index = band * ColorCount + color - 1;
         return (_firstColumns[index], _lastColumns[index]);
     }
 
@@ -36,6 +38,7 @@ internal sealed partial class SixelPlot {
 
         Width = width;
         Height = height;
+        ColorCount = kind == GraphKind.Gauge ? MaximumInkColors : InkColors;
         if (!Enum.IsDefined(kind)) {
             throw new ArgumentOutOfRangeException(nameof(kind));
         }
@@ -47,7 +50,7 @@ internal sealed partial class SixelPlot {
             _pixels.AsSpan(0, width * height).Clear();
         }
 
-        int planeCount = BandCount * InkColors, planeSize = checked(planeCount * width);
+        int planeCount = BandCount * ColorCount, planeSize = checked(planeCount * width);
         if (_planes.Length < planeSize) {
             _planes = new byte[planeSize];
         }
@@ -70,6 +73,9 @@ internal sealed partial class SixelPlot {
             Palette[4] = Color.Mix(background, ink, .6f);
             Palette[5] = Color.Mix(background, ink, .8f);
             Palette[6] = ink;
+            for (int i = 7; i <= InkColors; i++) {
+                Palette[i] = ink;
+            }
             _ink = ink;
             _background = background;
             _hasPalette = true;
@@ -123,8 +129,8 @@ internal sealed partial class SixelPlot {
         for (int band = top / 6; band <= bottom / 6; band++) {
             int firstRow = Math.Max(top - band * 6, 0), lastRow = Math.Min(bottom - band * 6, 5);
             byte mask = (byte)(((1 << (lastRow - firstRow + 1)) - 1) << firstRow);
-            for (int shade = 1; shade <= InkColors; shade++) {
-                int plane = band * InkColors + shade - 1;
+            for (int shade = 1; shade <= ColorCount; shade++) {
+                int plane = band * ColorCount + shade - 1;
                 var columns = _planes.AsSpan(plane * Width + left, right - left + 1);
                 if (shade == color) {
                     for (int x = 0; x < columns.Length; x++) {
@@ -158,8 +164,8 @@ internal sealed partial class SixelPlot {
             int firstRow = Math.Max(top - band * 6, 0), lastRow = Math.Min(bottom - band * 6, 5);
             byte mask = (byte)(((1 << (lastRow - firstRow + 1)) - 1) << firstRow);
             // Paint keeps the stronger shade, including existing antialiased strokes.
-            for (int shade = color; shade <= InkColors && mask != 0; shade++) {
-                mask &= (byte)~_planes[(band * InkColors + shade - 1) * Width + x];
+            for (int shade = color; shade <= ColorCount && mask != 0; shade++) {
+                mask &= (byte)~_planes[(band * ColorCount + shade - 1) * Width + x];
             }
 
             if (mask == 0) {
@@ -167,10 +173,10 @@ internal sealed partial class SixelPlot {
             }
 
             for (int shade = 1; shade < color; shade++) {
-                _planes[(band * InkColors + shade - 1) * Width + x] &= (byte)~mask;
+                _planes[(band * ColorCount + shade - 1) * Width + x] &= (byte)~mask;
             }
 
-            int plane = band * InkColors + color - 1;
+            int plane = band * ColorCount + color - 1;
             _planes[plane * Width + x] |= mask;
             _firstColumns[plane] = Math.Min(_firstColumns[plane], x);
             _lastColumns[plane] = Math.Max(_lastColumns[plane], x + 1);
@@ -189,7 +195,7 @@ internal sealed partial class SixelPlot {
         }
 
         _pixels[pixel] = color;
-        int band = y / 6 * InkColors, mask = 1 << (y % 6);
+        int band = y / 6 * ColorCount, mask = 1 << (y % 6);
         // A stronger stroke replaces the earlier color at this pixel. Retaining
         // both masks would make the final shade depend on palette emission order.
         if (previous != 0) {

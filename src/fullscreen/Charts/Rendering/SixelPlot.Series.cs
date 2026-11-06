@@ -30,6 +30,13 @@ internal sealed partial class SixelPlot {
         }
 
         Initialize(width, height, ink, background, kind);
+        Palette[1] = theme?.ChartGridColor ?? Palette[1];
+        if (kind == GraphKind.Heatmap && theme is not null) {
+            for (int shade = 2; shade <= 6; shade++) {
+                Palette[shade] = theme.SequentialColor((shade - 2) / 4f);
+            }
+            _hasPalette = false;
+        }
         if (kind is GraphKind.Waterfall or GraphKind.Kagi) {
             Palette[2] = ink;
             Palette[3] = theme?.Success ?? ink;
@@ -46,19 +53,19 @@ internal sealed partial class SixelPlot {
             return;
         }
         bool multiple = data.Length > 1;
+        bool categoryColors = Chart.UsesCategoryColors(data, kind);
         if (kind == GraphKind.Flamegraph && theme is not null) {
             for (byte shade = 2; shade <= 6; shade++) {
                 Palette[shade] = Chart.FlameColor(theme, shade);
             }
             _hasPalette = false;
         }
-        if (multiple && (theme is not null || Chart.UsesStackedPalette(kind))
-            && kind != GraphKind.Heatmap && !ChartTopology.Supports(kind)) {
+        if ((multiple || categoryColors) && kind != GraphKind.Heatmap && !ChartTopology.Supports(kind)) {
             var palette = theme ?? Themes.ThemePalette.Default;
-            for (int index = 0; index < 5; index++) {
+            for (int index = 0; index < Themes.ThemePalette.SeriesColorCount; index++) {
                 Palette[2 + index] = Chart.AutomaticSeriesColor(palette, ink, kind, index);
             }
-            for (int index = 0; index < Math.Min(5, data.Length); index++) {
+            for (int index = 0; index < Math.Min(Themes.ThemePalette.SeriesColorCount, data.Length); index++) {
                 if (data[index].Color is { } color) {
                     Palette[2 + index] = color;
                 }
@@ -103,7 +110,7 @@ internal sealed partial class SixelPlot {
                 continue;
             }
 
-            byte color = multiple ? (byte)(2 + index % 5) : (byte)6;
+            byte color = multiple ? (byte)(2 + index % Themes.ThemePalette.SeriesColorCount) : (byte)6;
             void SeriesPaint(int x, int y, byte shade) {
                 if (kind == GraphKind.ColumnLine && (uint)x < (uint)Width && (uint)y < (uint)Height) {
                     SetPixel(x, y, shade);
@@ -203,12 +210,15 @@ internal sealed partial class SixelPlot {
 
                 int x = kind is GraphKind.Bars or GraphKind.ColumnLine ? columns.Center(point.X, range, width) : X(point.X);
                 double y = Y(value);
+                if (categoryColors) {
+                    color = (byte)(2 + point.Index % Themes.ThemePalette.SeriesColorCount);
+                }
                 if (seriesKind is GraphKind.Area or GraphKind.Stem or GraphKind.Bars) {
                     var bounds = seriesKind == GraphKind.Bars ? columns.Bounds(index, point.X, range, width) : new XenoAtom.Terminal.UI.Geometry.Rectangle(x, 0, 1, 1);
                     for (int column = bounds.X; column < bounds.Right; column++) {
                         if (kind != GraphKind.ColumnLine) {
                             FillColumn(column, Math.Min(baseline, (int)Math.Ceiling(y)), Math.Max(baseline, (int)Math.Ceiling(y)),
-                                multiple ? color : seriesKind == GraphKind.Area ? (byte)2 : seriesKind == GraphKind.Bars ? (byte)5 : color);
+                                multiple || categoryColors ? color : seriesKind == GraphKind.Area ? (byte)2 : seriesKind == GraphKind.Bars ? (byte)5 : color);
                             continue;
                         }
 
@@ -243,7 +253,7 @@ internal sealed partial class SixelPlot {
                 }
 
                 if ((seriesKind != GraphKind.Bars && series.Marker != ChartMarker.None) || point.Index == selected) {
-                    if (!multiple) {
+                    if (!multiple && !categoryColors) {
                         Dot(x, y);
                     }
                     else {
