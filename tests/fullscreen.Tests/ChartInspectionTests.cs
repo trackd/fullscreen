@@ -173,7 +173,7 @@ public sealed class ChartInspectionTests {
     public async Task HistoryDistributionHoverShowsStatisticsForImplicitSeries(GraphKind kind) {
         var history = new HistoryChart { GraphKind = kind };
         foreach (double value in new[] { 1d, 2, 2, 4, 8 }) {
-            history.Add(value, DateTimeOffset.UtcNow);
+            history.Add(value, DateTimeOffset.UnixEpoch.AddSeconds(history.History.Count));
         }
         await using var ui = new DesignerUxTests.UiSession(history, () => { }, 90, 28);
         var chart = history.EnumerateVisualsDepthFirst().OfType<Chart>().Single();
