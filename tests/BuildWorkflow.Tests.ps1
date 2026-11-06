@@ -17,6 +17,78 @@ Describe 'Build task graph' {
 
         $workflow | Should -Match '(?m)^\s+\./build\.ps1 -Configuration Release\s*$'
         $workflow | Should -Not -Match 'tools/|dotnet format'
+        $workflow | Should -Not -Match '\bInstall-Module\b|\bInstall-PSResource\b'
+    }
+
+    It 'Bootstraps missing pinned modules into a path inherited by a fresh build worker and reuses them offline' {
+        $root = Join-Path $TestDrive 'bootstrap'
+        $moduleRoot = Join-Path $root 'modules'
+        $fastPath = Join-Path $moduleRoot 'ModuleFast' '0.6.1'
+        $null = New-Item -ItemType Directory -Path $fastPath -Force
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'build.ps1') -Destination $root
+        $sources = @{}
+        $versions = @{
+            InvokeBuild = '5.14.23'
+            'Microsoft.PowerShell.PlatyPS' = '1.0.1'
+            Pester = '6.2.0'
+            'Microsoft.PowerShell.PSResourceGet' = '1.2.0'
+        }
+        foreach ($module in $versions.GetEnumerator()) {
+            $installed = Get-Module -ListAvailable -FullyQualifiedName @{
+                ModuleName = $module.Key
+                RequiredVersion = $module.Value
+            } | Select-Object -First 1
+            $sources[$module.Key] = $installed.ModuleBase
+        }
+        $sources | Export-Clixml -LiteralPath (Join-Path $root 'sources.xml')
+        Set-Content -LiteralPath (Join-Path $fastPath 'ModuleFast.psd1') -Value "@{ ModuleVersion = '0.6.1'; RootModule = 'ModuleFast.psm1' }"
+        Set-Content -LiteralPath (Join-Path $fastPath 'ModuleFast.psm1') -Value @'
+function Install-ModuleFast {
+    [CmdletBinding()]
+    param($Specification, $Destination, $Source, [switch]$NoPSModulePathUpdate, [switch]$NoProfileUpdate, $ThrottleLimit)
+    if ($Source -ne 'https://pwsh.gallery/index.json' -or -not $NoPSModulePathUpdate -or -not $NoProfileUpdate) {
+        throw 'Bootstrap must use the mirror without modifying user configuration.'
+    }
+    $root = Split-Path -Parent (Split-Path -Parent $Destination)
+    $sources = Import-Clixml -LiteralPath (Join-Path $root 'sources.xml')
+    foreach ($spec in $Specification) {
+        $name, $version = $spec.Split('=')
+        $target = Join-Path $Destination $name $version
+        $null = New-Item -ItemType Directory -Path $target -Force
+        Get-ChildItem -LiteralPath $sources[$name] -Force | Copy-Item -Destination $target -Recurse -Force
+        Add-Content -LiteralPath (Join-Path $root 'installed.txt') -Value $spec
+    }
+}
+'@
+        Set-Content -LiteralPath (Join-Path $root 'fullscreen.build.ps1') -Value @'
+#Requires -Modules InvokeBuild
+param($Configuration, [switch]$SkipHelp, [switch]$SkipTests)
+task Bootstrap {
+    foreach ($name in 'InvokeBuild', 'Microsoft.PowerShell.PlatyPS', 'Pester', 'Microsoft.PowerShell.PSResourceGet') {
+        if (-not (Get-Module $name)) { throw "$name was not imported in the worker." }
+    }
+    Set-Content -LiteralPath (Join-Path $PSScriptRoot 'worker.txt') -Value $env:PSModulePath
+}
+'@
+        $powerShell = Join-Path $PSHOME $(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' })
+        $run = {
+            param($root)
+            $env:PSModulePath = (Join-Path $root 'modules') + [IO.Path]::PathSeparator + (Join-Path $PSHOME 'Modules')
+            & (Join-Path $root 'build.ps1') -Task Bootstrap
+            exit $LASTEXITCODE
+        }
+        & $powerShell -NoProfile -Command $run -args $root
+        $LASTEXITCODE | Should -Be 0
+        $installed = @(Get-Content -LiteralPath (Join-Path $root 'installed.txt'))
+        $installed | Should -Contain 'InvokeBuild=5.14.23'
+        $installed | Should -Contain 'Microsoft.PowerShell.PlatyPS=1.0.1'
+        $installed | Should -Contain 'Pester=6.2.0'
+        (Get-Content -LiteralPath (Join-Path $root 'worker.txt') -Raw) |
+            Should -Match ([regex]::Escape((Join-Path $root '.tools' 'Modules')))
+        Remove-Item -LiteralPath (Join-Path $fastPath 'ModuleFast.psm1')
+        & $powerShell -NoProfile -Command $run -args $root
+        $LASTEXITCODE | Should -Be 0 -Because 'The second build must need neither ModuleFast nor the network.'
+        (Get-Content -LiteralPath (Join-Path $root 'installed.txt')) -join ',' | Should -Be ($installed -join ',')
     }
 }
 
