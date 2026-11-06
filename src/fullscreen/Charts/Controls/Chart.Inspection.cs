@@ -115,6 +115,9 @@ public partial class Chart {
             var data = GetRenderData(Math.Max(1, Bounds.Width));
             var range = RenderRange(data);
             int seriesIndex = Array.FindIndex(data, series => series.SourceIndex == point.SeriesIndex);
+            if (seriesIndex < 0) {
+                seriesIndex = point.SeriesIndex;
+            }
             var distribution = GetDistributions(data, range, PlotBounds.Width)[seriesIndex];
             if (GraphKind == GraphKind.Histogram) {
                 double value = YAxis.Transform(point.Y);

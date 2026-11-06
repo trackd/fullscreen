@@ -106,7 +106,7 @@ public sealed partial class ObjectTableApp {
         return true;
     }
 
-    private static TableModel CreateNodeModel(NodeState node, ObjectView view) {
+    private static TableModel CreateNodeModel(NodeState node, ObjectView view, string[]? properties = null) {
         object raw = node.Value is PSObject ps ? ps.BaseObject : node.Value;
         if (raw is IEnumerable sequence and not string and not IDictionary) {
             if (node.Items is null) {
@@ -119,7 +119,7 @@ public sealed partial class ObjectTableApp {
                 }
             }
 
-            return view == ObjectView.Formatted ? PowerShellObjectViews.Format(node.Items) : ObjectSnapshot.Create(node.Items);
+            return view == ObjectView.Formatted ? PowerShellObjectViews.Format(node.Items) : ObjectSnapshot.Create(node.Items, properties);
         }
 
         if (view == ObjectView.Formatted) { return PowerShellObjectViews.Format([PSObject.AsPSObject(node.Value)]); }

@@ -33,7 +33,8 @@ internal sealed class SixelChartPresenter(
         string? ImagePayload,
         SixelPayload? ChartPayload,
         Rectangle[] Windows,
-        Color? Background
+        Color? Background,
+        Visual? Window
     ) {
         internal ReadOnlySpan<char> Payload => ChartPayload is { } chart ? chart.Span : ImagePayload.AsSpan();
     }
@@ -76,23 +77,28 @@ internal sealed class SixelChartPresenter(
         SelectWindows(null);
     }
 
-    private void SelectWindows(Visual? source) {
+    private Visual? SelectWindows(Visual? source) {
         _windows.Clear();
-        foreach (var (owner, bounds) in _overlays) {
-            bool containsSource = false;
+        int containingWindow = -1;
+        for (int index = 0; index < _overlays.Count; index++) {
+            var (owner, _) = _overlays[index];
             if (owner is not null) {
                 for (var ancestor = source; ancestor is not null; ancestor = ancestor.Parent) {
                     if (ReferenceEquals(ancestor, owner)) {
-                        containsSource = true;
+                        containingWindow = index;
                         break;
                     }
                 }
             }
-            // A dialog masks charts behind it, not charts hosted in its own content.
-            if (!containsSource) {
+        }
+        for (int index = 0; index < _overlays.Count; index++) {
+            var (owner, bounds) = _overlays[index];
+            // Only windows above the source's containing window may cover it.
+            if (owner is null || index > containingWindow) {
                 _windows.Add(bounds);
             }
         }
+        return containingWindow < 0 ? null : _overlays[containingWindow].Owner;
     }
 
     private bool Covered(Rectangle clip) {
@@ -123,7 +129,7 @@ internal sealed class SixelChartPresenter(
             if (chart is null && image is null) {
                 continue;
             }
-            SelectWindows(command.Content.Source as Visual);
+            var containingWindow = SelectWindows(command.Content.Source as Visual);
 
             var clip = Intersect(
                 Intersect(command.CellBounds, command.ClipBounds),
@@ -141,6 +147,7 @@ internal sealed class SixelChartPresenter(
                 || previous.Clip != clip
                 || previous.Key != key
                 || !SameWindows(previous)
+                || !ReferenceEquals(previous.Window, containingWindow)
                 || image is not null && !ReferenceEquals(previous.ImagePayload, image)
                 || previous.CellWidth != pixelMetrics.CellPixelWidth
                 || previous.CellHeight != pixelMetrics.CellPixelHeight
@@ -210,7 +217,7 @@ internal sealed class SixelChartPresenter(
             if (chart is null && image is null) {
                 continue;
             }
-            SelectWindows(command.Content.Source as Visual);
+            var containingWindow = SelectWindows(command.Content.Source as Visual);
 
             var key = chart?.PixelKey ?? default;
             var bounds = command.CellBounds;
@@ -234,6 +241,7 @@ internal sealed class SixelChartPresenter(
                 && previous.Clip == clip
                 && previous.Key == key
                 && SameWindows(previous)
+                && ReferenceEquals(previous.Window, containingWindow)
                 && (image is null || ReferenceEquals(previous.ImagePayload, image))
                 && previous.CellWidth == cellWidth
                 && previous.CellHeight == cellHeight) {
@@ -250,7 +258,7 @@ internal sealed class SixelChartPresenter(
                     LastCacheMissCount = _diagnostics.LastCacheMissCount + 1
                 };
                 if (image is not null) {
-                    next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, image, null, [.. _windows], null);
+                    next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, image, null, [.. _windows], null, containingWindow);
                     continue;
                 }
 
@@ -304,10 +312,9 @@ internal sealed class SixelChartPresenter(
                 };
             }
 
-            next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, null, payload, [.. _windows], key.Background);
+            next[command.VisualRenderId] = new(bounds, clip, key, cellWidth, cellHeight, null, payload, [.. _windows], key.Background, containingWindow);
         }
 
-        SelectWindows(null);
         writer.SaveCursor();
         try {
             bool cleared = false;
@@ -317,6 +324,7 @@ internal sealed class SixelChartPresenter(
                 }
 
                 SetBackground(writer, previous.Background);
+                SelectWindows(previous.Window);
                 Erase(writer, previous.Clip, _windows, context.ViewportBounds);
                 cleared = true;
             }
@@ -334,6 +342,7 @@ internal sealed class SixelChartPresenter(
                 // terminal. Erase cells, rather than encoding background pixels.
                 if (changed && old is not null && old.Clip == placement.Clip) {
                     SetBackground(writer, placement.Background);
+                    SelectWindows(placement.Window);
                     Erase(writer, placement.Clip, _windows, context.ViewportBounds);
                 }
 

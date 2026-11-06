@@ -427,7 +427,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
                 continue;
             }
 
-            int boxRow = GraphKind == GraphKind.BoxPlot ? Array.FindIndex(rendered, visible => visible.SourceIndex == seriesIndex) : 0;
+            int boxRow = GraphKind == GraphKind.BoxPlot ? Array.FindIndex(rendered, visible => visible.SourceIndex == seriesIndex || ReferenceEquals(visible, series)) : 0;
             ChartPoint? previous = null;
             foreach (var point in series.Span) {
                 if (!point.Y.HasValue) {

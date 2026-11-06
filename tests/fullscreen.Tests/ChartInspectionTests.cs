@@ -168,6 +168,52 @@ public sealed class ChartInspectionTests {
     }
 
     [TestMethod]
+    [DataRow(GraphKind.Histogram)]
+    [DataRow(GraphKind.BoxPlot)]
+    public async Task HistoryDistributionHoverShowsStatisticsForImplicitSeries(GraphKind kind) {
+        var history = new HistoryChart { GraphKind = kind };
+        foreach (double value in new[] { 1d, 2, 2, 4, 8 }) {
+            history.Add(value, DateTimeOffset.UtcNow);
+        }
+        await using var ui = new DesignerUxTests.UiSession(history, () => { }, 90, 28);
+        var chart = history.EnumerateVisualsDepthFirst().OfType<Chart>().Single();
+        var bounds = chart.PlotBounds;
+        var host = chart.EnumerateVisualsDepthFirst().OfType<TooltipHost>().Single();
+        ui.Mouse(TerminalMouseKind.Move, TerminalMouseButton.None, bounds.X + bounds.Width / 4, bounds.Y + bounds.Height / 2,
+            () => host.TooltipContent is not null);
+        string text = ((Paragraph)host.TooltipContent!).Text!;
+        Assert.Contains("Count:", text);
+        if (kind == GraphKind.BoxPlot) {
+            Assert.Contains("Count: 5", text);
+            Assert.Contains("Median: 2", text);
+        }
+        else {
+            Assert.Contains("Bin containing observation:", text);
+        }
+    }
+
+    [TestMethod]
+    public async Task LogarithmicHorizontalBarsKeepOriginalValuesInHoverAndSelection() {
+        object source = new();
+        var chart = new Chart { GraphKind = GraphKind.HorizontalBars, XAxis = new() { Scale = ChartScale.Logarithmic } };
+        chart.Series.Add(new("Load", [10, 100, 1000]));
+        chart.Series[0].Sources.AddRange([new object(), source, new object()]);
+        await using var ui = new DesignerUxTests.UiSession(chart, () => { }, 90, 28);
+        var bounds = chart.PlotBounds;
+        var data = chart.GetRenderData(90);
+        var geometry = new ChartGeometry();
+        geometry.Build(data, chart.RenderRange(data), chart.GraphKind, bounds.Width, bounds.Height);
+        var shape = geometry.Primitives.First(item => item.Point == 1);
+        int x = bounds.X + (shape.X0 + shape.X1) / 2, y = bounds.Y + (shape.Y0 + shape.Y1) / 2;
+        var host = chart.EnumerateVisualsDepthFirst().OfType<TooltipHost>().Single();
+        ui.Mouse(TerminalMouseKind.Move, TerminalMouseButton.None, x, y, () => host.TooltipContent is not null);
+        Assert.Contains("Load: 100", ((Paragraph)host.TooltipContent!).Text!);
+        ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, x, y, () => chart.Selection is not null);
+        Assert.AreEqual(100d, chart.Selection!.Y);
+        Assert.AreSame(source, chart.Selection.Source);
+    }
+
+    [TestMethod]
     public async Task BoxPlot_ClickingAnotherLane_SelectsThatSeries() {
         var chart = new Chart { GraphKind = GraphKind.BoxPlot };
         chart.Series.Add(new("First", [10, 20, 30]));

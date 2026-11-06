@@ -101,7 +101,8 @@ public partial class Chart {
                 : GraphKind == GraphKind.Gantt && series.Schedule is { } schedule
                     ? $"{schedule.Tasks[shape.Point].Start.UtcDateTime:u} .. {schedule.Tasks[shape.Point].End.UtcDateTime:u} (UTC); progress {(schedule.Tasks[shape.Point].Progress is { } completed ? completed.ToString("P0", System.Globalization.CultureInfo.InvariantCulture) : "unknown")}"
                     : series.Property;
-            return _gridSelection = new(sourceIndex, details, point.Index, point.X, point.Y!.Value, point.Label, point.Source);
+            double value = GraphKind == GraphKind.HorizontalBars ? XAxis.Inverse(point.Y!.Value) : point.Y!.Value;
+            return _gridSelection = new(sourceIndex, details, point.Index, point.X, value, point.Label, point.Source);
         }
         return null;
     }

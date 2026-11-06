@@ -55,6 +55,29 @@ public sealed class ReusableControlTests {
     }
     [TestMethod]
     [DoNotParallelize]
+    public async Task ObjectExplorerColumnsRestrictRootGettersButNotNestedInspection() {
+        var value = new ExplorerValue();
+        var node = new TuiNode { Id = "objects", Type = "ObjectExplorer", Columns = ["Name"] };
+        using var explorer = new ReusableObjectExplorer(node, new[] { value });
+        await using var ui = new DesignerUxTests.UiSession(explorer, () => explorer.Tick(explorer, CancellationToken.None), 100, 30);
+        CollectionAssert.AreEqual(new[] { "Name" }, explorer.Application.Surface.Model.Columns);
+        Assert.AreEqual(0, value.Reads, "Excluded getters must not be evaluated in the root snapshot.");
+        var row = explorer.Application.Surface.Model.Rows.Single();
+        explorer.Application.InspectSelected(row);
+        Assert.IsTrue(explorer.Application.Surface.Model.Rows.Any(item => item.Cells.Contains("Details")));
+        Assert.IsGreaterThan(0, value.Reads, "Nested inspection must remain unrestricted.");
+        Assert.IsTrue(explorer.Application.GoBack());
+        CollectionAssert.AreEqual(new[] { "Name" }, explorer.Application.Surface.Model.Columns);
+    }
+
+    public sealed class ExplorerValue {
+        public string Name { get; } = "deployment";
+        public int Reads { get; private set; }
+        public string Details { get { Reads++; return "nested details"; } }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
     public async Task UserComponentReturnsTypedSelectionWithoutOwningAnotherTerminal() {
         var surface = new Monitoring.MonitorSurface { UsersOnly = true, IncludeUserProcesses = false };
         surface.Frame.Users[0] = new("ada", "console", "Active", "host", "", 1, IdleTime: TimeSpan.FromMinutes(5));

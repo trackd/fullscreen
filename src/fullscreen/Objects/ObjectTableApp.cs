@@ -436,7 +436,7 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
     private void ShowInspection(NodeState node) {
         var model = node.Models[1];
         if (model is null) {
-            model = CreateNodeModel(node, ObjectView.Inspect);
+            model = CreateNodeModel(node, ObjectView.Inspect, ReferenceEquals(node, _inspection) ? _options.Property : null);
             if (ReferenceEquals(node, _inspection) && _options.View == ObjectView.Inspect) {
                 ConfigureModel(model, ObjectView.Inspect);
             }
