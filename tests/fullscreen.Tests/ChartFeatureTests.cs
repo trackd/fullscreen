@@ -63,6 +63,24 @@ public sealed class ChartFeatureTests {
     }
 
     [TestMethod]
+    [DataRow(GraphKind.Bars)]
+    [DataRow(GraphKind.HorizontalBars)]
+    public async Task CategoryBarLegendSelectsOriginalRowsRatherThanHidingTheSeries(GraphKind kind) {
+        object source = new();
+        var chart = new Chart { GraphKind = kind, ShowLegend = true };
+        chart.Series.Add(new("Load", [20, 40]));
+        chart.Series[0].Labels.AddRange(["CPU", "Memory"]);
+        chart.Series[0].Sources.AddRange([source, new object()]);
+        ChartSelection? selection = null;
+        chart.SelectionChanged += value => selection = value;
+        await using var ui = new DesignerUxTests.UiSession(chart, () => { }, 80, 24);
+        ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, 2, 0, () => selection is not null);
+        Assert.AreSame(source, selection!.Source);
+        Assert.AreEqual(0, selection.PointIndex);
+        Assert.IsTrue(chart.Series[0].Visible);
+    }
+
+    [TestMethod]
     public void LegendsMeasureWrapAndTruncateUnicodeLabelsInCells() {
         const string wide = "\u4e2d\u6587";
         var chart = new Chart { ShowLegend = true };

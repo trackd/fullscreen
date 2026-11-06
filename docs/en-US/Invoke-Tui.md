@@ -51,6 +51,9 @@ Charts prefer Sixel when supported and otherwise render terminal cells. Wheel zo
 and keyboard zoom/pan are disabled by default; set `EnableZoom = $true` on a Chart
 to opt in, including scalar-bound history charts. Embedded charts otherwise leave
 the wheel to their surrounding scroll viewer.
+Single-series Bars and HorizontalBars automatically color each category and show
+matching category legends. Grouped and stacked bars retain per-series colors;
+explicit series colors take precedence.
 
 Handlers run on the UI thread and can update State or request that the app close.
 Keep callbacks short, avoid host output, and use background jobs for long work.

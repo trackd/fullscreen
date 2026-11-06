@@ -5,6 +5,7 @@ Cycle through every chart kind in one fullscreen window.
 Shows deterministic synthetic data, one chart at a time, using a bound
 TabControl. Tick callbacks advance the page without blocking input or
 opening another window. The default cycle takes about 78 seconds and repeats.
+Bar charts use category colors or series colors with matching legends.
 .PARAMETER Theme
 Built-in palette or custom theme.
 .PARAMETER Minimal
@@ -379,6 +380,12 @@ $pages = foreach ($kind in $chartKinds) {
         { $_ -in 'Histogram', 'BoxPlot' } {
             $chart.XProperty = ''
             $description = 'Distribution of response times (ms)'
+        }
+        { $_ -in 'Bars', 'HorizontalBars' } {
+            $chart.Bind = 'resources'
+            $chart.XProperty = 'Resource'
+            $chart.YProperty = @('Load')
+            $description = 'Resource load (%) - automatic category colors and matching legend'
         }
         { $_ -in 'StackedBars', 'Heatmap', 'StackedArea', 'PercentStackedArea' } {
             $chart.Bind = 'outcomes'

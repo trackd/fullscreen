@@ -137,7 +137,9 @@ public partial class Chart {
             Color color = shape.Color ?? (GraphKind == GraphKind.Flamegraph ? FlameColor(shape.Shade)
                 : GraphKind == GraphKind.Gantt ? shape.Shade == 3 ? Palette.Success : PixelInk
                 : GraphKind == GraphKind.Kagi ? shape.Shade == 3 ? Palette.Success : Palette.Error
-                : ChartGrid.Supports(GraphKind) ? GridColor(shape.Shade) : shape.Shade > 0 ? Color.Mix(PixelBackground, PixelInk, (shape.Shade - 1) / 5f) : data.ElementAtOrDefault(shape.Series)?.Color ?? DefaultSeriesColor(shape.Series));
+                : ChartGrid.Supports(GraphKind) ? GridColor(shape.Shade)
+                : UsesCategoryColors(data, GraphKind) && shape.Point >= 0 ? DefaultSeriesColor(data[shape.Series].Points[shape.Point].Index)
+                : shape.Shade > 0 ? Color.Mix(PixelBackground, PixelInk, (shape.Shade - 1) / 5f) : data.ElementAtOrDefault(shape.Series)?.Color ?? DefaultSeriesColor(shape.Series));
             if (ChartTopology.Supports(GraphKind) && shape.Point >= 0 && data[shape.Series].Points[shape.Point].Index == SelectedIndex) {
                 color = Color.Mix(PixelBackground, PixelInk, .8f);
             }
@@ -200,6 +202,9 @@ internal sealed partial class SixelPlot {
             }
 
             byte color = shape.Shade > 0 ? shape.Shade : data.Length > 1 ? (byte)(2 + shape.Series % Themes.ThemePalette.SeriesColorCount) : (byte)6;
+            if (Chart.UsesCategoryColors(data, kind) && shape.Point >= 0) {
+                color = (byte)(2 + data[shape.Series].Points[shape.Point].Index % Themes.ThemePalette.SeriesColorCount);
+            }
             if (ChartTopology.Supports(kind) && shape.Point >= 0 && data[shape.Series].Points[shape.Point].Index == selected) {
                 color = 5;
             }

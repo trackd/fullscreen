@@ -627,7 +627,7 @@ public sealed partial class SixelTests {
                 plot.Draw(history, history.Latest, 100, size.Item1, size.Item2, ink, Color.Rgb(13, 20, 32), kind, 5);
                 var actual = Decode(encoder.EncodePlot(plot));
                 CollectionAssert.AreEqual(plot.Pixels.ToArray(), actual.Pixels, $"{kind}: {size}");
-                var expectedColor = (ChartRadial.IsRadial(kind) || kind == GraphKind.Waterfall ? plot.Palette[6] : ink).ToRgb();
+                var expectedColor = (ChartRadial.IsRadial(kind) || kind is GraphKind.Waterfall or GraphKind.Bars or GraphKind.HorizontalBars ? plot.Palette[6] : ink).ToRgb();
                 Assert.AreEqual(((expectedColor.R * 100 + 127) / 255, (expectedColor.G * 100 + 127) / 255, (expectedColor.B * 100 + 127) / 255), actual.Colors[6]);
             }
         }

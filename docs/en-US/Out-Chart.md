@@ -780,7 +780,11 @@ ParameterSets:
 
 ### -ShowLegend
 
-Display the wrapping, clickable series legend above the plot.
+Display the wrapping, clickable legend above the plot. Single-series Bars and
+HorizontalBars use a different theme color per category, with matching category
+legend entries that select the original row. Grouped and stacked bars retain
+per-series colors and visibility toggles. An explicit series color keeps
+single-series bars uniform.
 The object viewer shows it by default; use `-ShowLegend:$false` to hide it,
 including a legend restored from configuration.
 

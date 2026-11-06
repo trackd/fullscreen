@@ -53,13 +53,14 @@ internal sealed partial class SixelPlot {
             return;
         }
         bool multiple = data.Length > 1;
+        bool categoryColors = Chart.UsesCategoryColors(data, kind);
         if (kind == GraphKind.Flamegraph && theme is not null) {
             for (byte shade = 2; shade <= 6; shade++) {
                 Palette[shade] = Chart.FlameColor(theme, shade);
             }
             _hasPalette = false;
         }
-        if (multiple && kind != GraphKind.Heatmap && !ChartTopology.Supports(kind)) {
+        if ((multiple || categoryColors) && kind != GraphKind.Heatmap && !ChartTopology.Supports(kind)) {
             var palette = theme ?? Themes.ThemePalette.Default;
             for (int index = 0; index < Themes.ThemePalette.SeriesColorCount; index++) {
                 Palette[2 + index] = Chart.AutomaticSeriesColor(palette, ink, kind, index);
@@ -209,12 +210,15 @@ internal sealed partial class SixelPlot {
 
                 int x = kind is GraphKind.Bars or GraphKind.ColumnLine ? columns.Center(point.X, range, width) : X(point.X);
                 double y = Y(value);
+                if (categoryColors) {
+                    color = (byte)(2 + point.Index % Themes.ThemePalette.SeriesColorCount);
+                }
                 if (seriesKind is GraphKind.Area or GraphKind.Stem or GraphKind.Bars) {
                     var bounds = seriesKind == GraphKind.Bars ? columns.Bounds(index, point.X, range, width) : new XenoAtom.Terminal.UI.Geometry.Rectangle(x, 0, 1, 1);
                     for (int column = bounds.X; column < bounds.Right; column++) {
                         if (kind != GraphKind.ColumnLine) {
                             FillColumn(column, Math.Min(baseline, (int)Math.Ceiling(y)), Math.Max(baseline, (int)Math.Ceiling(y)),
-                                multiple ? color : seriesKind == GraphKind.Area ? (byte)2 : seriesKind == GraphKind.Bars ? (byte)5 : color);
+                                multiple || categoryColors ? color : seriesKind == GraphKind.Area ? (byte)2 : seriesKind == GraphKind.Bars ? (byte)5 : color);
                             continue;
                         }
 
@@ -249,7 +253,7 @@ internal sealed partial class SixelPlot {
                 }
 
                 if ((seriesKind != GraphKind.Bars && series.Marker != ChartMarker.None) || point.Index == selected) {
-                    if (!multiple) {
+                    if (!multiple && !categoryColors) {
                         Dot(x, y);
                     }
                     else {

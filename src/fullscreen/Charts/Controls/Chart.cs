@@ -557,6 +557,9 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     private Color DefaultSeriesColor(int index) =>
         AutomaticSeriesColor(Palette, PixelInk, GraphKind, index);
 
+    internal static bool UsesCategoryColors(ChartDataSeries[] data, GraphKind kind) =>
+        kind is GraphKind.Bars or GraphKind.HorizontalBars && data.Length == 1 && data[0].Color is null;
+
     internal static Color AutomaticSeriesColor(Themes.ThemePalette palette, Color ink, GraphKind kind, int index) =>
         index % Themes.ThemePalette.SeriesColorCount == 0 ? ink : palette.SeriesColor(index);
 }

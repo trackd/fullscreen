@@ -246,7 +246,7 @@ public partial class Chart {
             }
 
             projected.Add(new(series.Property, points) {
-                Color = series.Color ?? DefaultSeriesColor(index),
+                Color = UsesCategoryColors(data, GraphKind) ? null : series.Color ?? DefaultSeriesColor(index),
                 LineStyle = series.LineStyle,
                 Marker = series.Marker,
                 Role = series.Role,
@@ -808,7 +808,8 @@ public partial class Chart {
             var original = GetData(Math.Max(1, Bounds.Width));
             foreach (var entry in GetLegend().Entries) {
                 var style = entry.Index < 0 ? Palette.Muted : entry.Point >= 0
-                    ? Palette.Body.WithForeground(GraphKind == GraphKind.Gauge ? Palette.Accent : DefaultSeriesColor(entry.Point))
+                    ? Palette.Body.WithForeground(GraphKind == GraphKind.Gauge ? Palette.Accent
+                        : DefaultSeriesColor(UsesCategoryColors(original, GraphKind) ? original[entry.Index].Points[entry.Point].Index : entry.Point))
                     : original[entry.Index].Visible
                     ? Palette.Body.WithForeground(original[entry.Index].Color ?? DefaultSeriesColor(entry.Index)) : Palette.Muted;
                 WriteFeature(

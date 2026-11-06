@@ -218,6 +218,15 @@ Describe 'Chart showcase' {
                     $chart.Bounds.Height | Should -BeGreaterThan 4
                     $chart.Bounds.Bottom | Should -BeLessOrEqual $size[1]
                     $draw.Invoke($chart, [object[]]@($plot, 640, 320))
+                    if ($kind -in 'Bars', 'HorizontalBars', 'StackedBars') {
+                        $chart.ShowLegend | Should -BeTrue
+                        $pixels = $plot.GetType().GetField('_pixels', $flags).GetValue($plot)
+                        $lastColor = if ($kind -eq 'StackedBars') { 4 } else { 5 }
+                        foreach ($color in 2..$lastColor) {
+                            [Array]::IndexOf[byte]($pixels, [byte]$color, 0, (640 * 320)) |
+                                Should -BeGreaterOrEqual 0 -Because "$kind must paint each category or series in its own legend color"
+                        }
+                    }
                     $painted = $plot.GetType().GetField('_lastColumns', $flags).GetValue($plot) | Measure-Object -Maximum
                     $painted.Maximum | Should -BeGreaterThan 0 -Because "$kind must contain painted geometry, not only a Sixel palette header"
                     $payload = $encode.Invoke($encoder, @($plot))

@@ -42,7 +42,7 @@ public partial class Chart {
         var entries = new List<LegendEntry>();
         int width = Bounds.Width, maxRows = Math.Max(0, (Bounds.Height - TitleRows - (ShowAxes ? 1 : 0)) / 2);
         int x = 0, row = 0;
-        bool rows = ChartRadial.IsRows(GraphKind) && data.Length == 1;
+        bool rows = ChartRadial.IsRows(GraphKind) && data.Length == 1 || UsesCategoryColors(data, GraphKind);
         int count = rows ? data[0].Count : data.Length;
         double largest = 0, total = 0;
         if (rows && GraphKind == GraphKind.Pie) {
@@ -64,7 +64,7 @@ public partial class Chart {
                 string value = point.Y is { } number ? number.ToString("G4", System.Globalization.CultureInfo.InvariantCulture) : "missing";
                 string proportion = GraphKind == GraphKind.Pie && total > 0 && point.Y is { } portion
                     ? $" ({(portion / largest / total * 100).ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}%)" : "";
-                bool overflow = GraphKind != GraphKind.Pie && (point.Y < (Minimum ?? 0) || point.Y > (Maximum ?? 100));
+                bool overflow = ChartRadial.IsRows(GraphKind) && GraphKind != GraphKind.Pie && (point.Y < (Minimum ?? 0) || point.Y > (Maximum ?? 100));
                 label = $"{(series.Visible ? "●" : "○")} {point.Label}: {value}{proportion}{(overflow ? " !" : "")}";
             }
             label = ChartText.Fit(label, width, ellipsis: true);
