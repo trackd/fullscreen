@@ -67,8 +67,7 @@ internal sealed class SixelChartPresenter(
             }
 
             if (visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)) {
-                // Popup is a viewport-sized input host; only its content covers pixels.
-                _windows.Add(visual is Popup { Content: { } content } ? content.Bounds : visual.Bounds);
+                _windows.Add(TerminalOverlayBounds.Window(visual));
             }
         }
     }

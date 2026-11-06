@@ -7,6 +7,7 @@ using fullscreen.Tables;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Layout;
 
 namespace fullscreen.Development;
 /// <summary>One serialized I/O worker; cached lazy pages and UI-thread-only publication.</summary>
@@ -14,6 +15,8 @@ public sealed partial class DeveloperApp : IFullscreenApp {
     private readonly IDeveloperBackend _backend;
     private readonly TimeSpan _refreshInterval;
     private readonly bool _readOnly;
+    private readonly int[] _visibleViews;
+    private static readonly int[] AzureViewOrder = [0, 1, 2, 3, 6, 4, 5];
     private readonly CancellationTokenSource _stop = new();
     private readonly Channel<Work> _requests = Channel.CreateBounded<Work>(32);
     private readonly ConcurrentQueue<Action> _completed = new();
@@ -34,6 +37,8 @@ public sealed partial class DeveloperApp : IFullscreenApp {
     private string _summary = "";
     private int _page;
     private bool _previewEnabled;
+    private PipelineMonitor? _pipelineMonitor;
+    private DeveloperItem? _requestedPipeline;
     private static readonly string[] AzureOptionalColumns = ["Type", "Board column", "Parent", "Priority", "Remaining", "Iteration", "Tags"];
     /// <summary>Gets the resource or monitor view index.</summary>
     public int View { get; private set; }
@@ -42,7 +47,8 @@ public sealed partial class DeveloperApp : IFullscreenApp {
     /// <summary>Gets the visual surface rendered by the application.</summary>
     public TableSurface Surface { get; }
     /// <summary>Gets the root visual whose descendants are inspected.</summary>
-    public Visual Root => Surface;
+    public Visual Root { get; }
+    private readonly VStack _dashboard = new() { IsVisible = false, HorizontalAlignment = Align.Stretch, VerticalAlignment = Align.Stretch };
 
     private sealed record Work(long Version, Func<CancellationToken, Task<Action>> Execute, bool Mutation = false);
     /// <summary>Initializes a new DeveloperApp instance.</summary>
@@ -53,58 +59,57 @@ public sealed partial class DeveloperApp : IFullscreenApp {
     /// <param name="readOnly">Whether actions that change external state are disabled. Defaults to
     /// false.</param>
     /// <param name="minimal">Whether reduced-chrome layout is enabled. Defaults to false.</param>
+    /// <param name="excludeTabs">Resource tabs hidden without loading their pages.</param>
     public DeveloperApp(
         IDeveloperBackend backend,
         int initialView = 0,
         int refreshSeconds = 30,
         bool readOnly = false,
-        bool minimal = false
+        bool minimal = false,
+        string[]? excludeTabs = null
     ) {
         _backend = backend;
+        var excluded = new HashSet<string>(excludeTabs ?? [], StringComparer.OrdinalIgnoreCase);
+        _visibleViews = [.. (backend is AzureDevOpsBackend ? AzureViewOrder : Enumerable.Range(0, backend.Tabs.Length))
+            .Where(view => !excluded.Contains(backend.Tabs[view].Replace(" ", "", StringComparison.Ordinal)))];
+        if (_visibleViews.Length == 0) {
+            throw new ArgumentException("At least one tab must remain visible.", nameof(excludeTabs));
+        }
         _previewEnabled = backend is not AzureDevOpsBackend;
         _refreshInterval = TimeSpan.FromSeconds(refreshSeconds);
         _readOnly = readOnly;
         Surface = new(new TableModel(["Loading"]), backend.Title) {
-            Tabs = backend.Tabs,
+            Tabs = [.. _visibleViews.Select(view => backend.Tabs[view])],
             DocumentTitle = "DETAILS",
             DocumentHint = "read-only · source data / diff",
             DocumentHelp = "Backspace list · Tab views · arrows scroll · F5 refresh · A actions · Q close",
             ExtraHelp = "A actions · F5 refresh · [/] pages · Shift↑↓ preview",
             Minimal = minimal
         };
+        Root = backend is AzureDevOpsBackend
+            ? new VStack(Surface, _dashboard) { Spacing = 1, HorizontalAlignment = Align.Stretch, VerticalAlignment = Align.Stretch }
+            : Surface;
         Surface.CellAccent = (row, column) => {
             string name = Surface.Model.Columns[column];
             if (name is not ("Status" or "Conclusion" or "Result" or "State")) {
                 return null;
             }
 
-            string value = row.Cells[column];
-            if (value.StartsWith("✓ ", StringComparison.Ordinal)) {
-                return Surface.Palette.Success;
-            }
-
-            if (value.StartsWith("✗ ", StringComparison.Ordinal)) {
-                return Surface.Palette.Error;
-            }
-
-            if (value.StartsWith("● ", StringComparison.Ordinal)) {
-                return Surface.Palette.Warning;
-            }
-
-            if (value.StartsWith("○ ", StringComparison.Ordinal)) {
-                return Surface.Palette.Foreground;
-            }
-
-            return value.ToLowerInvariant() switch {
-                "success" or "succeeded" or "completed" or "active" => Surface.Palette.Success,
-                "failure" or "failed" or "timed_out" or "startup_failure" or "action_required" => Surface.Palette.Error,
-                "queued" or "pending" or "in_progress" or "inprogress" or "waiting" or "requested"
-                    or "partiallysucceeded" => Surface.Palette.Warning,
-                "cancelled" or "canceled" or "skipped" or "disabled_manually" or "disabled_inactivity" => Surface.Palette.Foreground,
-                _ => null
-            };
+            return DeveloperStatus.Color(row.Cells[column], Surface.Palette);
         };
+        Surface.RowAccent = row => {
+            bool pullRequests = _backend is GitHubBackend && View == 1 || _backend is AzureDevOpsBackend && View == 4;
+            bool runs = _backend is GitHubBackend && View == 2 || _backend is AzureDevOpsBackend && View == 5;
+            int column = Array.IndexOf(Surface.Model.Columns, pullRequests ? "State" : runs ? "Result" : "");
+            return column >= 0 ? DeveloperStatus.Color(row.Cells[column], Surface.Palette) : null;
+        };
+        Surface.DocumentAccent = line => DeveloperStatus.LineColor(line, Surface.Palette);
         Surface.InspectRequested += _ => {
+            if (_backend is IPipelineBackend pipelines && pipelines.IsPipelineView(View)
+                && Surface.Model.Current?.Original is DeveloperItem run) {
+                RequestPipelineMonitor();
+                return;
+            }
             if (Busy) {
                 if (!_mutation && _loadingDetailKey is not null
                     && Surface.Model.Current?.Original is DeveloperItem pending
@@ -138,12 +143,21 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         Surface.ContextRequested += ShowActions;
         Surface.TabRequested += view => {
             if (!_mutation) {
-                SwitchView(view);
+                SwitchView(_visibleViews[view]);
             }
         };
         Surface.Shortcut += key => {
             switch (key.ToLowerInvariant()) {
+                case "y":
+                    if (_backend is AzureDevOpsBackend && View is not (4 or 5) && !Busy) {
+                        LoadBoardsAnalytics();
+                    }
+                    break;
                 case "u":
+                    if (_backend is AzureDevOpsBackend && View == 0 && !Busy) {
+                        LoadBoardsAnalytics();
+                        break;
+                    }
                     if (_backend is AzureDevOpsBackend && (AzureDevOpsBackend.IsWorkItemView(View) || View == 5)) {
                         ShowAnalytics();
                     }
@@ -154,7 +168,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
                     }
                     break;
                 case "i":
-                    if (_backend is AzureDevOpsBackend && View is 2 or 3 && !Busy) {
+                    if (_backend is AzureDevOpsBackend && View is 1 or 2 or 3 && !Busy) {
                         ShowSprints();
                     }
                     break;
@@ -171,8 +185,18 @@ public sealed partial class DeveloperApp : IFullscreenApp {
 
                     break;
                 case "l":
-                    if (!Busy && _backend is AzureDevOpsBackend && View == 6) {
-                        ShowBacklogLevels();
+                    if (!Busy && _backend is AzureDevOpsBackend) {
+                        if (View == 0) {
+                            ShowBoardLevels();
+                        }
+                        else if (View == 6) {
+                            ShowBacklogLevels();
+                        }
+                    }
+                    break;
+                case "t":
+                    if (!Busy && _backend is AzureDevOpsBackend && View == 1) {
+                        ShowWorkItemTypes();
                     }
                     break;
                 case "a":
@@ -245,7 +269,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) {
             }
         });
-        SwitchView(initialView);
+        SwitchView(_visibleViews.Contains(initialView) ? initialView : _visibleViews[0]);
     }
 
     /// <summary>Switches the resource view and starts loading its first page.</summary>
@@ -258,11 +282,21 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         if (_mutation) {
             return;
         }
+        if (!_visibleViews.Contains(view)) {
+            Surface.Status = "That tab is excluded. Restart without its -ExcludeTab entry to open it.";
+            Surface.Refresh();
+            return;
+        }
 
         View = view;
+        if (_backend is AzureDevOpsBackend) {
+            _dashboard.IsVisible = view == 0;
+            Surface.MaxHeight = view == 0 ? 12 : int.MaxValue;
+        }
+        _requestedPipeline = null;
         _analyticsRequested = false;
         _page = 0;
-        Surface.ActiveTab = view;
+        Surface.ActiveTab = Array.IndexOf(_visibleViews, view);
         _expanded = false;
         Surface.SetDocument(null);
         Surface.ResetColumns();
@@ -290,26 +324,54 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         }
     }
 
-    private void Load() {
+    private void Load(bool background = false) {
         if (_mutation) {
             return;
         }
 
         _error = false;
         Busy = true;
-        _selectedKey = null;
-        _loadingDetailKey = null;
-        _detail = "";
-        Surface.SetPreview("DETAILS", _previewEnabled ? "Loading…" : null);
+        if (!background) {
+            _selectedKey = null;
+            _loadingDetailKey = null;
+            _detail = "";
+            Surface.SetPreview("DETAILS", _previewEnabled ? "Loading…" : null);
+        }
         long version = Interlocked.Increment(ref _version);
         int view = View, page = _page;
-        Surface.Status = "Loading " + _backend.Tabs[view] + $" · page {page + 1}";
-        Surface.Refresh();
+        if (!background) {
+            Surface.Status = "Loading " + _backend.Tabs[view] + $" · page {page + 1}";
+            Surface.Refresh();
+        }
         _lastRefresh = Stopwatch.GetTimestamp();
         Queue(new(version, async token => {
             var result = await _backend.LoadAsync(view, page, token).ConfigureAwait(false);
             return () => {
                 var previous = Surface.Model;
+                bool unchanged = previous.Columns.SequenceEqual(result.Columns)
+                    && (Surface.PreferredWidths ?? []).SequenceEqual(result.Widths ?? [])
+                    && previous.Rows.Count == result.Items.Length;
+                for (int row = 0; unchanged && row < result.Items.Length; row++) {
+                    var item = result.Items[row];
+                    unchanged = previous.Rows[row].Original is DeveloperItem old && old.Key == item.Key
+                        && old.Cells.SequenceEqual(item.Cells) && Equals(old.State, item.State);
+                }
+                if (background && unchanged) {
+                    Busy = false;
+                    _summary = result.Summary;
+                    if (Surface.Status != result.Summary) {
+                        Surface.Status = result.Summary;
+                        Surface.Refresh();
+                    }
+                    if (view == 0 && _backend is AzureDevOpsBackend sameBoards) {
+                        LoadBoardDashboard(sameBoards);
+                    }
+                    return;
+                }
+                if (background) {
+                    _selectedKey = null;
+                    _detail = "";
+                }
                 var model = new TableModel(result.Columns) {
                     Filter = previous.Filter,
                     PreferredWidths = result.Widths,
@@ -322,6 +384,10 @@ public sealed partial class DeveloperApp : IFullscreenApp {
                     ) : -1;
                 model.SortColumn = MatchColumn(previous.SortColumn);
                 model.GroupColumn = MatchColumn(previous.GroupColumn);
+                if (_backend is AzureDevOpsBackend && view == 6 && !previous.Columns.Contains("Order", StringComparer.Ordinal)) {
+                    model.SortColumn = Array.IndexOf(model.Columns, "Order");
+                    model.Descending = false;
+                }
                 for (int column = 0; column < previous.Columns.Length; column++) {
                     int target = MatchColumn(column);
                     if (target >= 0) {
@@ -390,6 +456,9 @@ public sealed partial class DeveloperApp : IFullscreenApp {
                     _showBoardWhenLoaded = false;
                     ShowKanban();
                 }
+                if (view == 0 && _backend is AzureDevOpsBackend ado) {
+                    LoadBoardDashboard(ado);
+                }
             };
         }));
     }
@@ -426,6 +495,10 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         var item = Surface.Model.Current?.Original as DeveloperItem;
         var operations = _backend.Operations(View, item);
         var menu = operations.Where(operation => !_readOnly || operation.ReadOnly).Select(operation => new MenuItem(operation.Label, () => Prompt(operation))).ToList();
+        if (item is not null && _backend is IPipelineBackend pipelines && pipelines.IsPipelineView(View)) {
+            menu.Insert(0, new MenuItem("Monitor run · jobs / logs / artifacts", RequestPipelineMonitor));
+            menu.Insert(1, new MenuItem("Run overview", () => { _expanded = true; Detail(item); }));
+        }
         if (menu.Count == 0) {
             menu.Add(new MenuItem(_readOnly ? "Read-only mode · no write actions" : "Inspect the selected item to load available actions", () => {
             }));
@@ -522,6 +595,11 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         if (Busy) {
             return;
         }
+        if (operation.TargetView is { } destination && !_visibleViews.Contains(destination)) {
+            Surface.Status = "That tab is excluded. Restart without its -ExcludeTab entry to open it.";
+            Surface.Refresh();
+            return;
+        }
 
         if (_readOnly && !operation.ReadOnly) {
             return;
@@ -564,8 +642,22 @@ public sealed partial class DeveloperApp : IFullscreenApp {
 
     /// <inheritdoc cref="fullscreen.Hosting.IFullscreenApp.Tick"/>
     public bool Tick() {
+        if (_pipelineMonitor is { } monitor) {
+            monitor.Tick();
+            if (monitor.Closed) {
+                monitor.Dispose();
+                _pipelineMonitor = null;
+                AppFocus();
+            }
+            return !Surface.ExitRequested;
+        }
         while (_completed.TryDequeue(out var completion)) {
             completion();
+        }
+        if (!Busy && _requestedPipeline is { } run && _backend is IPipelineBackend pipelines && pipelines.IsPipelineView(View)) {
+            _requestedPipeline = null;
+            OpenPipelineMonitor(pipelines, run);
+            return !Surface.ExitRequested;
         }
 
         if (_analyticsRequested && !Busy) {
@@ -590,7 +682,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
                 Detail(item);
             }
             else if (!_error && Stopwatch.GetElapsedTime(_lastRefresh) >= _refreshInterval) {
-                Load();
+                Load(background: true);
             }
         }
 
@@ -604,6 +696,7 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         }
 
         _disposed = true;
+        _pipelineMonitor?.Dispose();
         _stop.Cancel();
         _requests.Writer.TryComplete();
         try {
@@ -628,5 +721,28 @@ public sealed partial class DeveloperApp : IFullscreenApp {
         }
 
         return text;
+    }
+
+    private void OpenPipelineMonitor(IPipelineBackend backend, DeveloperItem run) {
+        if (_pipelineMonitor is not null) {
+            return;
+        }
+        _pipelineMonitor = new(backend, run, Surface.Palette, Surface.Bounds.Width, Surface.Bounds.Height);
+        _pipelineMonitor.Show();
+    }
+
+    private void RequestPipelineMonitor() {
+        if (_backend is not IPipelineBackend pipelines || !pipelines.IsPipelineView(View)
+            || Surface.Model.Current?.Original is not DeveloperItem run || _mutation) {
+            return;
+        }
+        if (Busy) {
+            _requestedPipeline = run;
+            Surface.Status = "Opening run monitor when the current request finishes…";
+            Surface.Refresh();
+        }
+        else {
+            OpenPipelineMonitor(pipelines, run);
+        }
     }
 }

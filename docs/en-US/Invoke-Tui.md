@@ -54,6 +54,24 @@ For object-bound ErrorBars, set YProperty to the point-estimate field and
 LowerProperty/UpperProperty to the optional bound fields. Bounds remain in the
 source units and are preserved in saved definitions.
 
+All interactive Chart controls show point values after a 200 ms hover using the
+same native tooltip host as the designer, including Flamegraph frames and Gantt
+tasks. Unchanged data sampled on a tick preserves the tooltip; changed data
+dismisses stale details. Set ShowTooltips to false on a Chart
+node to disable hover without disabling selection. Click or use the arrow keys to select;
+Enter or double-click invokes the point. SelectionBind and Selection/Invoke
+events publish the original record, or the numeric value for a plain numeric
+collection. Bind a details control to SelectionBind to keep the selection visible.
+The ChartShowcase example pauses on selection and displays the record's fields.
+
+Hidden collection charts defer projection until shown, then apply the latest
+bound data. Timestamped scalar history charts continue collecting samples.
+Hidden Spectre controls defer rendering; visible controls reuse parsed text and
+styles when the rendered ANSI is unchanged. Mutable Spectre renderables are
+still sampled to detect changes. An embedded SystemMonitor that has started
+keeps graph-history collection alive while hidden, but defers table projection
+and drawing; closing the TUI disposes its worker.
+
 Set the root control's VerticalAlignment to Stretch for a full-height layout
 with independently scrolling panes. Other root alignments allow the whole layout
 to scroll vertically when it exceeds the terminal height.

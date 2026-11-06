@@ -175,7 +175,8 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
                     Text(pr, "number"),
                     Text(pr, "title"),
                     User(pr),
-                    Text(pr, "draft") == "True" ? "Draft" : "Ready",
+                    DeveloperStatus.PullRequestState(Text(pr, "state"), Text(pr, "draft") == "True",
+                        Text(pr, "merged_at").Length > 0, Text(pr, "mergeable_state")),
                     Text(pr.GetProperty("head"), "ref"),
                     Text(pr, "updated_at")
                 ],
@@ -315,22 +316,22 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
             _reviewedHeads[pr.Number] = head;
             string checkLines = string.Join(
                 '\n',
-                checks.GetProperty("check_runs").EnumerateArray().Select(check => Text(check, "name") +
-                " · " + Text(check, "status") +
-                " · " + Text(check, "conclusion"))
+                checks.GetProperty("check_runs").EnumerateArray().Select(check =>
+                    StatusLabel(Text(check, "status"), Text(check, "conclusion")) + "  " + Text(check, "name"))
             );
             string statusLines = statuses.TryGetProperty("contexts", out var contexts) ? string.Join(
                 '\n',
-                contexts.EnumerateArray().Select(status => Text(status, "context") +
-                " · " + Text(status, "state"))
+                contexts.EnumerateArray().Select(status =>
+                    StatusLabel(Text(status, "state"), "") + "  " + Text(status, "context"))
             ) : "";
             string reviewLines = string.Join(
                 '\n',
-                reviews.EnumerateArray().Select(review => User(review) +
-                " · " + Text(review, "state") +
+                reviews.EnumerateArray().Select(review => StatusLabel(Text(review, "state"), "") + "  " + User(review) +
                 " · " + Text(review, "body"))
             );
             return Text(current, "html_url") +
+                "\nState: " + DeveloperStatus.PullRequestState(Text(current, "state"), Text(current, "draft") == "True",
+                    Text(current, "merged_at").Length > 0, Text(current, "mergeable_state")) +
                 "\nHEAD " + head +
                 "\n\n" + Text(current, "title") +
                 "\n\n" + Text(current, "body") +
@@ -625,10 +626,11 @@ public sealed partial class GitHubBackend : IDeveloperBackend {
     internal static string StatusLabel(string status, string conclusion) {
         string state = conclusion.Length > 0 ? conclusion : status;
         string glyph = state.ToLowerInvariant() switch {
-            "success" or "succeeded" or "completed" or "active" => "✓",
-            "failure" or "failed" or "timed_out" or "startup_failure" or "action_required" => "✗",
+            "success" or "succeeded" or "active" or "approved" => "✓",
+            "failure" or "failed" or "error" or "timed_out" or "startup_failure" or "action_required" or "changes_requested" => "✗",
             "queued" or "pending" or "in_progress" or "waiting" or "requested" or "inprogress" or "partiallysucceeded" or "notstarted" => "●",
-            "cancelled" or "canceled" or "skipped" or "disabled_manually" or "disabled_inactivity" => "○",
+            "cancelled" or "canceled" or "skipped" or "neutral" or "stale" or "completed" or "commented" or "dismissed"
+                or "disabled_manually" or "disabled_inactivity" => "○",
             _ => "·"
         };
         return glyph + " " + (state.Length > 0 ? state : status);

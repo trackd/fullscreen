@@ -27,11 +27,14 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
     private sealed record Binding(TuiNode Node, Visual Control) {
         public object? Last { get; set; }
         public object? LastEdges { get; set; }
+        public bool Deferred { get; set; }
     }
 
     private readonly List<Binding> _bindings = [];
     private readonly Dictionary<Charts.Chart, Charts.ChartTopology> _diagramSnapshots = [];
     private readonly Dictionary<Charts.Chart, Charts.ChartDataSeries[]> _objectSeriesSnapshots = [];
+    private readonly Dictionary<Charts.Chart, Charts.ChartTask[]> _taskSnapshots = [];
+    private readonly Dictionary<Charts.Chart, Charts.ChartFrame[]> _frameSnapshots = [];
     private readonly List<Visual> _chrome = [];
     private readonly List<(TuiNode Node, ReusableTable Table)> _tables = [];
     private readonly List<(TuiNode Node, ReusableObjectExplorer Explorer)> _explorers = [];
@@ -275,6 +278,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                         FlameFrameRows = node.FlameFrameRows,
                         GraphKind = Enum.Parse<Charts.GraphKind>(node.GraphKind, true),
                         ShowLegend = node.ShowLegend,
+                        ShowTooltips = node.ShowTooltips,
                         ShowAxes = node.ShowAxes,
                         MinHeight = node.Height ?? 8
                     };
@@ -306,6 +310,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                         Maximum = node.Maximum ?? 0,
                         GraphKind = Enum.Parse<Charts.GraphKind>(node.GraphKind, true),
                         ShowLegend = node.ShowLegend,
+                        ShowTooltips = node.ShowTooltips,
                         ShowAxes = node.ShowAxes,
                         MinHeight = node.Height ?? 8
                     };
@@ -410,14 +415,15 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
 
         Controls.Add(node.Id, control);
-        if (control is Charts.Chart frameChart && (node.YProperty.Length > 0 || Charts.ChartTopology.Supports(frameChart.GraphKind) || frameChart.GraphKind is Charts.GraphKind.Flamegraph or Charts.GraphKind.Gantt)) {
+        if (control is Charts.Chart frameChart) {
             frameChart.SelectionChanged += selection => {
+                object value = selection.Source ?? selection.Y;
                 if (node.SelectionBind.Length > 0) {
-                    State[node.SelectionBind] = selection.Source;
+                    State[node.SelectionBind] = value;
                 }
-                _events.Enqueue(new(node.Id, "Selection", selection.Source));
+                Enqueue(node.Id, "Selection", value);
             };
-            frameChart.PointInvoked += selection => _events.Enqueue(new(node.Id, "Invoke", selection.Source));
+            frameChart.PointInvoked += selection => Enqueue(node.Id, "Invoke", selection.Source ?? selection.Y);
         }
         if (node.Bind.Length != 0) {
             var binding = new Binding(node, control) {
@@ -471,7 +477,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         chart.SetData(topology.Data);
         _diagramSnapshots[chart] = topology;
     }
-    private static void ReplaceChartTasks(Charts.Chart chart, TuiNode node, object? value) {
+    private void ReplaceChartTasks(Charts.Chart chart, TuiNode node, object? value) {
         if (UnwrapChartValue(value) is not IEnumerable values || value is string) {
             throw new ArgumentException("Gantt requires a collection of absolute task intervals.");
         }
@@ -481,15 +487,16 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
             rows.Add(item is null ? throw new ArgumentException("Gantt task rows cannot be null.") : System.Management.Automation.PSObject.AsPSObject(item));
             sources.Add(item);
         }
-        if (rows.Count == 0) {
-            chart.SetData(new Charts.ChartSchedule([]).Data);
+        var tasks = rows.Count == 0 ? [] : new Charts.ObjectChartData(rows).ReadTasks(
+            node.StartProperty, node.EndProperty, node.TaskNameProperty,
+            node.ProgressProperty.Length == 0 ? null : node.ProgressProperty, [.. Enumerable.Range(0, rows.Count)], sources);
+        if (_taskSnapshots.TryGetValue(chart, out var previous) && previous.AsSpan().SequenceEqual(tasks)) {
             return;
         }
-        var data = new Charts.ObjectChartData(rows);
-        chart.SetData(data.ProjectTasks(node.StartProperty, node.EndProperty, node.TaskNameProperty,
-            node.ProgressProperty.Length == 0 ? null : node.ProgressProperty, [.. Enumerable.Range(0, rows.Count)], sources));
+        chart.SetData(new Charts.ChartSchedule(tasks).Data);
+        _taskSnapshots[chart] = tasks;
     }
-    private static void ReplaceChartFrames(Charts.Chart chart, TuiNode node, object? value) {
+    private void ReplaceChartFrames(Charts.Chart chart, TuiNode node, object? value) {
         if (UnwrapChartValue(value) is not IEnumerable values || value is string) {
             throw new ArgumentException("Flamegraph requires a collection of FrameId/ParentId/self-weight records.");
         }
@@ -502,24 +509,31 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
             rows.Add(System.Management.Automation.PSObject.AsPSObject(item));
             sources.Add(item);
         }
-        if (rows.Count == 0) {
-            chart.SetData(new Charts.ChartFlameTree([]).Data);
+        var data = rows.Count == 0 ? null : new Charts.ObjectChartData(rows);
+        var frames = data is null ? [] : data.ReadFrames(node.FrameIdProperty, node.ParentIdProperty,
+            node.FrameNameProperty.Length == 0 ? null : node.FrameNameProperty,
+            data.Resolve(node.WeightProperty), [.. Enumerable.Range(0, rows.Count)], sources);
+        if (_frameSnapshots.TryGetValue(chart, out var previous) && previous.AsSpan().SequenceEqual(frames)) {
             return;
         }
-        var data = new Charts.ObjectChartData(rows);
-        chart.SetData(data.ProjectFrames(node.FrameIdProperty, node.ParentIdProperty, node.FrameNameProperty.Length == 0 ? null : node.FrameNameProperty,
-            data.Resolve(node.WeightProperty), [.. Enumerable.Range(0, rows.Count)], sources));
+        chart.SetData(new Charts.ChartFlameTree(frames).Data);
+        _frameSnapshots[chart] = frames;
     }
     private static void ReplaceChartValues(Charts.Chart chart, object? value) {
-        chart.Values.Clear();
+        var samples = new List<double>();
         if (UnwrapChartValue(value) is IEnumerable values and not string) {
             foreach (var item in values) {
-                chart.Values.Add(UnwrapChartValue(item) is null ? double.NaN : Number(item));
+                samples.Add(UnwrapChartValue(item) is null ? double.NaN : Number(item));
             }
         }
         else {
-            chart.Values.Add(value is null ? double.NaN : Number(value));
+            samples.Add(value is null ? double.NaN : Number(value));
         }
+        if (chart.Values.SequenceEqual(samples)) {
+            return;
+        }
+        chart.Values.Clear();
+        chart.Values.AddRange(samples);
     }
 
     private void ReplaceChartObjectSeries(Charts.Chart chart, TuiNode node, object? value) {
@@ -680,11 +694,18 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
             }
 
             object? value = State[binding.Node.Bind];
+            if (binding.Control is Charts.Chart or SpectreView
+                && Root.App is not null
+                && !TuiComponentHost.IsVisibleWithin(binding.Control, Root)) {
+                binding.Deferred = true;
+                continue;
+            }
             if (binding.Control is SpectreView spectre) {
-                if (!_preview && (_chartSampleDue || !ReferenceEquals(value, binding.Last))) {
+                if (!_preview && (_chartSampleDue || binding.Deferred || !ReferenceEquals(value, binding.Last))) {
                     spectre.SetContent(value);
                 }
 
+                binding.Deferred = false;
                 binding.Last = value;
                 continue;
             }
@@ -700,7 +721,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
 
             if (binding.Control is Charts.Chart numericChart) {
                 object? edges = binding.Node.EdgeBind.Length == 0 ? null : State[binding.Node.EdgeBind];
-                if (_chartSampleDue || !ReferenceEquals(value, binding.Last) || !ReferenceEquals(edges, binding.LastEdges)) {
+                if (_chartSampleDue || binding.Deferred || !ReferenceEquals(value, binding.Last) || !ReferenceEquals(edges, binding.LastEdges)) {
                     if (Charts.ChartTopology.Supports(numericChart.GraphKind)) {
                         ReplaceChartTopology(numericChart, binding.Node, value);
                     }
@@ -720,6 +741,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
 
                 binding.Last = value;
                 binding.LastEdges = edges;
+                binding.Deferred = false;
                 continue;
             }
 

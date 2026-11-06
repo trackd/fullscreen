@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using fullscreen.Charts;
+using fullscreen.Custom;
 using fullscreen.Monitoring;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Rendering;
 
 namespace fullscreen.Tests;
@@ -22,23 +24,20 @@ public sealed class MonitorFollowupTests {
         SpinWait.SpinUntil(() => { ui.Tick(); return predicate(); }, 5000);
 
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task DashboardBackgroundSamplingKeepsHistoriesCurrentAndStillPauses(bool enabled) {
+    public async Task DashboardHistoriesStayCurrentAcrossViewsAndStillPause() {
         var source = new FixtureSource();
         using var app = new MonitorApp(60, 100, "", ProcessSort.Cpu, MonitorView.Services,
-            source, minimal: true, backgroundSampling: enabled);
+            source, minimal: true);
         var surface = (MonitorSurface)app.Root;
         await using var ui = new DesignerUxTests.UiSession(surface, () => app.Tick());
-        Assert.IsTrue(Wait(ui, () => source.Samples.Count >= 3 && surface.Frame.ServiceCount == 1));
+        Assert.IsTrue(Wait(ui, () => source.Samples.Count >= 3 && surface.Frame.ServiceCount == 1
+            && History(surface, "_cpuHistory").Count >= 2));
         const CollectorMetrics summary = CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu;
-        Assert.AreEqual(enabled ? CollectorMetrics.Services | summary : CollectorMetrics.Services, surface.RequiredMetrics);
+        Assert.AreEqual(CollectorMetrics.Services | summary, surface.RequiredMetrics);
         foreach (string name in new[] { "_cpuHistory", "_memoryHistory", "_receiveHistory", "_sendHistory", "_gpuHistory", "_vramHistory" }) {
             var history = History(surface, name);
-            Assert.AreEqual(enabled, history.Count >= 2, name);
-            if (enabled) {
-                Assert.IsNotNull(history.ValueAt(history.Count - 1), name);
-            }
+            Assert.IsGreaterThanOrEqualTo(2, history.Count, name);
+            Assert.IsNotNull(history.ValueAt(history.Count - 1), name);
         }
         Assert.IsTrue(source.Samples.All(metrics => (metrics & (CollectorMetrics.Processes | CollectorMetrics.Users | CollectorMetrics.Owners)) == 0));
         ui.App.Focus(surface);
@@ -47,6 +46,34 @@ public sealed class MonitorFollowupTests {
         int count = History(surface, "_cpuHistory").Count;
         for (int tick = 0; tick < 30; tick++) { ui.Tick(); }
         Assert.AreEqual(count, History(surface, "_cpuHistory").Count);
+    }
+
+    [TestMethod]
+    public async Task HiddenEmbeddedMonitor_KeepsHistoryWithoutReprojectionAndCatchesUpOnShow() {
+        var source = new FixtureSource();
+        MonitorApp? monitor = null;
+        using var host = new TuiComponentHost("Monitor", () => monitor = new MonitorApp(
+            60, 100, "", ProcessSort.Cpu, MonitorView.Processes, source, minimal: true));
+        var tabs = new TabControl(new TabPage("Monitor", host), new TabPage("Other", new TextBlock("Other"))) {
+            VerticalAlignment = Align.Stretch, HorizontalAlignment = Align.Stretch
+        };
+        await using var ui = new DesignerUxTests.UiSession(tabs, () => host.Tick(tabs));
+        Assert.IsTrue(Wait(ui, () => monitor is not null && ((MonitorSurface)monitor.Root).Model.Rows.Length > 0));
+        var surface = (MonitorSurface)monitor!.Root;
+        tabs.SelectedIndex = 1;
+        ui.Tick();
+        int samples = History(surface, "_cpuHistory").Count;
+        var revision = typeof(MonitorSurface).GetProperty("Revision", Private)!;
+        int before = (int)revision.GetValue(surface)!;
+        Assert.IsTrue(Wait(ui, () => History(surface, "_cpuHistory").Count >= samples + 2));
+        Assert.IsTrue(host.Running, "Hiding ftop must not dispose its sampling worker.");
+        Assert.AreEqual(before, revision.GetValue(surface), "Hidden frames must not invalidate the monitor presentation.");
+        const CollectorMetrics summary = CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu;
+        Assert.AreEqual(summary, source.Samples.Last(), "Hidden tables must not request expensive per-process counters.");
+        tabs.SelectedIndex = 0;
+        Assert.IsTrue(Wait(ui, () => (int)revision.GetValue(surface)! > before && !surface.DeferPresentation
+            && surface.Model.Rows.Length > 0));
+        Assert.IsGreaterThanOrEqualTo(samples + 2, History(surface, "_cpuHistory").Count);
     }
 
     [TestMethod]

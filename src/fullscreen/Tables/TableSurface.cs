@@ -64,6 +64,10 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
     public Func<TableRow, Color?>? RowAccent { get; set; }
     /// <summary>Gets or sets the callback selecting an optional cell accent.</summary>
     public Func<TableRow, int, Color?>? CellAccent { get; set; }
+    /// <summary>Gets or sets the callback selecting an optional detail or preview line accent.</summary>
+    public Func<string, Color?>? DocumentAccent { get; set; }
+    /// <summary>Gets or sets whether right-clicking a header opens its text filter.</summary>
+    public bool ColumnFiltering { get; set; }
     /// <summary>Gets or sets the available tab headings.</summary>
     public string[]? Tabs { get; set; }
     /// <summary>Gets or sets the index of the active directory tab.</summary>
@@ -100,6 +104,14 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         Refresh();
     }
 
+    internal void UpdateLivePreview(string title, string text, bool follow) {
+        _previewTitle = title;
+        _preview = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        _previewOffset = follow ? Math.Max(0, _preview.Length - Height)
+            : Math.Min(_previewOffset, Math.Max(0, _preview.Length - Height));
+        Refresh();
+    }
+
     private string[]? _document;
     private int _documentOffset;
     private int _documentX;
@@ -114,6 +126,13 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         _documentX = 0;
         _documentSearching = false;
         _documentSearch = "";
+        Refresh();
+    }
+
+    internal void UpdateLiveDocument(string text, bool follow) {
+        _document = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        _documentOffset = follow ? Math.Max(0, _document.Length - DocumentRows)
+            : Math.Min(_documentOffset, Math.Max(0, _document.Length - DocumentRows));
         Refresh();
     }
 
@@ -254,7 +273,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         if (_document is not null) {
             for (int i = _documentOffset; i < Math.Min(_document.Length, _documentOffset + DocumentRows); i++) {
                 var line = _document[i].AsSpan();
-                Style style = DocumentTitle != "JSON" && line.StartsWith("+") ? Palette.Added : DocumentTitle != "JSON" && line.StartsWith("-") ? Palette.Removed : line.TrimStart().StartsWith("\"") || line.StartsWith("@@") ? Accent : Body;
+                Style style = DocumentStyle(_document[i]);
                 Write(
                     buffer,
                     2,
@@ -315,7 +334,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                 buffer,
                 x,
                 HeaderTop,
-                Model.Columns[column] + (column == Model.GroupColumn ? " ▦" : "") + (column == Model.SortColumn ? Model.Descending ? " ↓" : " ↑" : ""),
+                Model.Columns[column] + (Model.ColumnFilters.ContainsKey(column) ? " ◆" : "") + (column == Model.GroupColumn ? " ▦" : "") + (column == Model.SortColumn ? Model.Descending ? " ↓" : " ↑" : ""),
                 Accent,
                 columnWidth - 1
             );
@@ -394,7 +413,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
             Write(buffer, GridWidth + 2, HeaderTop, _previewTitle, Accent, Bounds.Width - GridWidth - 3);
             for (int i = _previewOffset; i < Math.Min(_preview.Length, _previewOffset + Height); i++) {
                 string line = _preview[i];
-                Style style = line.StartsWith('+') ? Palette.Added : line.StartsWith('-') ? Palette.Removed : line.StartsWith("@@", StringComparison.Ordinal) ? Accent : Body;
+                Style style = DocumentStyle(line, diff: true);
                 Write(buffer, GridWidth + 2, HeaderTop + 1 + i - _previewOffset, line, style, Bounds.Width - GridWidth - 3);
             }
         }
@@ -429,6 +448,16 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         if (Minimal && Status.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase)) {
             Write(buffer, 1, Bounds.Height - 1, Status, Palette.Removed, Bounds.Width - 2);
         }
+    }
+
+    private Style DocumentStyle(string line, bool diff = false) {
+        if (DocumentAccent?.Invoke(line) is { } color) {
+            return Body.WithForeground(color);
+        }
+
+        return (diff || DocumentTitle != "JSON") && line.StartsWith('+') ? Palette.Added
+            : (diff || DocumentTitle != "JSON") && line.StartsWith('-') ? Palette.Removed
+            : line.AsSpan().TrimStart().StartsWith("\"") || line.StartsWith("@@", StringComparison.Ordinal) ? Accent : Body;
     }
 
     private int ColumnWidth() {
@@ -562,9 +591,13 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         dialog = new Dialog {
             Title = new TextBlock("Details"),
             IsModal = true,
-            Width = Math.Max(20, Math.Min(100, Bounds.Width - 4)),
-            Height = Math.Max(8, Bounds.Height - 4),
-            Content = new VStack(new ScrollViewer(new TextBlock(text)), new Button("Close").Click(() => dialog!.Close()))
+            Width = Math.Max(1, Math.Min(100, Bounds.Width - 4)),
+            Height = Math.Max(1, Bounds.Height - 4),
+            Content = new VStack(new ScrollViewer(new Paragraph(text) { Wrap = true }) {
+                HorizontalScrollEnabled = false,
+                HorizontalAlignment = Align.Stretch,
+                VerticalAlignment = Align.Stretch
+            }, new Button("Close").Click(() => dialog!.Close()))
         };
         dialog.KeyDown((_, e) => {
             if (e.Key == TerminalKey.Escape) {
@@ -641,7 +674,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
             return;
         }
 
-        if (!_filtering && e.Key == TerminalKey.Escape && (_document is not null || Model.Filter.Length == 0)
+        if (!_filtering && e.Key == TerminalKey.Escape && (_document is not null || Model.Filter.Length == 0 && Model.ColumnFilters.Count == 0)
             && BackRequested?.Invoke() == true) {
             e.Handled = true;
             return;
@@ -755,8 +788,9 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                 Shortcut?.Invoke("back");
                 break;
             case TerminalKey.Escape:
-                if (Model.Filter.Length > 0) {
+                if (Model.Filter.Length > 0 || Model.ColumnFilters.Count > 0) {
                     Model.Filter = "";
+                    Model.ColumnFilters.Clear();
                     Model.Rebuild();
                 }
                 else if (Embedded) {
@@ -954,6 +988,58 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         ContextMenuService.Show(this, items, Bounds.X + 2, Bounds.Y + 3);
     }
 
+    /// <summary>Opens a column picker followed by a text-only filter editor.</summary>
+    public void ShowColumnFilterMenu() {
+        var items = Model.Columns.Select((name, column) =>
+            new MenuItem(name, () => ShowColumnFilter(column))).ToList();
+        items.Add(new MenuItem("Clear column filters", () => {
+            Model.ColumnFilters.Clear();
+            Model.Rebuild();
+            Refresh();
+        }));
+        ContextMenuService.Show(this, items, Bounds.X + 2, Bounds.Y + 3);
+    }
+
+    private void ShowColumnFilter(int column) {
+        var input = new TextBox(Model.ColumnFilters.GetValueOrDefault(column, ""));
+        Dialog? dialog = null;
+        void Close() {
+            dialog!.Close();
+            App?.Focus(this);
+        }
+        void Apply() {
+            string value = input.Text ?? "";
+            if (value.Length == 0) {
+                Model.ColumnFilters.Remove(column);
+            }
+            else {
+                Model.ColumnFilters[column] = value;
+            }
+            Model.Rebuild();
+            Refresh();
+            Close();
+        }
+        dialog = new Dialog {
+            Title = new TextBlock("Filter " + Model.Columns[column]),
+            IsModal = true,
+            Width = Math.Max(1, Math.Min(70, Bounds.Width - 4)),
+            Content = new VStack(new TextBlock("Contains text (case-insensitive); empty clears"), input,
+                new HStack(new Button("Apply").Click(Apply), new Button("Cancel").Click(Close)))
+        };
+        dialog.KeyDown((_, e) => {
+            if (e.Key == TerminalKey.Escape) {
+                Close();
+                e.Handled = true;
+            }
+            else if (e.Key == TerminalKey.Enter) {
+                Apply();
+                e.Handled = true;
+            }
+        });
+        dialog.Show();
+        App?.Focus(input);
+    }
+
     private void Columns() {
         var items = new MenuItem[Model.Columns.Length];
         for (int i = 0; i < items.Length; i++) {
@@ -1032,7 +1118,10 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
                 int width = Width(i, x);
                 if (e.LocalX >= x && e.LocalX < x + width) {
-                    if (Model.SortColumn == i) {
+                    if (ColumnFiltering && e.Button == TerminalMouseButton.Right) {
+                        ShowColumnFilter(i);
+                    }
+                    else if (Model.SortColumn == i) {
                         Model.Descending = !Model.Descending;
                     }
                     else {

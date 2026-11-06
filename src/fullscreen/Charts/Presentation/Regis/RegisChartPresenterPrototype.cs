@@ -59,7 +59,7 @@ internal sealed class RegisChartPresenterPrototype(TerminalInstance terminal, Te
             Math.Clamp((int)Math.Round(x * 799d / columns), 0, 799);
         int ScreenY(int y) =>
             Math.Clamp((int)Math.Round(y * 479d / rows), 0, 479);
-        var windows = context.App.Root.EnumerateVisualsDepthFirst().Where(visual => visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)).Select(visual => visual is Popup { Content: { } content } ? content.Bounds : visual.Bounds).ToList();
+        var windows = context.App.Root.EnumerateVisualsDepthFirst().Where(visual => visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)).Select(TerminalOverlayBounds.Window).ToList();
         var debug = TerminalOverlayBounds.Debug(context.App);
         if (debug.Width > 0 && debug.Height > 0) {
             windows.Add(debug);

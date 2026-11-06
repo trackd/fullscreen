@@ -34,6 +34,8 @@ public sealed class TableModel(string[] columns) {
     public HashSet<long> Marked { get; } = [];
     /// <summary>Gets or sets the text or expression used to restrict visible rows.</summary>
     public string Filter { get; set; } = "";
+    /// <summary>Gets case-insensitive substring filters keyed by column index.</summary>
+    public Dictionary<int, string> ColumnFilters { get; } = [];
     /// <summary>Gets the latest filter parsing error, or null when the filter is valid.</summary>
     public string? FilterError { get; private set; }
     /// <summary>Gets or sets the column index used for sorting.</summary>
@@ -52,10 +54,12 @@ public sealed class TableModel(string[] columns) {
     public TableRow? Current => Selected < Visible.Count ? Visible[Selected] : null;
 
     private string? _applied;
+    private KeyValuePair<int, string>[] _appliedColumns = [];
     /// <summary>Applies a longer plain filter to the already sorted visible rows; anything else rebuilds.</summary>
     public void Narrow() {
         string filter = Filter;
-        if (_applied is null || !filter.Contains(_applied, StringComparison.OrdinalIgnoreCase)
+        if (_applied is null || !_appliedColumns.SequenceEqual(ColumnFilters)
+            || !filter.Contains(_applied, StringComparison.OrdinalIgnoreCase)
             || Pattern(filter)
             || Pattern(_applied)) {
             Rebuild();
@@ -114,6 +118,10 @@ public sealed class TableModel(string[] columns) {
                 continue;
             }
 
+            if (!MatchesColumns(row)) {
+                continue;
+            }
+
             try {
                 if (filter.Length > 0
                     && !row.Cells.Any(cell => pattern is null ? cell.Contains(filter, StringComparison.OrdinalIgnoreCase) : pattern.IsMatch(cell))) {
@@ -149,7 +157,18 @@ public sealed class TableModel(string[] columns) {
         }
 
         _applied = filter;
+        _appliedColumns = [.. ColumnFilters];
         Reselect(selected);
+    }
+
+    private bool MatchesColumns(TableRow row) {
+        foreach (var (column, text) in ColumnFilters) {
+            if (column >= 0 && column < row.Cells.Length
+                && !row.Cells[column].Contains(text, StringComparison.OrdinalIgnoreCase)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>Selects a visible table row and adjusts the scroll offset.</summary>

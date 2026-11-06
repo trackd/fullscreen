@@ -28,11 +28,13 @@ public sealed partial class AzureDevOpsBackend {
         string source = S(P(pull, "lastMergeSourceCommit"), "commitId");
         string target = S(P(pull, "lastMergeTargetCommit"), "commitId");
         var text = new StringBuilder("#" + item.Key + " · " + S(pull, "title") +
+            "\nState: " + DeveloperStatus.PullRequestState(S(pull, "status"), S(pull, "isDraft") == "True",
+                S(pull, "status") == "completed", S(pull, "mergeStatus")) +
             "\n" + S(pull, "status") + " · " + Identity(P(pull, "createdBy")) +
             "\n" + S(pull, "sourceRefName") + " → " + S(pull, "targetRefName") +
             "\n\nDESCRIPTION\n" + Plain(S(pull, "description")) +
             "\n\nREVIEWERS\n" + string.Join('\n', Values(pull, "reviewers").Select(reviewer =>
-                Identity(reviewer) + " · " + VoteLabel(Number(reviewer, "vote")))));
+                VoteLabel(Number(reviewer, "vote")) + "  " + Identity(reviewer))));
         text.AppendLine("\n\nDISCUSSION");
         foreach (var thread in Values(threads).Where(thread => P(thread, "isDeleted").ValueKind != JsonValueKind.True)) {
             foreach (var comment in Values(thread, "comments").Where(comment => P(comment, "isDeleted").ValueKind != JsonValueKind.True)) {

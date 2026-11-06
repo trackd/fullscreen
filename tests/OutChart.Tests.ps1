@@ -3,6 +3,47 @@ BeforeAll {
 }
 
 Describe 'Out-Chart pipeline contract' {
+    It 'Binds diagram collection aliases by name and pipeline property' {
+        $nodes = @([pscustomobject]@{ NodeId = 'a' })
+        $edges = @([pscustomobject]@{ SourceId = 'a'; TargetId = 'missing' })
+        { Out-Chart -Vertices $nodes -Links $edges -ErrorAction Stop } |
+            Should -Throw '*existing SourceId/TargetId*'
+        { Out-Chart -Vertices $nodes -Connections $edges -ErrorAction Stop } |
+            Should -Throw '*existing SourceId/TargetId*'
+        { [pscustomobject]@{ Vertices = $nodes } | Out-Chart -Edges $edges -ErrorAction Stop } |
+            Should -Throw '*existing SourceId/TargetId*'
+        { [pscustomobject]@{ Links = $edges } | Out-Chart -Nodes $nodes -ErrorAction Stop } |
+            Should -Throw '*existing SourceId/TargetId*'
+        { [pscustomobject]@{ Connections = $edges } | Out-Chart -Nodes $nodes -ErrorAction Stop } |
+            Should -Throw '*existing SourceId/TargetId*'
+    }
+
+    It 'Enables property-name binding for object inputs and combines piped diagram collections' {
+        $command = Get-Command fullscreen\Out-Chart
+        foreach ($name in 'InputObject', 'Nodes', 'Edges') {
+            $command.Parameters[$name].Attributes.ValueFromPipelineByPropertyName | Should -Contain $true
+        }
+        $nodes = @(
+            [pscustomobject]@{ NodeId = 'a' }
+            [pscustomobject]@{ NodeId = 'b' }
+        )
+        $records = @(
+            [pscustomobject]@{ Edges = @([pscustomobject]@{ SourceId = 'a'; TargetId = 'b' }) }
+            [pscustomobject]@{ Edges = @([pscustomobject]@{ SourceId = 'b'; TargetId = 'missing' }) }
+        )
+        { $records | Out-Chart -Nodes $nodes -ErrorAction Stop } |
+            Should -Throw '*existing SourceId/TargetId*'
+        $nodeRecords = @(
+            [pscustomobject]@{ Nodes = @([pscustomobject]@{ NodeId = 'a' }) }
+            [pscustomobject]@{ Nodes = @([pscustomobject]@{ NodeId = 'b' }) }
+        )
+        $edges = @([pscustomobject]@{ SourceId = 'b'; TargetId = 'missing' })
+        { $nodeRecords | Out-Chart -Edges $edges -ErrorAction Stop } |
+            Should -Throw '*existing SourceId/TargetId*'
+        { $records | Out-Chart -Nodes $nodes -MaximumCount 3 -ErrorAction Stop } |
+            Should -Throw -ErrorId 'FullscreenChartLimit*'
+    }
+
     It 'Accepts separate diagram collections and validates references before terminal startup' {
         $command = Get-Command fullscreen\Out-Chart
         foreach ($field in 'Nodes', 'Edges') {

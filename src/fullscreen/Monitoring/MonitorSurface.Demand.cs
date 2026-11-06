@@ -1,21 +1,20 @@
 namespace fullscreen.Monitoring;
 
 public sealed partial class MonitorSurface {
-    /// <summary>Gets or sets whether dashboard summaries continue sampling while another view is active.</summary>
-    public bool BackgroundSampling { get; set; }
-    /// <summary>Gets the metric groups needed by the active view.</summary>
+    internal bool DeferPresentation { get; set; }
+    /// <summary>Gets graph-history summaries plus metric groups needed by the visible view.</summary>
     public CollectorMetrics RequiredMetrics {
         get {
             if (Paused) {
                 return CollectorMetrics.None;
             }
 
-            if (Bounds.Width > 0 && (Bounds.Width < 35 || Bounds.Height < 12)) {
-                return CollectorMetrics.None;
-            }
-
             const CollectorMetrics summaries = CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu;
-            CollectorMetrics background = BackgroundSampling ? summaries : CollectorMetrics.None;
+            CollectorMetrics background = summaries;
+            if (DeferPresentation || App is { } app && !Custom.TuiComponentHost.IsVisibleWithin(this, app.Root)
+                || Bounds.Width > 0 && (Bounds.Width < 35 || Bounds.Height < 12)) {
+                return summaries;
+            }
             if (View == MonitorView.Dashboard) {
                 return summaries;
             }

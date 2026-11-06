@@ -50,6 +50,14 @@ Follow, new lines are read as they are written, and truncated or replaced files
 are detected. F toggles scrolling to new entries; moving the selection stops it.
 Q closes the viewer.
 
+Use **Filter column** or right-click a column heading to enter a case-insensitive
+substring search for that column. Column searches combine with `/` and severity
+filtering; no list of distinct log values is built. An empty column search clears
+that filter. **L Severity** also provides a clickable minimum-level selector.
+Escape clears global and column searches before closing the viewer.
+Inspect shows the source and raw entry as wrapped, vertically scrollable text
+within the overlay width.
+
 Initial reads are limited to the last 8 MiB of each file, and lines longer than
 16 KiB characters are truncated. When old entries are discarded, their bookmarks
 are removed too.

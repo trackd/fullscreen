@@ -72,6 +72,10 @@ public sealed partial class TuiComponentHost : Themes.ThemedSurface, IDisposable
         }
 
         if (!IsVisibleWithin(this, root)) {
+            if (_application is Monitoring.MonitorApp monitor) {
+                monitor.Tick(visible: false);
+                return;
+            }
             Stop();
             _closedByUser = false;
             return;

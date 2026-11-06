@@ -33,6 +33,11 @@ public sealed partial class HistoryChart : Themes.ThemedSurface {
         get => _trend.ShowLegend;
         set => _trend.ShowLegend = value;
     }
+    /// <summary>Gets or sets whether the history chart allows hover tooltips. Defaults to true.</summary>
+    public bool ShowTooltips {
+        get => _trend.ShowTooltips;
+        set => _trend.ShowTooltips = value;
+    }
     /// <summary>Gets or sets whether the history chart shows supported coordinate axes.</summary>
     public bool ShowAxes {
         get => _trend.ShowAxes;

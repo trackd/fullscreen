@@ -37,7 +37,35 @@ fullscreen terminal app. Tabs load when first opened. Issues show their body and
 comments; pull requests show diffs, checks and reviews. Runs, jobs and steps show
 a green check, red cross or progress marker for their status. Workflows show their
 recent runs, and run details list jobs, steps, durations, pending deployments and
-artifacts with links that open in the browser.
+artifacts with links that open in the browser. Results are colored consistently
+in tables, previews and expanded details: green for success, red for failure,
+yellow for pending/in-progress, and grey for skipped/cancelled/neutral. Each
+recent workflow run uses its own result color. Pull requests use green for open,
+grey for draft, yellow for blocked/conflicting when reported by GitHub, red for
+closed and purple for merged. The list continues to load open pull requests only.
+
+Press Enter on a run to open its monitor. Flow shows status-colored jobs and steps
+for the current run attempt, with durations and automatic refresh every three seconds.
+Select a row to preview its log; Enter expands the log, and Backspace returns to
+the flow (or closes the monitor from the flow). P pauses status/log refresh,
+F toggles following the log tail, F5 refreshes and resumes, and / searches the
+loaded log when expanded. With follow off, refresh preserves the reading position.
+Q closes just the monitor. Actions still provides the original Run overview.
+
+The Artifacts tab lists available and expired artifacts. Enter or D prompts for
+an explicit local destination; Download confirms saving the ZIP archive.
+Existing files are never overwritten, failed downloads are cleaned up, and
+archives are not extracted. Downloads are limited to 1 GiB and remain available
+in ReadOnly mode, which prevents remote changes rather than local file downloads.
+Closing the monitor cancels its pending requests and downloads.
+
+Like gh run watch, the monitor follows live job/step status, not a streaming
+GitHub console feed. GitHub normally publishes downloadable job logs after the
+job completes; unavailable logs are identified explicitly and retried.
+Steps share their job's combined log rather than separate live step streams.
+Logs larger than 4 MiB show only their beginning with an explicit notice.
+The REST API does not expose a resolved needs/dependency graph: Flow is an
+honest job/step hierarchy, not a reconstructed dependency DAG.
 
 Press A or right-click for actions: comment on issues, approve, request changes
 or comment on pull requests, view failed-step logs, rerun failed jobs, cancel

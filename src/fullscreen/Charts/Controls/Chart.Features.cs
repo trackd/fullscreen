@@ -555,9 +555,8 @@ public partial class Chart {
 
     /// <inheritdoc/>
     protected override void OnPointerMoved(PointerEventArgs e) {
-        if (Interactive && GraphKind == GraphKind.Flamegraph && e.RoutingPhase != RoutingPhase.Preview) {
-            FlameHover = PlotBounds.Contains(e.UiX, e.UiY) ? PickPoint(e.UiX, e.UiY) : null;
-            return;
+        if (e.RoutingPhase != RoutingPhase.Preview) {
+            InspectPointer(e.UiX, e.UiY);
         }
         if (!Interactive || e.RoutingPhase == RoutingPhase.Preview || !_dragStart.HasValue) {
             return;

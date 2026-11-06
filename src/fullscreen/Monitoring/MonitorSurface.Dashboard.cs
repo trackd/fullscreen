@@ -83,28 +83,18 @@ public sealed partial class MonitorSurface {
         SampleMilliseconds = frame.SampleMilliseconds;
         SampleAllocation = frame.SampleAllocation;
         DateTimeOffset timestamp = frame.CapturedAt == default ? DateTimeOffset.UtcNow : frame.CapturedAt;
-        bool all = BackgroundSampling || View == MonitorView.Dashboard || !Minimal && ProcessTable;
-        if (all) {
-            _cpuHistory.Add(CpuPercent, timestamp);
-            _memoryHistory.Add(MemoryPercent, timestamp);
-        }
-
-        if (all || !Minimal && View == MonitorView.Gpu) {
-            _gpuHistory.Add(GpuPercent, timestamp);
-            double? vram = null;
-            foreach (ref readonly var gpu in frame.Gpus.AsSpan(0, frame.GpuCount)) {
-                if (gpu.UsedMemory.HasValue) {
-                    vram = (vram ?? 0) + gpu.UsedMemory.Value;
-                }
+        _cpuHistory.Add(CpuPercent, timestamp);
+        _memoryHistory.Add(MemoryPercent, timestamp);
+        _gpuHistory.Add(GpuPercent, timestamp);
+        double? vram = null;
+        foreach (ref readonly var gpu in frame.Gpus.AsSpan(0, frame.GpuCount)) {
+            if (gpu.UsedMemory.HasValue) {
+                vram = (vram ?? 0) + gpu.UsedMemory.Value;
             }
-
-            _vramHistory.Add(vram, timestamp);
         }
-
-        if (all || !Minimal && View == MonitorView.Network) {
-            _receiveHistory.Add(frame.ReceiveBytesPerSecond, timestamp);
-            _sendHistory.Add(frame.SendBytesPerSecond, timestamp);
-        }
+        _vramHistory.Add(vram, timestamp);
+        _receiveHistory.Add(frame.ReceiveBytesPerSecond, timestamp);
+        _sendHistory.Add(frame.SendBytesPerSecond, timestamp);
     }
 
     /// <inheritdoc/>

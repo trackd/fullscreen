@@ -21,7 +21,7 @@ Charts pipeline objects interactively and lets you change fields and graph types
 
 ```
 Out-Chart [[-InputObject] <psobject[]>] [-XProperty <Object>] [-YProperty <Object[]>]
- [-GraphType <GraphKind>] [-SeriesRole <ChartSeriesRole[]>] [-ShowLegend] [-Minimum <double>] [-Maximum <double>] [-ReversalAmount <double>] [-ChartRenderer <ChartRenderer>] [-Title <string>] [-MaximumCount <int>] [-PassThru] [-Theme <Object>]
+ [-GraphType <GraphKind>] [-SeriesRole <ChartSeriesRole[]>] [-ShowLegend] [-ShowTooltips] [-Minimum <double>] [-Maximum <double>] [-ReversalAmount <double>] [-ChartRenderer <ChartRenderer>] [-Title <string>] [-MaximumCount <int>] [-PassThru] [-Theme <Object>]
  [-FrameIdProperty <string>] [-ParentIdProperty <string>] [-FrameNameProperty <string>] [-FlameReverse] [-FlameFrameRows <int>]
  [-StartProperty <string>] [-EndProperty <string>] [-TaskNameProperty <string>] [-ProgressProperty <string>]
  [-GroupBy <Object>] [-Aggregate <ChartAggregate>] [-LowerProperty <Object>] [-UpperProperty <Object>]
@@ -32,7 +32,7 @@ Out-Chart [[-InputObject] <psobject[]>] [-XProperty <Object>] [-YProperty <Objec
 
 ```
 Out-Chart -Nodes <psobject[]> -Edges <psobject[]> [-GraphType <GraphKind>]
- [-ChartRenderer <ChartRenderer>] [-Title <string>] [-ShowLegend] [-PassThru]
+ [-ChartRenderer <ChartRenderer>] [-Title <string>] [-ShowLegend] [-ShowTooltips] [-PassThru]
  [-Configuration <string>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
 ```
 
@@ -43,6 +43,14 @@ graph type and Top/Bottom/First/Last filters from the menu. Both axis parameters
 accept property names or calculated properties such as
 @{ Name = 'MB'; Expression = { $_.WorkingSet64 / 1MB } }; Custom… opens the same
 editor in the UI. Sixel is automatic, with terminal-cell fallback.
+
+Hover over a point for 200 ms to see its series, value and label in a native
+tooltip. Distribution charts show bin counts or box statistics; task, flame and
+relationship charts show their contextual details. Click selects a point;
+Enter or double-click inspects the original record.
+Use `-ShowTooltips:$false` or clear Show tooltips in Graph / Axes and view to
+disable hover without affecting selection or inspection. This option is saved
+with chart configuration.
 
 `FlowChart` and `NetworkDiagram` instead take **separate** `-Nodes` and `-Edges`
 collections. Nodes have unique ordinal NodeId, optional Name (defaults to NodeId)
@@ -267,6 +275,10 @@ Out-Chart -Refresh {
 ```
 
 Refresh runs on the UI thread; keep the script quick. Space pauses/resumes.
+Unchanged, reused PowerShell records containing only scalar note properties
+reuse their existing chart data. Replacement objects, calculated expressions,
+adapted getters and nested mutable values retain conservative refresh behavior
+so inspection sources and externally computed values do not become stale.
 Opening the data table freezes refresh until it closes. Applying a table subset
 or selecting a range pauses refresh for stable inspection.
 
@@ -744,19 +756,25 @@ leave gaps rather than inventing shares. Inspection still returns raw counts.
 
 Separate diagram node records with unique NodeId, optional Name and Shape
 (Auto, Process, Decision or Terminal). Name defaults to NodeId. Used together
-with Edges; GraphType defaults to FlowChart in this parameter set.
+with Edges; GraphType defaults to FlowChart in this parameter set. Accepts a
+`Nodes` property from pipeline records; collections from successive records are
+combined, while an explicitly supplied collection is included only once.
+Supply `-Edges` explicitly when piping `Nodes` properties to select the Diagram
+parameter set rather than the default whole-object pipeline binding.
+Alias `Vertices` also works for named arguments and property-name pipeline binding.
 
 ```yaml
 Type: System.Management.Automation.PSObject[]
 DefaultValue: None
 SupportsWildcards: false
-Aliases: []
+Aliases:
+- Vertices
 ParameterSets:
 - Name: Diagram
   Position: Named
   IsRequired: true
   ValueFromPipeline: false
-  ValueFromPipelineByPropertyName: false
+  ValueFromPipelineByPropertyName: true
   ValueFromRemainingArguments: false
 ```
 
@@ -764,25 +782,34 @@ ParameterSets:
 
 Separate diagram edge records with SourceId, TargetId, optional Label and Boolean
 Directed (default true). References must identify existing Nodes. Empty edges
-are valid for isolated nodes.
+are valid for isolated nodes. Accepts an `Edges` property from pipeline records;
+collections from successive records are combined.
+Supply `-Nodes` explicitly when piping `Edges` properties to select the Diagram
+parameter set.
+Aliases `Links` and `Connections` also work for named arguments and property-name
+pipeline binding.
 
 ```yaml
 Type: System.Management.Automation.PSObject[]
 DefaultValue: None
 SupportsWildcards: false
-Aliases: []
+Aliases:
+- Links
+- Connections
 ParameterSets:
 - Name: Diagram
   Position: Named
   IsRequired: true
   ValueFromPipeline: false
-  ValueFromPipelineByPropertyName: false
+  ValueFromPipelineByPropertyName: true
   ValueFromRemainingArguments: false
 ```
 
 ### -InputObject
 
-Complete objects to chart. Accepts pipeline input or an array.
+Complete objects to chart. Accepts pipeline input or an array, with property-name
+binding enabled for `InputObject`. PowerShell's normal binding precedence applies:
+direct whole-object pipeline binding takes precedence over property-name binding.
 
 ```yaml
 Type: System.Management.Automation.PSObject[]
@@ -794,7 +821,7 @@ ParameterSets:
   Position: 0
   IsRequired: false
   ValueFromPipeline: true
-  ValueFromPipelineByPropertyName: false
+  ValueFromPipelineByPropertyName: true
   ValueFromRemainingArguments: false
 ```
 
@@ -899,6 +926,26 @@ ParameterSets:
 Display the wrapping, clickable series legend above the plot.
 The object viewer shows it by default; use `-ShowLegend:$false` to hide it,
 including a legend restored from configuration.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: None
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+```
+
+### -ShowTooltips
+
+Show point details after a 200 ms hover. Enabled by default; use
+`-ShowTooltips:$false` to disable, including tooltips restored from configuration.
+Click selection and Enter inspection remain available.
 
 ```yaml
 Type: System.Management.Automation.SwitchParameter

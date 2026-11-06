@@ -19,6 +19,7 @@ public sealed partial class SpectreView : Visual {
         HorizontalAlignment = Align.Stretch
     };
     private object? _content;
+    private string? _ansi;
     private int _width = -1, _renderedRevision = -1;
     [Bindable]
     private partial int Revision { get; set; }
@@ -33,7 +34,27 @@ public sealed partial class SpectreView : Visual {
     /// <param name="value">The input value to format, display, or append.</param>
     public void SetContent(object? value) {
         _content = value?.GetType().FullName == "System.Management.Automation.PSObject" ? value.GetType().GetProperty("BaseObject")!.GetValue(value) : value;
+        if (_width > 0) {
+            string ansi = RenderContent(_width);
+            if (ansi == _ansi) {
+                return;
+            }
+            ApplyAnsi(ansi);
+        }
         Revision++;
+    }
+
+    private string RenderContent(int width) =>
+        _content is null ? "Spectre · bind an IRenderable through Invoke-Tui -State" : RenderToAnsi(_content, width);
+
+    private void ApplyAnsi(string ansi) {
+        if (ansi == _ansi) {
+            return;
+        }
+        var (text, runs) = ParseAnsi(ansi);
+        _paragraph.Text = text;
+        _paragraph.Runs = runs;
+        _ansi = ansi;
     }
 
     /// <inheritdoc/>
@@ -46,10 +67,9 @@ public sealed partial class SpectreView : Visual {
     protected override SizeHints MeasureCore(in LayoutConstraints constraints) {
         int width = Math.Clamp(constraints.MaxWidth, 1, 1000);
         if (_width != width || _renderedRevision != Revision) {
-            string ansi = _content is null ? "Spectre · bind an IRenderable through Invoke-Tui -State" : RenderToAnsi(_content, width);
-            var (text, runs) = ParseAnsi(ansi);
-            _paragraph.Text = text;
-            _paragraph.Runs = runs;
+            if (_width != width || _ansi is null) {
+                ApplyAnsi(RenderContent(width));
+            }
             _width = width;
             _renderedRevision = Revision;
         }

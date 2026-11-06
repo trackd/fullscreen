@@ -24,7 +24,7 @@ Show-SystemMonitor [-RefreshRate <int>] [-SampleInterval <int>] [-Filter <string
  [-SortBy <ProcessSort>] [-View <MonitorView>] [-GraphType <GraphKind>] [-ChartRenderer <ChartRenderer>] [-Tree] [-Column <ProcessColumn[]>]
  [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
- [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling]
+ [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal]
  [<CommonParameters>]
 ```
 
@@ -35,7 +35,7 @@ Show-SystemMonitor -Session <PSSession> [-RefreshRate <int>] [-SampleInterval <i
  [-Filter <string>] [-SortBy <ProcessSort>] [-View <MonitorView>] [-GraphType <GraphKind>] [-ChartRenderer <ChartRenderer>] [-Tree]
  [-Column <ProcessColumn[]>] [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
- [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling]
+ [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal]
  [<CommonParameters>]
 ```
 
@@ -47,7 +47,7 @@ Show-SystemMonitor -ComputerName <string> [-RefreshRate <int>] [-SampleInterval 
  [-Column <ProcessColumn[]>] [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
  [-ExcludeGpuColumn <GpuColumn[]>] [-Credential <pscredential>] [-ConfigurationName <string>]
- [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [-BackgroundSampling] [<CommonParameters>]
+ [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -114,11 +114,11 @@ device counters without per-process GPU support. Device memory and temperature
 columns depend on the provider. On 32-bit Windows targets, parent PID, process
 state and per-process disk/network rates are unavailable.
 
-Use BackgroundSampling to keep CPU, memory, network and GPU dashboard histories
-current while another view is open, including in Minimal mode. Sampling still
-uses SampleInterval and stops while paused or the terminal is too small to
-display the monitor. This increases collection work and remote traffic; it does
-not load hidden service/session lists or additional per-process counters.
+CPU, memory, network and GPU dashboard histories always stay current across
+views, including Minimal mode and small terminals. Sampling uses SampleInterval
+and stops while paused. Hidden graphs retain samples without rendering or
+projecting hidden tables. Service/session lists and extra per-process counters
+remain demand-driven. This replaces the former BackgroundSampling switch.
 
 Use ComputerName or Session to monitor a remote computer over PowerShell
 remoting; all metrics and actions then use the remote target. The target can run
@@ -162,36 +162,10 @@ finally { Remove-PSSession -Session $session }
 Start in Users and continue sampling dashboard metrics when switching views.
 
 ```powershell
-ftop -View Users -BackgroundSampling -SampleInterval 2000
+ftop -View Users -SampleInterval 2000
 ```
 
 ## PARAMETERS
-
-### -BackgroundSampling
-
-Keep CPU, memory, network and GPU dashboard histories current while viewing other
-tabs, including in Minimal mode. Respects SampleInterval and Pause. Sampling
-stops when the terminal is too small to display the monitor. Adds collection
-cost and remote traffic without loading hidden service/session lists or extra
-per-process counters.
-
-```yaml
-Type: System.Management.Automation.SwitchParameter
-DefaultValue: False
-SupportsWildcards: false
-Aliases: []
-ParameterSets:
-- Name: (All)
-  Position: Named
-  IsRequired: false
-  ValueFromPipeline: false
-  ValueFromPipelineByPropertyName: false
-  ValueFromRemainingArguments: false
-DontShow: false
-AcceptedValues: []
-HelpMessage: ''
-```
-
 
 ### -ChartRenderer
 

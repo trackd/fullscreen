@@ -64,6 +64,10 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             _interactive = value;
             Focusable = value;
             IsTabStop = value;
+            _inspection.IsVisible = value && ShowTooltips;
+            if (!value) {
+                ClearInspection();
+            }
         }
     }
 
@@ -78,7 +82,8 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     private long _dataVersion;
     private ChartSeriesStyle _primaryStyle = new();
     private ChartSeriesVersion[] _versions = [];
-    internal bool UseSixel => _exportingPixels || ChartPresenters.Supports(App, GraphKind);
+    internal bool PreferTerminalCells { get; set; }
+    internal bool UseSixel => _exportingPixels || !PreferTerminalCells && ChartPresenters.Supports(App, GraphKind);
     internal Rectangle PlotBounds => ContentPlotBounds;
     internal virtual bool UsesWidthForData => false;
     internal ChartPixelKey PixelKey {
@@ -122,6 +127,11 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         Annotations = new(this, nameof(Annotations));
         HorizontalAlignment = Align.Stretch;
         VerticalAlignment = Align.Stretch;
+        _inspection.Content = new InspectionAnchor(this) {
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch
+        };
+        AttachChild(_inspection);
         PixelInk = Palette.Accent;
         PixelBackground = Palette.Background;
     }
@@ -350,6 +360,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         _ = SelectedIndex;
         _ = InspectionColumn;
         _ = Title;
+        MeasureInspection(constraints);
         return SizeHints.Flex(new(0, 0), new(48, 8), new(int.MaxValue, int.MaxValue), 1, 1, 1, 1);
     }
 
@@ -416,6 +427,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
                 continue;
             }
 
+            int boxRow = GraphKind == GraphKind.BoxPlot ? Array.FindIndex(rendered, visible => visible.SourceIndex == seriesIndex) : 0;
             ChartPoint? previous = null;
             foreach (var point in series.Span) {
                 if (!point.Y.HasValue) {
@@ -438,6 +450,9 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
                 double center = GraphKind is GraphKind.Bars or GraphKind.ColumnLine ? columns.Center(px, range, plotBounds.Width) : Fraction(px, range.MinX, range.MaxX) * Math.Max(0, plotBounds.Width - 1);
                 double dx = center - (x - plotBounds.X);
                 double dy = distribution ? 0 : (1 - Fraction(py, range.MinY, range.MaxY)) * Math.Max(0, plotBounds.Height - 1) - (y - plotBounds.Y);
+                if (GraphKind == GraphKind.BoxPlot) {
+                    dy = Math.Min(plotBounds.Height - 1, boxRow * Math.Max(1, plotBounds.Height / rendered.Length) + plotBounds.Height / (rendered.Length * 2)) - (y - plotBounds.Y);
+                }
                 if (GraphKind == GraphKind.ColumnLine) {
                     dy = Math.Round(dy + y - plotBounds.Y) - (y - plotBounds.Y);
                 }
@@ -513,6 +528,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             return;
         }
 
+        ClearInspection();
         if (HandleFeaturePointer(e)) {
             return;
         }

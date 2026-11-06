@@ -55,7 +55,6 @@ public sealed class MonitorApp : IFullscreenApp {
     /// <param name="includeUserProcesses">Whether owned processes are shown in the user-session tree.
     /// Defaults to true.</param>
     /// <param name="usersOnly">Whether only the user-session view is available. Defaults to false.</param>
-    /// <param name="backgroundSampling">Whether dashboard summaries continue sampling in other views.</param>
     public MonitorApp(
         int refreshRate,
         int sampleInterval,
@@ -71,14 +70,12 @@ public sealed class MonitorApp : IFullscreenApp {
         GpuColumn[]? excludedGpu = null,
         bool minimal = false,
         bool includeUserProcesses = true,
-        bool usersOnly = false,
-        bool backgroundSampling = false
+        bool usersOnly = false
     ) {
         _source = source ?? new LocalMonitorSource();
         _frameInterval = TimeSpan.FromSeconds(1.0 / refreshRate);
         _surface = new MonitorSurface {
             UsersOnly = usersOnly,
-            BackgroundSampling = backgroundSampling,
             IncludeUserProcesses = includeUserProcesses,
             View = view,
             SourceLabel = _source.Label,
@@ -223,7 +220,11 @@ public sealed class MonitorApp : IFullscreenApp {
     }
 
     /// <inheritdoc cref="fullscreen.Hosting.IFullscreenApp.Tick"/>
-    public bool Tick() {
+    public bool Tick() => Tick(_surface.App is { } app
+        ? Custom.TuiComponentHost.IsVisibleWithin(_surface, app.Root) : _surface.Parent is null);
+
+    internal bool Tick(bool visible) {
+        _surface.DeferPresentation = !visible;
         if (_surface.ExitRequested) {
             return false;
         }
@@ -291,13 +292,16 @@ public sealed class MonitorApp : IFullscreenApp {
         if (batchResults is not null) {
             _surface.ShowSessionResults(batchResults);
         }
-        if (changed) {
+        if (changed && visible) {
             if (projection && _surface.View == MonitorView.Processes) {
                 _surface.Model.Update(_snapshot.Processes.AsSpan(0, _snapshot.ProcessCount));
             }
 
             _surface.Dirty = false;
             _surface.Refresh();
+        }
+        else if (changed) {
+            _surface.Dirty = true;
         }
 
         return true;

@@ -44,7 +44,7 @@ internal sealed class DrcsChartPresenter(
             new(0, 0, context.ViewportBounds.Width, context.ViewportBounds.Height)
         );
     private static Rectangle[] Windows(TerminalGraphicsPresentContext context) =>
-        [.. context.App.Root.EnumerateVisualsDepthFirst().Where(visual => visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)).Select(visual => visual is Popup { Content: { } content } ? content.Bounds : visual.Bounds)];
+        [.. context.App.Root.EnumerateVisualsDepthFirst().Where(visual => visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)).Select(TerminalOverlayBounds.Window)];
     // Charts under a popup are withheld; counting them would leave output pending forever.
     private static List<(ulong Id, Rectangle Bounds, Rectangle Clip, ChartPixelKey Key)> Visible(
         GraphicsCommandBuffer current,

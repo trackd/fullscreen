@@ -27,6 +27,8 @@ A portable TUI definition with DefinitionOnly; otherwise no output.
 .NOTES
 Import fullscreen first. No files, services, jobs or external data are required.
 Use Previous, Pause / Resume and Next to control playback; Close or F10 exits.
+Hover for 200 ms for point details; selecting a point pauses playback and shows
+the original record below the chart. Resume restarts automatic playback.
 Sixel-capable terminals use pixel rendering; other terminals use cell rendering.
 #>
 [CmdletBinding()]
@@ -347,6 +349,7 @@ $pages = foreach ($kind in $chartKinds) {
     $chart = @{
         Id = "chart_$kind"
         Type = 'Chart'
+        SelectionBind = 'selectedPoint'
         Bind = 'signal'
         GraphKind = $kind
         XProperty = 'Sample'
@@ -473,6 +476,11 @@ $layout = New-TuiDefinition -Title 'Chart showcase' -Root @{
             Children = @($pages)
         }
         @{
+            Id = 'selection'
+            Type = 'Text'
+            Bind = 'selectedDetails'
+        }
+        @{
             Id = 'status'
             Type = 'Text'
             Bind = 'playback'
@@ -514,6 +522,8 @@ $layout = New-TuiDefinition -Title 'Chart showcase' -Root @{
     paused = $false
     slideStarted = 0
     playback = "Playing - $SecondsPerChart seconds per chart"
+    selectedPoint = $null
+    selectedDetails = 'Click a point to show its values; hover for details (200 ms).'
     signal = @($signal)
     outcomes = $outcomes
     resources = $resources
@@ -557,7 +567,15 @@ $onEvent = {
         $tuiEvent,
         $state
     )
+    if ($tuiEvent.Id -like 'chart_*' -and $tuiEvent.Kind -in 'Selection', 'Invoke') {
+        $state.selectedDetails = (($tuiEvent.Value | Format-List * | Out-String).Trim() -split '\r?\n' |
+            Where-Object { $_.Trim().Length -gt 0 }) -join ' | '
+        $state.paused = $true
+        $state.playback = 'Paused - inspecting selection'
+        return
+    }
     if ($tuiEvent.Id -eq 'pages' -and $tuiEvent.Kind -eq 'Change') {
+        $state.selectedDetails = 'Click a point to show its values; hover for details (200 ms).'
         $state.slideStarted = [System.Diagnostics.Stopwatch]::GetTimestamp()
         return
     }

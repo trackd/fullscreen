@@ -37,6 +37,7 @@ public partial class Chart {
             MaximumX = MaximumX,
             ShowAxes = ShowAxes,
             ShowLegend = ShowLegend,
+            ShowTooltips = ShowTooltips,
             XAxis = XAxis,
             YAxis = YAxis,
             Thresholds = [.. Thresholds],
@@ -146,6 +147,7 @@ public partial class Chart {
         YAxis = settings.YAxis;
         ShowAxes = settings.ShowAxes;
         ShowLegend = settings.ShowLegend;
+        ShowTooltips = settings.ShowTooltips;
         Thresholds.Clear();
         foreach (var threshold in settings.Thresholds) {
             Thresholds.Add(threshold);

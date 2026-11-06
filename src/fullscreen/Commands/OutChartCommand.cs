@@ -8,6 +8,11 @@ namespace fullscreen.Commands;
 [OutputType(typeof(PSObject))]
 public sealed class OutChartCommand : FullscreenCommand {
     private readonly List<PSObject> _objects = [];
+    private readonly List<PSObject> _nodes = [];
+    private readonly List<PSObject> _edges = [];
+    private bool _explicitNodes;
+    private bool _explicitEdges;
+    private bool _diagramCollected;
     private ScriptBlock? _boundedRefresh;
     /// <summary>Select Auto, Sixel, Native or Regis. DRCS chart rendering is disabled. Regis is an
     /// experimental, explicitly selected Contour vector backend; Area, Histogram, BoxPlot, ColumnLine and radial kinds use cell
@@ -16,17 +21,19 @@ public sealed class OutChartCommand : FullscreenCommand {
     public ChartRenderer ChartRenderer { get; set; }
 
     /// <summary>Complete objects to chart. Accepts pipeline input or an array.</summary>
-    [Parameter(ValueFromPipeline = true, Position = 0, ParameterSetName = "Objects")]
+    [Parameter(ValueFromPipeline = true, ValueFromPipelineByPropertyName = true, Position = 0, ParameterSetName = "Objects")]
     [AllowNull]
     public PSObject[]? InputObject { get; set; }
 
     /// <summary>Separate diagram node records: unique NodeId, optional Name and Shape (Auto, Process, Decision or Terminal).</summary>
-    [Parameter(Mandatory = true, ParameterSetName = "Diagram")]
+    [Parameter(Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = "Diagram")]
+    [Alias("Vertices")]
     [AllowEmptyCollection]
     public PSObject[] Nodes { get; set; } = [];
 
     /// <summary>Separate diagram edge records: SourceId, TargetId, optional Label and Boolean Directed (default true).</summary>
-    [Parameter(Mandatory = true, ParameterSetName = "Diagram")]
+    [Parameter(Mandatory = true, ValueFromPipelineByPropertyName = true, ParameterSetName = "Diagram")]
+    [Alias("Links", "Connections")]
     [AllowEmptyCollection]
     public PSObject[] Edges { get; set; } = [];
 
@@ -69,6 +76,9 @@ public sealed class OutChartCommand : FullscreenCommand {
     /// to hide a legend restored from configuration.</summary>
     [Parameter]
     public SwitchParameter ShowLegend { get; set; }
+    /// <summary>Show point details after a 200 ms hover. Use -ShowTooltips:$false to disable.</summary>
+    [Parameter]
+    public SwitchParameter ShowTooltips { get; set; }
 
     /// <summary>Lower shared value bound; cumulative endpoints for Waterfall, color scale for Heatmap. Gauge and RadialBars default to 0. Pie does not accept bounds.</summary>
     [Parameter]
@@ -205,7 +215,32 @@ public sealed class OutChartCommand : FullscreenCommand {
     }
 
     /// <inheritdoc/>
+    protected override void BeginProcessing() {
+        _explicitNodes = MyInvocation.BoundParameters.ContainsKey(nameof(Nodes));
+        _explicitEdges = MyInvocation.BoundParameters.ContainsKey(nameof(Edges));
+    }
+
+    /// <inheritdoc/>
     protected override void ProcessRecord() {
+        if (ParameterSetName == "Diagram") {
+            long count = (long)_nodes.Count + _edges.Count
+                + (!_diagramCollected || !_explicitNodes ? Nodes.Length : 0)
+                + (!_diagramCollected || !_explicitEdges ? Edges.Length : 0);
+            if (count > MaximumCount) {
+                ThrowTerminatingError(new ErrorRecord(
+                    new InvalidOperationException("Diagram input exceeds MaximumCount."),
+                    "FullscreenChartLimit", ErrorCategory.LimitsExceeded, MaximumCount));
+            }
+            if (!_diagramCollected || !_explicitNodes) {
+                _nodes.AddRange(Nodes);
+            }
+            if (!_diagramCollected || !_explicitEdges) {
+                _edges.AddRange(Edges);
+            }
+            _diagramCollected = true;
+            return;
+        }
+
         foreach (var item in InputObject ?? []) {
             if (item is null) {
                 continue;
@@ -299,6 +334,9 @@ public sealed class OutChartCommand : FullscreenCommand {
             if (MyInvocation.BoundParameters.ContainsKey(nameof(ShowLegend))) {
                 app.Surface.Plot.ShowLegend = ShowLegend.IsPresent;
             }
+            if (MyInvocation.BoundParameters.ContainsKey(nameof(ShowTooltips))) {
+                app.Surface.Plot.ShowTooltips = ShowTooltips.IsPresent;
+            }
             if (MyInvocation.BoundParameters.ContainsKey(nameof(Minimum))) {
                 app.Surface.Plot.Minimum = Minimum;
             }
@@ -343,6 +381,8 @@ public sealed class OutChartCommand : FullscreenCommand {
         }
         finally {
             _objects.Clear();
+            _nodes.Clear();
+            _edges.Clear();
         }
     }
 
@@ -360,12 +400,9 @@ public sealed class OutChartCommand : FullscreenCommand {
             }
         }
         ChartTopology.ValidateOptions(Minimum, Maximum, null, null, ChartScale.Linear, ChartScale.Linear, 0, 0, null);
-        if ((long)Nodes.Length + Edges.Length > MaximumCount) {
-            throw new ArgumentException("Diagram node and edge records exceed MaximumCount.");
-        }
-        var topology = ChartTopology.FromObjects(Nodes, Edges);
+        var topology = ChartTopology.FromObjects(_nodes, _edges);
         _ = topology.Layout(kind);
-        using var app = new ObjectChartApp([.. Nodes, .. Edges], null, null, kind, Title, new(), PipelineStopToken,
+        using var app = new ObjectChartApp([.. _nodes, .. _edges], null, null, kind, Title, new(), PipelineStopToken,
             initialize: Configuration is null, diagram: topology);
         app.Surface.PassThru = PassThru.IsPresent;
         app.WorkingDirectory = SessionState.Path.CurrentFileSystemLocation.ProviderPath;
@@ -381,6 +418,9 @@ public sealed class OutChartCommand : FullscreenCommand {
         }
         if (MyInvocation.BoundParameters.ContainsKey(nameof(ShowLegend))) {
             app.Surface.Plot.ShowLegend = ShowLegend.IsPresent;
+        }
+        if (MyInvocation.BoundParameters.ContainsKey(nameof(ShowTooltips))) {
+            app.Surface.Plot.ShowTooltips = ShowTooltips.IsPresent;
         }
         _ = app.Surface.Plot.GetRenderData(100);
         FullscreenHost.Run(app, PipelineStopToken, ResolveTheme(), Minimal.IsPresent, ChartRenderer);
