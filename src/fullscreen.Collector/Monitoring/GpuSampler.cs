@@ -5,6 +5,7 @@ namespace fullscreen.Monitoring;
 public sealed class GpuSampler : IDisposable {
     private NvmlSampler? _nvml;
     private WindowsGpuSampler? _windows;
+    private LinuxGpuSampler? _linux;
     private (bool Devices, bool Processes) _mode;
     internal CollectorCapabilities ProcessCapabilities =>
         (_windows?.Capabilities ?? CollectorCapabilityDetection.Current()) & CollectorCapabilities.ProcessGraphics;
@@ -15,6 +16,7 @@ public sealed class GpuSampler : IDisposable {
     /// <param name="processes">Whether per-process GPU counters are collected. Defaults to true.</param>
     public void Sample(CollectorFrame frame, bool devices = true, bool processes = true) {
         frame.GpuCount = 0;
+        frame.GpuStatus = "";
         DeviceCapabilities = CollectorCapabilities.None;
         if (devices) {
             (_nvml ??= new()).Sample(frame);
@@ -44,22 +46,25 @@ public sealed class GpuSampler : IDisposable {
         }
 
         if (devices && Platform.IsLinux()) {
-            DeviceCapabilities |= SampleDrm(frame, "/sys/class/drm");
+            (_linux ??= new()).Sample(frame);
+            DeviceCapabilities |= _linux.Capabilities;
+        }
+        else {
+            _linux = null;
         }
 
-        if (devices && frame.GpuCount == 0 && _windows?.Utilization is double busyPercent) {
-            frame.Gpus[frame.GpuCount++] = new(
-                "WDDM adapters · busiest engine",
-                "Windows PDH",
-                busyPercent,
-                _windows.DedicatedMemory,
-                null,
-                null
-            );
+        if (devices && frame.GpuCount == 0 && _windows is { } windows && WindowsDevice(windows.Utilization, windows.UsedMemory) is { } deviceRow) {
+            frame.Gpus[frame.GpuCount++] = deviceRow;
         }
 
-        frame.GpuStatus = frame.GpuCount > 0 ? "GPU telemetry available" : "Unavailable · driver/provider not exposed";
+        if (_linux is null || !frame.GpuStatus.StartsWith("Intel", StringComparison.Ordinal)) {
+            frame.GpuStatus = frame.GpuCount > 0 ? "GPU telemetry available" : "Unavailable · driver/provider not exposed";
+        }
     }
+
+    internal static GpuRow? WindowsDevice(double? utilization, ulong? memory) =>
+        utilization.HasValue || memory.HasValue
+            ? new("WDDM adapters · busiest engine", "Windows PDH", utilization, memory, null, null) : null;
 
     internal static CollectorCapabilities SampleDrm(CollectorFrame frame, string root) {
         var capabilities = CollectorCapabilities.None;
@@ -70,11 +75,15 @@ public sealed class GpuSampler : IDisposable {
                 }
 
                 string device = Path.Combine(card, "device");
-                if (!ExposesCounter(Path.Combine(device, "gpu_busy_percent"))) {
+                bool intel = ReadLabel(Path.Combine(device, "vendor")) == "0x8086";
+                bool busyCounter = ExposesCounter(Path.Combine(device, "gpu_busy_percent"));
+                if (!busyCounter && !intel) {
                     continue;
                 }
 
-                capabilities |= CollectorCapabilities.GpuUtilization;
+                if (busyCounter) {
+                    capabilities |= CollectorCapabilities.GpuUtilization;
+                }
                 if (ExposesCounter(Path.Combine(device, "mem_info_vram_used"))) {
                     capabilities |= CollectorCapabilities.GpuUsedMemory;
                 }
@@ -85,7 +94,9 @@ public sealed class GpuSampler : IDisposable {
                 ulong? used = (ulong?)ReadNumber(Path.Combine(device, "mem_info_vram_used"));
                 ulong? total = (ulong?)ReadNumber(Path.Combine(device, "mem_info_vram_total"));
                 frame.Gpus = CollectorFrame.EnsureCapacity(frame.Gpus, frame.GpuCount + 1);
-                frame.Gpus[frame.GpuCount++] = new(Path.GetFileName(card), "DRM/sysfs", busy, used, total, null);
+                frame.Gpus[frame.GpuCount++] = new(
+                    Path.GetFileName(card) + (intel ? " Intel GPU " + ReadLabel(Path.Combine(device, "device")) : ""),
+                    intel ? "DRM/Intel clients" : "DRM/sysfs", busy, used, total, null);
             }
         }
         catch (DirectoryNotFoundException) {
@@ -113,6 +124,15 @@ public sealed class GpuSampler : IDisposable {
         }
     }
 
+    private static string? ReadLabel(string path) {
+        try {
+            return File.ReadAllText(path).Trim();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) {
+            return null;
+        }
+    }
+
     private static double? ReadNumber(string path) {
         try {
             return double.TryParse(
@@ -120,7 +140,7 @@ public sealed class GpuSampler : IDisposable {
                 NumberStyles.Float,
                 CultureInfo.InvariantCulture,
                 out double value
-            ) ? value : null;
+            ) && Compat.IsFinite(value) && value >= 0 ? value : null;
         }
         catch (IOException) {
             return null;

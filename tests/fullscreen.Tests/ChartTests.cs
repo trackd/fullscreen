@@ -71,6 +71,19 @@ public sealed class ChartTests {
         Assert.IsTrue(picker.EnumerateVisualsDepthFirst().OfType<BuiltInTrend>().All(chart => chart.Bounds.Width == 0), "Native children must not paint over the column chooser.");
     }
     [TestMethod]
+    public void MissingHistoryStatisticsStayUnknownUntilAValidZeroSampleArrives() {
+        var history = new TimeSeries(3);
+        var time = DateTimeOffset.UnixEpoch;
+        history.Add(null, time);
+        Assert.IsFalse(history.HasValues);
+        history.Add(0, time.AddSeconds(1));
+        Assert.IsTrue(history.HasValues, "A measured zero must remain distinguishable from missing telemetry.");
+        Assert.AreEqual(0d, history.Maximum);
+        history.Add(null, time.AddSeconds(124));
+        Assert.IsFalse(history.HasValues, "Expired readings must not keep unavailable statistics looking measured.");
+    }
+
+    [TestMethod]
     public void HistoryIsBoundedAndHonorsTimeAndMissingSamples() {
         var history = new TimeSeries(3);
         var time = DateTimeOffset.UnixEpoch;

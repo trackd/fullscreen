@@ -69,6 +69,16 @@ Actions use your existing permissions and require confirmation. Logging off a
 Windows session closes its applications and can lose unsaved work. Unsupported
 metrics are hidden; temporarily inaccessible values appear as unknown.
 Per-process network and GPU metrics require supported Windows providers.
+The Users view lists login sessions, with processes grouped under those users;
+service accounts without a login are omitted. Root appears when it has a login.
+Linux Intel GPUs use i915/xe DRM client counters when the driver exposes them.
+Utilization represents the busiest engine across readable clients; the first
+sample is unknown while counters warm up. New GPU clients are discovered every
+five seconds. Restricted procfs access can limit coverage even when the device
+is detected. Client-memory totals may count buffers shared between applications
+more than once; they are not a measurement of dedicated VRAM.
+Windows GPU memory includes dedicated and shared usage from WDDM counters,
+including integrated GPUs. Missing readings remain unknown rather than zero.
 CPU is a percentage of total processor capacity; RSS includes shared pages.
 
 Remote metrics and actions apply to the target computer. Targets support

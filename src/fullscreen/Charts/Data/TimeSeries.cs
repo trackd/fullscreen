@@ -13,6 +13,7 @@ public sealed class TimeSeries(int capacity = 2048) {
     public double Maximum { get; private set; }
     /// <summary>Gets the mean of available numeric history samples.</summary>
     public double Average { get; private set; }
+    internal bool HasValues { get; private set; }
     /// <summary>Gets the rounded display scale, with hysteresis to avoid frequent shrinking.</summary>
     public double Scale { get; private set; } = 1;
     /// <summary>Gets the timestamp of the newest sample, or the default timestamp when empty.</summary>
@@ -37,6 +38,7 @@ public sealed class TimeSeries(int capacity = 2048) {
     public void Clear() {
         Count = _next = 0;
         Maximum = Average = 0;
+        HasValues = false;
         Scale = 1;
         Version++;
     }
@@ -79,6 +81,7 @@ public sealed class TimeSeries(int capacity = 2048) {
         }
 
         Average = valid == 0 ? 0 : sum / valid;
+        HasValues = valid > 0;
         // Grow immediately; shrink only after a full range drops below one quarter of the scale.
         if (Maximum > Scale || Maximum < Scale / 4) {
             Scale = NiceScale(Maximum);

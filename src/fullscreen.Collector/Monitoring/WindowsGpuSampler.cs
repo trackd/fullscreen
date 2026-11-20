@@ -7,13 +7,13 @@ namespace fullscreen.Monitoring;
 internal sealed partial class WindowsGpuSampler : IDisposable {
     private readonly SafeQuery? _query;
     private readonly bool _collectProcesses, _collectDevices;
-    private readonly nint _engine, _memory, _adapterMemory;
+    private readonly nint _engine, _memory, _adapterMemory, _sharedMemory, _adapterSharedMemory;
     private byte[] _buffer = new byte[256 * 1024];
     private readonly Dictionary<int, double> _processUse = [];
     private readonly Dictionary<int, ulong> _processMemory = [];
     private readonly Dictionary<ulong, double> _engines = [];
     public double? Utilization { get; private set; }
-    public ulong? DedicatedMemory { get; private set; }
+    public ulong? UsedMemory { get; private set; }
     internal CollectorCapabilities Capabilities { get; private set; } =
         CollectorCapabilities.ProcessGraphics | CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory;
     internal static bool MissingCounter(int status) =>
@@ -37,10 +37,16 @@ internal sealed partial class WindowsGpuSampler : IDisposable {
         }
 
         if (processes) {
+            if (PdhAddEnglishCounterW(query, "\\GPU Process Memory(*)\\Shared Usage", 0, out _sharedMemory) == 0) {
+                Capabilities |= CollectorCapabilities.ProcessGpuMemory;
+            }
+            else {
+                _sharedMemory = 0;
+            }
             int memoryStatus = PdhAddEnglishCounterW(query, "\\GPU Process Memory(*)\\Dedicated Usage", 0, out _memory);
             if (memoryStatus != 0) {
                 _memory = 0;
-                if (MissingCounter(memoryStatus)) {
+                if (MissingCounter(memoryStatus) && _sharedMemory == 0) {
                     Capabilities &= ~CollectorCapabilities.ProcessGpuMemory;
                 }
             }
@@ -53,6 +59,12 @@ internal sealed partial class WindowsGpuSampler : IDisposable {
                 if (MissingCounter(adapterStatus)) {
                     Capabilities &= ~CollectorCapabilities.GpuUsedMemory;
                 }
+            }
+            if (PdhAddEnglishCounterW(query, "\\GPU Adapter Memory(*)\\Shared Usage", 0, out _adapterSharedMemory) == 0) {
+                Capabilities |= CollectorCapabilities.GpuUsedMemory;
+            }
+            else {
+                _adapterSharedMemory = 0;
             }
         }
 
@@ -68,7 +80,7 @@ internal sealed partial class WindowsGpuSampler : IDisposable {
         _processMemory.Clear();
         _engines.Clear();
         Utilization = null;
-        DedicatedMemory = null;
+        UsedMemory = null;
         if (_query is null || PdhCollectQueryData(_query) != 0) {
             return;
         }
@@ -76,9 +88,11 @@ internal sealed partial class WindowsGpuSampler : IDisposable {
         Read(_engine, 0);
         if (processes) {
             Read(_memory, 1);
+            Read(_sharedMemory, 1);
         }
 
         Read(_adapterMemory, 2);
+        Read(_adapterSharedMemory, 2);
         foreach (double value in _engines.Values) {
             Utilization = Compat.Clamp(Math.Max(Utilization ?? 0, value), 0, 100);
         }
@@ -124,7 +138,7 @@ internal sealed partial class WindowsGpuSampler : IDisposable {
                     }
 
                     if (kind == 2) {
-                        DedicatedMemory = (DedicatedMemory ?? 0) + (ulong)item.Value.Number;
+                        UsedMemory = (UsedMemory ?? 0) + (ulong)item.Value.Number;
                         continue;
                     }
 
