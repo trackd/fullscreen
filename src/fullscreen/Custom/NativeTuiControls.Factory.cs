@@ -9,6 +9,8 @@ using XenoAtom.Terminal.UI.DataGrid;
 using XenoAtom.Terminal.UI.Collections;
 using System.Text.Json;
 using XenoAtom.Terminal;
+using XenoAtom.Terminal.UI.Templating;
+using XenoAtom.Terminal.UI.Styling;
 
 namespace fullscreen.Custom;
 /// <summary>Describes a cell edit emitted by a custom TUI data grid.</summary>
@@ -327,7 +329,9 @@ internal static partial class NativeTuiControls {
             case DocumentFlow flow:
                 flow.Items.Clear();
                 foreach (var item in Items(value)) {
-                    flow.Items.Add(new() { Content = new FlowDocument().AddParagraph(Text(item)) });
+                    flow.Items.Add(new() {
+                        Content = new FlowDocument().AddParagraph(Text(item))
+                    });
                 }
 
                 break;
@@ -417,6 +421,12 @@ internal static partial class NativeTuiControls {
 
                 break;
             case DataGridControl grid:
+                int selectedRow = grid.SelectedRow;
+                var currentCell = grid.CurrentCell;
+                var oldView = grid.View?.CurrentSnapshot;
+                int DocumentRow(int row) => oldView is not null && (uint)row < (uint)oldView.RowCount ? oldView.MapRowToDocument(row) : row;
+                int selectedDocumentRow = DocumentRow(selectedRow), currentDocumentRow = DocumentRow(currentCell.Row);
+                var sort = grid.SortDescriptions.ToArray();
                 grid.ReadOnly = !node.Options.ContainsKey("ReadOnly") || node.Options["ReadOnly"].GetBoolean();
                 var data = RowSnapshots.GetOrCreateValue(grid);
                 DisposeDocument(data);
@@ -424,10 +434,31 @@ internal static partial class NativeTuiControls {
                 grid.Document = data.Document;
                 data.View = new DataGridDocumentView(data.Document);
                 grid.View = data.View;
+                if (node.CellRanges.Length > 0 && node.Options.TryGetValue("MaxHeight", out var heightLimit)) {
+                    grid.MaxHeight = Math.Min(heightLimit.GetInt32(), Math.Max(2, data.Document.Table.Rows.Count + 2));
+                }
                 grid.Columns.Clear();
                 for (int column = 0; column < data.Document.CurrentSnapshot.ColumnCount; column++) {
-                    grid.Columns.Add(GridColumn(data.Document.CurrentSnapshot.GetColumn(column)));
+                    var info = data.Document.CurrentSnapshot.GetColumn(column);
+                    var gridColumn = GridColumn(info, node.CellColors);
+                    if (node.CellRanges.Length > 0) {
+                        gridColumn.Width = GridLength.Auto;
+                    }
+                    if (node.CellRanges.Contains(info.Key, StringComparer.OrdinalIgnoreCase) && gridColumn is DataGridColumn<object> rangeColumn) {
+                        rangeColumn.Width = GridLength.Star(1);
+                        rangeColumn.Sortable = false;
+                        rangeColumn.ReadOnlyCellTemplate = new DataTemplate<object>((DataTemplateValue<object> value, in DataTemplateContext context) => {
+                            object? record = value.GetValue();
+                            double? Read(string name) {
+                                object? field = Member(record, name);
+                                return double.TryParse(Convert.ToString(field, CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out double number) && double.IsFinite(number) ? number : null;
+                            }
+                            return new LatencyRangeCell(Read("Min"), Read("Avg"), Read("Max"), Read("Scale") ?? 200);
+                        }, null, null, null);
+                    }
+                    grid.Columns.Add(gridColumn);
                 }
+                data.View.SetSortDescriptions(sort.Where(description => grid.Columns.Any(column => column.Key == description.ColumnKey && column.Sortable)).ToArray());
 
                 data.Originals = originals;
                 data.RowChanged = (_, e) => {
@@ -440,8 +471,28 @@ internal static partial class NativeTuiControls {
                     data.Edited?.Invoke(new((uint)index < (uint)data.Originals.Length ? data.Originals[index] : null, values));
                 };
                 data.Document.Table.RowChanged += data.RowChanged;
+                if (data.Document.Table.Rows.Count > 0 && currentCell.Row >= 0 && grid.Columns.Count > 0) {
+                    grid.CurrentCell = new DataGridCell(ViewRow(currentDocumentRow), Math.Clamp(currentCell.Column, 0, grid.Columns.Count - 1));
+                }
+                if (data.Document.Table.Rows.Count > 0 && selectedRow >= 0) {
+                    grid.SelectedRow = ViewRow(selectedDocumentRow);
+                }
+                int ViewRow(int documentRow) {
+                    int target = Math.Min(documentRow, data.Document.Table.Rows.Count - 1);
+                    var snapshot = data.View.CurrentSnapshot;
+                    for (int row = 0; row < snapshot.RowCount; row++) {
+                        if (snapshot.MapRowToDocument(row) == target) {
+                            return row;
+                        }
+                    }
+                    return 0;
+                }
                 break;
             case TreeView tree:
+                if (node.Lazy) {
+                    ReplaceLazyTree(tree, value);
+                    break;
+                }
                 tree.Roots.Clear();
                 int count = 0;
                 var ancestors = new HashSet<object>(ReferenceEqualityComparer.Instance);
@@ -473,7 +524,7 @@ internal static partial class NativeTuiControls {
         }
     }
 
-    private static object? Member(object? value, string name) {
+    internal static object? Member(object? value, string name) {
         value = Unwrap(value);
         return value is IDictionary dictionary ? dictionary[name] : value is null ? null : PSObject.AsPSObject(value).Properties[name]?.Value;
     }
@@ -507,22 +558,43 @@ internal static partial class NativeTuiControls {
         return new DataGridDataTableDocument(table);
     }
 
-    private static DataGridColumn GridColumn(DataGridColumnInfo info) =>
+    private static DataGridColumn GridColumn(DataGridColumnInfo info, TuiCellColor[] colors) =>
         Type.GetTypeCode(info.ValueType) switch {
-            TypeCode.Boolean => GridColumn<bool>(info),
-            TypeCode.Byte => GridColumn<byte>(info),
-            TypeCode.Int16 => GridColumn<short>(info),
-            TypeCode.Int32 => GridColumn<int>(info),
-            TypeCode.Int64 => GridColumn<long>(info),
-            TypeCode.Single => GridColumn<float>(info),
-            TypeCode.Double => GridColumn<double>(info),
-            TypeCode.Decimal => GridColumn<decimal>(info),
-            TypeCode.DateTime => GridColumn<DateTime>(info),
-            TypeCode.String => GridColumn<string>(info),
-            _ => GridColumn<object>(info)
+            TypeCode.Boolean => GridColumn<bool>(info, colors),
+            TypeCode.Byte => GridColumn<byte>(info, colors),
+            TypeCode.Int16 => GridColumn<short>(info, colors),
+            TypeCode.Int32 => GridColumn<int>(info, colors),
+            TypeCode.Int64 => GridColumn<long>(info, colors),
+            TypeCode.Single => GridColumn<float>(info, colors),
+            TypeCode.Double => GridColumn<double>(info, colors),
+            TypeCode.Decimal => GridColumn<decimal>(info, colors),
+            TypeCode.DateTime => GridColumn<DateTime>(info, colors),
+            TypeCode.String => GridColumn<string>(info, colors),
+            _ => GridColumn<object>(info, colors)
         };
-    private static DataGridColumn<T> GridColumn<T>(DataGridColumnInfo info) =>
-        new() {
+    private static void SetCellColors<T>(DataGridColumn<T> column, TuiCellColor[] rules) {
+        var stops = rules.Select(rule => (rule.From, Color: (Color)ConvertValue(JsonSerializer.SerializeToElement(rule.Color), typeof(Color))!)).ToArray();
+        Visual Display(DataTemplateValue<T> value, in DataTemplateContext context) {
+            var text = Convert.ToString(value.GetValue(), CultureInfo.InvariantCulture) ?? "";
+            var cell = new TextBlock(text);
+            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double number) && double.IsFinite(number)) {
+                Color? foreground = null;
+                foreach (var stop in stops) {
+                    if (number < stop.From) {
+                        break;
+                    }
+                    foreground = stop.Color;
+                }
+                if (foreground is { } color) {
+                    cell.SetStyle(new TextBlockStyle { Foreground = color });
+                }
+            }
+            return cell;
+        }
+        column.ReadOnlyCellTemplate = new DataTemplate<T>(Display, null, null, null);
+    }
+    private static DataGridColumn<T> GridColumn<T>(DataGridColumnInfo info, TuiCellColor[] colors) {
+        var column = new DataGridColumn<T> {
             Key = info.Key,
             Header = new TextBlock(info.HeaderText),
             ReadOnly = info.ReadOnly,
@@ -536,6 +608,12 @@ internal static partial class NativeTuiControls {
                 ) => info.Accessor.SetValueAsObject(row, value)
             )
         };
+        var rules = colors.Where(rule => string.Equals(rule.Column, info.Key, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (rules.Length > 0) {
+            SetCellColors(column, rules);
+        }
+        return column;
+    }
     private static TreeNode Tree(object? value, int depth, ref int count, HashSet<object> ancestors) {
         if (++count > 10000 || depth > 24) {
             throw new ArgumentException("TreeView allows at most 10,000 nodes and 24 levels.");
@@ -585,7 +663,9 @@ internal static partial class NativeTuiControls {
         };
     private static object? SelectedGridRow(DataGridControl grid) {
         var view = grid.View?.CurrentSnapshot;
-        int index = view is not null && (uint)grid.SelectedRow < (uint)view.RowCount ? view.MapRowToDocument(grid.SelectedRow) : grid.SelectedRow;
+        // Normal clicks/navigation use CurrentCell, while the row anchor uses SelectedRow.
+        int selected = grid.SelectedRow >= 0 ? grid.SelectedRow : grid.CurrentCell.Row;
+        int index = view is not null && (uint)selected < (uint)view.RowCount ? view.MapRowToDocument(selected) : selected;
         return RowSnapshots.TryGetValue(grid, out var rows) && (uint)index < (uint)rows.Originals.Length ? rows.Originals[index] : null;
     }
 

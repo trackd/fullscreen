@@ -278,20 +278,22 @@ public sealed partial class MonitorSurface {
         }
 
         Write(buffer, x + 2, y + height - 2, "peak", Muted);
+        double? peak = history.HasValues ? history.Maximum : null;
+        double? average = history.HasValues ? history.Average : null;
         if (rate || bytes) {
-            Quantity(buffer, x + 8, y + height - 2, history.Maximum, rate, style, width - 10);
+            Quantity(buffer, x + 8, y + height - 2, peak, rate, style, width - 10);
         }
         else {
-            Metric(buffer, x + 8, y + height - 2, history.Maximum, style, width - 10);
+            Metric(buffer, x + 8, y + height - 2, peak, style, width - 10);
         }
 
         if (width >= 48) {
             Write(buffer, x + width / 2, y + height - 2, "avg", Muted);
             if (rate || bytes) {
-                Quantity(buffer, x + width / 2 + 4, y + height - 2, history.Average, rate, style, width / 2 - 6);
+                Quantity(buffer, x + width / 2 + 4, y + height - 2, average, rate, style, width / 2 - 6);
             }
             else {
-                Metric(buffer, x + width / 2 + 4, y + height - 2, history.Average, style, width / 2 - 6);
+                Metric(buffer, x + width / 2 + 4, y + height - 2, average, style, width / 2 - 6);
             }
         }
     }
@@ -342,7 +344,7 @@ public sealed partial class MonitorSurface {
                 2,
                 width,
                 height,
-                "VRAM · bytes in use",
+                "GPU memory · bytes in use",
                 _vramHistory,
                 0,
                 used,

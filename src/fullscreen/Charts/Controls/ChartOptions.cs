@@ -204,6 +204,8 @@ public sealed record ChartSettings {
     public ChartAxis YAxis { get; init; } = new();
     /// <summary>Gets or sets the horizontal and vertical reference lines.</summary>
     public ChartThreshold[] Thresholds { get; init; } = [];
+    /// <summary>Gets or sets up to four background bands ordered by their lower Y boundary.</summary>
+    public ChartPlotBand[] PlotBands { get; init; } = [];
     /// <summary>Gets or sets the labels anchored to data coordinates.</summary>
     public ChartAnnotation[] Annotations { get; init; } = [];
     /// <summary>Gets or sets the chart&apos;s additional numeric series.</summary>

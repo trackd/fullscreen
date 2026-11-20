@@ -57,6 +57,12 @@ internal static partial class NativeTuiControls {
     }
     internal static string[] Properties(string name) {
         var result = new List<string>();
+        if (name == "MenuBar") {
+            result.Add("CommandIds");
+        }
+        if (name == "TreeView") {
+            result.Add("Lazy");
+        }
         if (SupportsInput(name) || SupportsData(name) || SupportsOverlay(name)
             || name is "TextBlock" or "Markup" or "Paragraph" or "TextFiglet" or "Placeholder" or "Link"
             or "ProgressBar") {
@@ -107,6 +113,9 @@ internal static partial class NativeTuiControls {
 
         if (name is "MenuBar" or "CommandBar" or "CommandPalette") {
             result.Add("Click");
+        }
+        if (name == "TreeView") {
+            result.Add("Expand");
         }
 
         if (SupportsOverlay(name)) {

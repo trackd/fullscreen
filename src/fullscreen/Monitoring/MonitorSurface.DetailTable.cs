@@ -105,5 +105,8 @@ public sealed partial class MonitorSurface {
         if (DetailCount == 0) {
             Write(buffer, 2, top, network ? Frame.NetworkStatus : Frame.GpuStatus, Muted, Bounds.Width - 4);
         }
+        else if (!network && Frame.GpuStatus.StartsWith("Intel", StringComparison.Ordinal) && top + DetailCount < Bounds.Height - 2) {
+            Write(buffer, 2, top + DetailCount, Frame.GpuStatus, Muted, Bounds.Width - 4);
+        }
     }
 }

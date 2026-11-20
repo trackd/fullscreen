@@ -43,10 +43,11 @@ public sealed record TuiPropertyInfo(
 public static class TuiControlCatalog {
     private static readonly TuiNode Defaults = new();
     private static readonly string[] NativeOptionProperties = ["Options"];
+    private static readonly string[] CellColorProperties = ["CellColors", "CellRanges"];
     private static readonly string[] EnumTypeProperties = ["EnumType"];
     private static readonly PropertyInfo[] NodeProperties = [.. typeof(TuiNode).GetProperties().Where(property => property.CanWrite)];
     internal static string TypeDescription(Type type) =>
-        type == typeof(int?) ? "a whole number, or blank for automatic sizing" : type == typeof(int) ? "a whole number" : type == typeof(double?) ? "a finite number, or blank for automatic scaling" : type == typeof(double) ? "a finite number" : type == typeof(bool) ? "true or false" : type == typeof(string[]) ? "a list of text values" : "text";
+        type == typeof(int?) ? "a whole number, or blank for automatic sizing" : type == typeof(int) ? "a whole number" : type == typeof(double?) ? "a finite number, or blank for automatic scaling" : type == typeof(double) ? "a finite number" : type == typeof(bool) ? "true or false" : type == typeof(string[]) ? "a list of text values" : type == typeof(int[]) ? "a JSON array of whole numbers" : type == typeof(TuiCellColor[]) ? "a JSON array of Column, From and Color objects" : type == typeof(TuiPlotBand[]) ? "a JSON array of From and Color objects" : "text";
     /// <summary>Describes the editable properties supported by a control type.</summary>
     /// <param name="type">The supported control catalog name.</param>
     /// <returns>The control&apos;s property descriptions.</returns>
@@ -68,13 +69,21 @@ public static class TuiControlCatalog {
             "Id" => "Unique control name used by event handlers.",
             "TabTitle" => "Tab caption when this control is a tab page; blank uses Id.",
             "Bind" => "Shared state key supplying this control's value.",
+            "CommandIds" => "Document command IDs shown by this menu; invocation emits Command using the shared ID.",
+            "Lazy" => "Request children on first expansion through Expand; rows advertise HasChildren, callback Value supplies children.",
             "EdgeBind" => "Separate diagram-edge state collection; Bind supplies node records.",
             "XProperty" => "Optional category/coordinate field in Bind's numeric object rows; requires YProperty.",
             "YProperty" => "Up to 64 unique numeric object-row fields; each becomes a named series with original source identity.",
+            "SeriesCountBind" => "Optional state key containing the number of leading YProperty entries to plot. Replace the bound rows when updating data.",
+            "HighlightSeriesBind" => "Optional state key containing the YProperty name to draw above the other lines.",
+            "DataVersionBind" => "Optional revision state key. Change its value or replace the bound rows to refresh; unchanged data is not sampled.",
             "LowerProperty" => "Optional lower-bound field for object-bound ErrorBars.",
             "UpperProperty" => "Optional upper-bound field for object-bound ErrorBars.",
             "SeriesRole" => "Optional Auto/Column/Line roles, one per YProperty in order, for ColumnLine.",
+            "SeriesColor" => "Optional #RRGGBB colors, one per YProperty in order. Blank uses the theme.",
+            "PlotBands" => "Optional JSON array of bands with From (Y value) and Color (#RRGGBB).",
             "SelectionBind" => "State key receiving the original selected object or path.",
+            "RangeBind" => "Two-way selected chart interval: MinimumX/MaximumX, or null. Emits Range after interactive selection.",
             "Minimum" or "Maximum" => "Chart bound; blank scales automatically.",
             "ReversalAmount" => "Positive fixed Kagi reversal in price units; default 1.",
             "FrameIdProperty" => "Flamegraph unique ID field; default FrameId.",
@@ -83,6 +92,9 @@ public static class TuiControlCatalog {
             "WeightProperty" => "Flamegraph exclusive self-weight field; default Weight.",
             "Foreground" or "Background" => "#RRGGBB; blank inherits the theme.",
             "Columns" => "Property names, one per line.",
+            "CellColors" => "JSON array of Column, From and RGB Color rules. Inclusive numeric thresholds ascend per column; missing/non-numeric values keep their normal style.",
+            "CellRanges" => "Columns containing Min/Avg/Max/Scale objects in milliseconds; renders colored text-cell ranges with absolute 50/150 ms bands, without Sixel.",
+            "ColumnWidths" => "Optional JSON array of cell widths, one per FTable column. Empty uses automatic widths.",
             "Items" => "Selection items, one per line.",
             "RefreshInterval" => "Sampling interval in milliseconds, 100–60000.",
             "IncludeProcesses" => "Load account-owned processes, CPU and memory; L toggles at runtime. False collects only login sessions.",
@@ -141,6 +153,7 @@ public static class TuiControlCatalog {
             ], [
                 "Bind",
                 "Columns",
+                "ColumnWidths",
                 "SelectionBind",
                 "Minimal"
             ], false),
@@ -191,14 +204,19 @@ public static class TuiControlCatalog {
                 "Minimal",
                 "IncludeProcesses"
             ], true),
-            "Chart" => ("Visualization", "Numeric, hierarchical, interval or relationship chart with Sixel and terminal-cell rendering; numeric scalar bindings use a history adapter.", "ftop, Out-Chart", "Bind: numeric collection, frames, tasks or nodes; EdgeBind: separate diagram edges; SelectionBind receives the original selected record", ["Selection", "Invoke"], [
+            "Chart" => ("Visualization", "Numeric, hierarchical, interval or relationship chart with Sixel and terminal-cell rendering; numeric scalar bindings use a history adapter.", "ftop, Out-Chart", "Bind: numeric collection, frames, tasks or nodes; EdgeBind: separate diagram edges; SelectionBind receives the original selected record", ["Selection", "Invoke", "Range"], [
                 "Bind",
                 "EdgeBind",
                 "XProperty",
                 "YProperty",
+                "SeriesCountBind",
+                "HighlightSeriesBind",
+                "DataVersionBind",
                 "LowerProperty",
                 "UpperProperty",
                 "SeriesRole",
+                "SeriesColor",
+                "PlotBands",
                 "Minimum",
                 "Maximum",
                 "GraphKind",
@@ -217,7 +235,8 @@ public static class TuiControlCatalog {
                 "EndProperty",
                 "TaskNameProperty",
                 "ProgressProperty",
-                "SelectionBind"
+                "SelectionBind",
+                "RangeBind"
             ], false),
             "Code" => ("Display", "Optional TextMate syntax highlighting; Markdown unless Language is set. Plain text without the module.", "ffile, fmc, fobject", "Bind: source text", [], [
                 "Bind",
@@ -267,6 +286,7 @@ public static class TuiControlCatalog {
                 ..common,
                 ..properties,
                 ..NativeTuiControls.Contains(name) ? NativeOptionProperties : [],
+                ..name == "DataGridControl" ? CellColorProperties : [],
                 ..name == "EnumSelect" ? EnumTypeProperties : []
             ],
             live
@@ -293,6 +313,9 @@ public static class TuiControlCatalog {
 
             object? value = property.GetValue(node), expected = property.GetValue(Defaults);
             bool same = value is System.Collections.IDictionary dictionary && dictionary.Count == 0
+                || value is int[] { Length: 0 } && expected is int[] { Length: 0 }
+                || value is TuiPlotBand[] { Length: 0 } && expected is TuiPlotBand[] { Length: 0 }
+                || value is TuiCellColor[] { Length: 0 } && expected is TuiCellColor[] { Length: 0 }
                 || (value is string[] array && expected is string[] empty ? array.SequenceEqual(empty) : Equals(value, expected));
             if (!same) {
                 throw new ArgumentException($"Control '{node.Id}' ({node.Type}) does not support '{property.Name}'.");

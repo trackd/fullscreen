@@ -115,6 +115,19 @@ public sealed class MonitorCapabilityTests {
     }
 
     [TestMethod]
+    public void WindowsGpuMemoryCanExposeAnAdapterBeforeUtilizationWarmsUp() {
+        Assert.IsNull(GpuSampler.WindowsDevice(null, null));
+        var warming = GpuSampler.WindowsDevice(null, 1024);
+        Assert.IsNotNull(warming);
+        Assert.IsNull(warming.Value.Utilization);
+        Assert.AreEqual(1024UL, warming.Value.UsedMemory);
+        var idle = GpuSampler.WindowsDevice(0, 0);
+        Assert.IsNotNull(idle);
+        Assert.AreEqual(0d, idle.Value.Utilization);
+        Assert.AreEqual(0UL, idle.Value.UsedMemory);
+    }
+
+    [TestMethod]
     public void MissingDrmProviderAddsNoCapabilitiesOrDevicesToExistingNvmlSample() {
         var frame = new CollectorFrame { GpuCount = 1 };
         frame.Gpus[0] = new("NVML fixture", "NVML", 50, 1024, 2048, 40);

@@ -9,6 +9,28 @@ namespace fullscreen.Tests;
 [TestClass]
 [DoNotParallelize]
 public sealed class UserViewTests {
+    [TestMethod]
+    public void LinuxUsersExcludeServiceOwnersButRetainRealRootAndProcesslessLogins() {
+        var frame = new CollectorFrame {
+            Platform = "Linux",
+            UserCount = 2,
+            Users = [new("andree", "pts/0", "Logged in", "", ""), new("idle", "pts/1", "Logged in", "", "")],
+            ProcessCount = 4,
+            Processes = [new(1, "init", 0, 4096, 1, UserName: "root"), new(2, "plex", 50, 4096, 1, UserName: "plex"),
+                new(3, "sshd", 0, 4096, 1, UserName: "andree"), new(4, "daemon", 0, 4096, 1, UserName: "daemon")]
+        };
+        var view = new UserView();
+        view.Update(frame);
+        CollectionAssert.AreEquivalent(new[] { "andree", "idle" }, view.Rows.Select(row => row.UserName).ToArray());
+        Assert.AreEqual(1, view.Rows.Single(row => row.UserName == "andree").ProcessCount);
+        frame.Users = [.. frame.Users, new("root", "pts/2", "Logged in", "", "")];
+        frame.UserCount = 3;
+        view.Update(frame);
+        Assert.AreEqual(1, view.Rows.Single(row => row.UserName == "root").ProcessCount);
+        frame.UserCount = 0;
+        view.Update(frame);
+        Assert.IsEmpty(view.Rows, "No login data must not silently fall back to all process owners.");
+    }
     private const CollectorMetrics Summaries = CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu;
     [TestMethod]
     [DataRow(ProcessSort.Cpu, false, 12)]

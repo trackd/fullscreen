@@ -98,7 +98,8 @@ public partial class Chart {
         FlameFocusId,
         FlameSearch,
         TaskOffset,
-        FlameFrameRows
+        FlameFrameRows,
+        PlotBands
     );
     private int LegendRows => ShowLegend ? GetLegend().Rows : 0;
     private int TitleRows => Title.Length == 0 ? 0 : 1;
@@ -247,6 +248,7 @@ public partial class Chart {
 
             projected.Add(new(series.Property, points) {
                 Color = UsesCategoryColors(data, GraphKind) ? null : series.Color ?? DefaultSeriesColor(index),
+                Emphasized = series.Emphasized,
                 LineStyle = series.LineStyle,
                 Marker = series.Marker,
                 Role = series.Role,
@@ -1052,5 +1054,6 @@ internal readonly record struct ChartViewKey(
     string FlameFocusId = "",
     string FlameSearch = "",
     int TaskOffset = 0,
-    int FlameFrameRows = 2
+    int FlameFrameRows = 2,
+    ChartPlotBand[]? PlotBands = null
 );

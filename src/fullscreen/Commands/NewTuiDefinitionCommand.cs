@@ -22,6 +22,9 @@ public sealed class NewTuiDefinitionCommand : TuiDefinitionCommand {
     /// Invoke-Tui.</summary>
     [Parameter(ParameterSetName = "Parts")]
     public Hashtable? State { get; set; }
+    /// <summary>Shared action definitions with Id, Label, Gesture, Scope and optional state bindings.</summary>
+    [Parameter(ParameterSetName = "Parts")]
+    public PSObject[] Command { get; set; } = [];
 
     /// <summary>Existing version-1 definition as a hashtable, PSCustomObject or JSON string. Accepts
     /// pipeline input and returns a validated copy.</summary>
@@ -36,6 +39,7 @@ public sealed class NewTuiDefinitionCommand : TuiDefinitionCommand {
                 ["Version"] = 1,
                 ["Title"] = Title,
                 ["State"] = State ?? [],
+                ["Commands"] = Command,
                 ["Root"] = (object?)Root ?? TuiDocument.Starter().ToPowerShell().Properties["Root"].Value
             });
             document.Validate();

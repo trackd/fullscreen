@@ -134,13 +134,13 @@ public sealed class UserView {
         bool windows = frame.Platform.Contains("Windows", StringComparison.OrdinalIgnoreCase);
         var comparer = windows ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var sessions = frame.Users.Take(frame.UserCount).Where(row => !string.IsNullOrWhiteSpace(row.UserName) && (!windows || row.IsNamedWindowsSession)).GroupBy(row => row.UserName, comparer).ToDictionary(group => group.Key, group => group.ToArray(), comparer);
-        var processes = frame.Processes.Take(IncludeProcesses ? frame.ProcessCount : 0).Where(row => !string.IsNullOrWhiteSpace(row.UserName) && (!windows || sessions.ContainsKey(row.UserName))).GroupBy(row => row.UserName!, comparer).ToDictionary(
+        var processes = frame.Processes.Take(IncludeProcesses ? frame.ProcessCount : 0).Where(row => !string.IsNullOrWhiteSpace(row.UserName) && sessions.ContainsKey(row.UserName)).GroupBy(row => row.UserName!, comparer).ToDictionary(
             group => group.Key,
             group => group.ToArray(),
             comparer
         );
         var groups = new List<(UserViewRow Row, ProcessRow[] Owned, bool Matches, ProcessRow Total)>();
-        IEnumerable<string> accounts = windows ? sessions.Keys : sessions.Keys.Concat(processes.Keys).Distinct(comparer);
+        var accounts = sessions.Keys;
         foreach (string account in accounts) {
             var logins = sessions.GetValueOrDefault(account) ?? [];
             var owned = processes.GetValueOrDefault(account) ?? [];

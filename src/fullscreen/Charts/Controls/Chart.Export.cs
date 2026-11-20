@@ -42,6 +42,7 @@ public partial class Chart {
             XAxis = XAxis,
             YAxis = YAxis,
             Thresholds = [.. Thresholds],
+            PlotBands = [.. PlotBands],
             Annotations = [.. Annotations],
             SelectedRange = SelectedRange,
             Series = [.. GetData(Math.Max(1, Bounds.Width)).Select(series => new ChartSeriesStyle(series.Property, series.Color, series.Visible, series.LineStyle, series.Marker) { Role = series.Role })]
@@ -133,6 +134,13 @@ public partial class Chart {
             ChartTopology.ValidateOptions(settings.Minimum, settings.Maximum, settings.MinimumX, settings.MaximumX,
                 settings.XAxis.Scale, settings.YAxis.Scale, settings.Thresholds.Length, settings.Annotations.Length, settings.SelectedRange);
         }
+        if (settings.PlotBands is null || settings.PlotBands.Length > 4
+            || settings.PlotBands.Any(band => !double.IsFinite(band.From))
+            || settings.PlotBands.Zip(settings.PlotBands.Skip(1)).Any(pair => pair.First.From >= pair.Second.From)
+            || settings.PlotBands.Length > 0 && settings.GraphKind is not (GraphKind.Line or GraphKind.ColumnLine)) {
+            throw new ArgumentException("Invalid plot bands for this chart.");
+        }
+        PlotBands = [.. settings.PlotBands];
         GraphKind = settings.GraphKind;
         ReversalAmount = settings.ReversalAmount;
         FlameReverse = settings.FlameReverse;
@@ -193,6 +201,7 @@ public partial class Chart {
 
         var snapshot = new Chart {
             Palette = Palette,
+            PlotBands = PlotBands,
             MinHeight = rows,
             MaxHeight = rows,
             _exportingPixels = true
