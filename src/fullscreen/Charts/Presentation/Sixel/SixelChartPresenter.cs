@@ -46,7 +46,6 @@ internal sealed class SixelChartPresenter(
     private byte[] _cropped = [];
     private readonly List<Rectangle> _windows = [];
     private readonly List<(Visual? Owner, Rectangle Bounds)> _overlays = [];
-    private Rectangle _diagnosticsBounds;
     public TerminalGraphicsCapabilities Capabilities => capabilities;
 
     public bool CanPresent(TerminalGraphicsCapabilities detected) =>
@@ -57,7 +56,6 @@ internal sealed class SixelChartPresenter(
         && detected.SupportedProtocols.Contains(TerminalGraphicsProtocol.Sixel);
     private void RefreshWindows(TerminalGraphicsPresentContext context) {
         _overlays.Clear();
-        _diagnosticsBounds = default;
         var debug = TerminalOverlayBounds.Debug(context.App);
         if (debug.Width > 0 && debug.Height > 0) {
             _overlays.Add((null, debug));
@@ -67,7 +65,7 @@ internal sealed class SixelChartPresenter(
             if (visual is Hosting.FullscreenChrome chrome) {
                 _overlays.Add((null, chrome.CloseBounds));
                 if (chrome.DiagnosticsBounds is { Width: > 0, Height: > 0 } diagnostics) {
-                    _diagnosticsBounds = diagnostics;
+                    _overlays.Add((null, diagnostics));
                 }
             }
 
@@ -77,7 +75,7 @@ internal sealed class SixelChartPresenter(
                 }
             }
 
-            if (visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)) {
+            if (visual is not Hosting.TerminalDiagnosticsOverlay && visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)) {
                 _overlays.Add((visual, TerminalOverlayBounds.Window(visual)));
             }
         }
@@ -104,11 +102,6 @@ internal sealed class SixelChartPresenter(
             if (owner is null || index > containingWindow) {
                 _windows.Add(bounds);
             }
-        }
-        // The supplementary strip belongs to the main content; modal windows
-        // are painted above it. Unlike upstream F12, it is not a global overlay.
-        if (containingWindow < 0 && _diagnosticsBounds.Width > 0) {
-            _windows.Add(_diagnosticsBounds);
         }
         return containingWindow < 0 ? null : _overlays[containingWindow].Owner;
     }
