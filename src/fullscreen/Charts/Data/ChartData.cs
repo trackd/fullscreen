@@ -15,6 +15,7 @@ internal sealed class ChartDataSeries(string property, ChartPoint[] points) {
     internal int Count { get; set; } = points.Length;
     internal Color? Color { get; set; }
     internal bool Visible { get; set; } = true;
+    internal bool Emphasized { get; set; }
     internal ChartLineStyle LineStyle { get; set; }
     internal ChartMarker Marker { get; set; }
     internal ChartSeriesRole Role { get; set; }

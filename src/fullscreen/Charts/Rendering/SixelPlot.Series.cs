@@ -23,13 +23,32 @@ internal sealed partial class SixelPlot {
         bool flameReverse = false,
         int flameFocus = -1,
         int flameFrameHeight = 1,
-        int taskOffset = 0
+        int taskOffset = 0,
+        ChartPlotBand[]? plotBands = null
     ) {
         if (data.Length == 1 && data[0].Color is { } singleColor) {
             ink = singleColor;
         }
 
-        Initialize(width, height, ink, background, kind);
+        bool extendedPalette = kind is GraphKind.Line or GraphKind.ColumnLine or GraphKind.Area
+            or GraphKind.Step or GraphKind.Scatter or GraphKind.Stem or GraphKind.Bars;
+        int seriesSlots = extendedPalette ? Math.Clamp(data.Length, Themes.ThemePalette.SeriesColorCount, MaximumSeriesColors)
+            : Themes.ThemePalette.SeriesColorCount;
+        Initialize(width, height, ink, background, kind, plotBands?.Length ?? 0, seriesSlots);
+        if (plotBands is { Length: > 0 }) {
+            for (int index = 0; index < plotBands.Length; index++) {
+                Palette[_firstBandColor + index] = Color.Mix(background, plotBands[index].Tint, .25f);
+            }
+            for (int y = 0; y < height; y++) {
+                double coordinate = range.MaxY - (range.MaxY - range.MinY) * y / Math.Max(1, height - 1);
+                int band = ChartPlotBand.At(plotBands, yAxis?.Inverse(coordinate) ?? coordinate);
+                if (band >= 0) {
+                    for (int x = 0; x < width; x++) {
+                        SetPixel(x, y, (byte)(_firstBandColor + band));
+                    }
+                }
+            }
+        }
         Palette[1] = theme?.ChartGridColor ?? Palette[1];
         if (kind == GraphKind.Heatmap && theme is not null) {
             for (int shade = 2; shade <= 6; shade++) {
@@ -62,10 +81,10 @@ internal sealed partial class SixelPlot {
         }
         if ((multiple || categoryColors) && kind != GraphKind.Heatmap && !ChartTopology.Supports(kind)) {
             var palette = theme ?? Themes.ThemePalette.Default;
-            for (int index = 0; index < Themes.ThemePalette.SeriesColorCount; index++) {
+            for (int index = 0; index < seriesSlots; index++) {
                 Palette[2 + index] = Chart.AutomaticSeriesColor(palette, ink, kind, index);
             }
-            for (int index = 0; index < Math.Min(Themes.ThemePalette.SeriesColorCount, data.Length); index++) {
+            for (int index = 0; index < Math.Min(seriesSlots, data.Length); index++) {
                 if (data[index].Color is { } color) {
                     Palette[2 + index] = color;
                 }
@@ -110,7 +129,7 @@ internal sealed partial class SixelPlot {
                 continue;
             }
 
-            byte color = multiple ? (byte)(2 + index % Themes.ThemePalette.SeriesColorCount) : (byte)6;
+            byte color = multiple ? (byte)(2 + index % seriesSlots) : (byte)6;
             void SeriesPaint(int x, int y, byte shade) {
                 if (kind == GraphKind.ColumnLine && (uint)x < (uint)Width && (uint)y < (uint)Height) {
                     SetPixel(x, y, shade);

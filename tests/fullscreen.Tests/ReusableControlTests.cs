@@ -15,6 +15,35 @@ namespace fullscreen.Tests;
 [TestClass]
 public sealed class ReusableControlTests {
     [TestMethod]
+    public void CustomControlCatalogBuildsPortablePreviewsAndDescribesChartBindings() {
+        string[] controls = [
+            "FTable", "FLogView", "ObjectExplorer", "FileBrowser", "FileCommander",
+            "PerformanceMonitor", "UserList", "Chart", "Code", "Image", "Spectre"
+        ];
+        foreach (string name in controls) {
+            var definition = new TuiDocument { Root = new() { Id = "widget", Type = name } };
+            var copy = TuiDocument.FromJson(definition.ToJson());
+            using var preview = new CustomTuiApp(copy, preview: true);
+            Assert.IsTrue(preview.Controls.ContainsKey("widget"), name);
+            Assert.IsTrue(TuiControlCatalog.Describe(name).Properties.Contains("Type"), name);
+            Assert.IsTrue(preview.Controls.Values.OfType<TuiComponentHost>().All(host => !host.Running), name);
+        }
+        var chart = new TuiDocument {
+            Root = new() {
+                Id = "chart",
+                Type = "Chart",
+                Bind = "samples",
+                YProperty = ["Hop 1", "Hop 2"],
+                SeriesCountBind = "count",
+                HighlightSeriesBind = "marked"
+            }
+        };
+        string scaffold = TuiScriptExporter.Generate(chart);
+        StringAssert.Contains(scaffold, "$state['count'] -> chart");
+        StringAssert.Contains(scaffold, "$state['marked'] -> chart");
+    }
+
+    [TestMethod]
     public void UserListAndCustomSurfaceDefinitionsRoundTripWithoutStartingWorkersInPreview() {
         var definition = TuiDocument.FromJson("""{"Root":{"Id":"root","Type":"Tabs","Children":[{"Id":"users","Type":"UserList","IncludeProcesses":true,"SelectionBind":"selectedUser"},{"Id":"commander","Type":"FileCommander","Path":"missing-left","SecondaryPath":"missing-right","SelectionBind":"file"},{"Id":"objects","Type":"ObjectExplorer","Bind":"rows","SelectionBind":"object"}]}}""");
         var clone = TuiDocument.FromJson(definition.ToJson());
@@ -50,7 +79,10 @@ public sealed class ReusableControlTests {
         Assert.AreEqual(1, widget.Application.NavigationDepth);
         ui.Key(TerminalKey.Backspace, () => widget.Application.NavigationDepth == 0);
         app.State["rows"] = new[] { System.Management.Automation.PSObject.AsPSObject("replacement") };
-        Assert.IsTrue(SpinWait.SpinUntil(() => { ui.Tick(); return widget.Application.Surface.Model.Rows.Count == 1 && widget.Application.Surface.Model.Rows[0].Cells.Contains("replacement"); }, 3000));
+        Assert.IsTrue(SpinWait.SpinUntil(() => {
+            ui.Tick();
+            return widget.Application.Surface.Model.Rows.Count == 1 && widget.Application.Surface.Model.Rows[0].Cells.Contains("replacement");
+        }, 3000));
         Assert.AreEqual(0, widget.Application.NavigationDepth);
     }
     [TestMethod]
@@ -73,7 +105,12 @@ public sealed class ReusableControlTests {
     public sealed class ExplorerValue {
         public string Name { get; } = "deployment";
         public int Reads { get; private set; }
-        public string Details { get { Reads++; return "nested details"; } }
+        public string Details {
+            get {
+                Reads++;
+                return "nested details";
+            }
+        }
     }
 
     [TestMethod]
@@ -122,14 +159,22 @@ public sealed class ReusableControlTests {
             Tick();
             Assert.AreSame(first, custom.State["selected"]);
             backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Down });
-            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return ReferenceEquals(second, custom.State["selected"]); }, 3000));
+            Assert.IsTrue(SpinWait.SpinUntil(() => {
+                Tick();
+                return ReferenceEquals(second, custom.State["selected"]);
+            }, 3000));
             backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Enter });
-            Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return !custom.Cancelled; }, 3000));
+            Assert.IsTrue(SpinWait.SpinUntil(() => {
+                Tick();
+                return !custom.Cancelled;
+            }, 3000));
             Assert.AreSame(second, custom.Value);
             Assert.AreEqual("table", custom.LastEvent);
             Assert.IsInstanceOfType<TextArea>(custom.Controls["editor"]);
         }
-        finally { typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null); }
+        finally {
+            typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null);
+        }
     }
     [TestMethod]
     public void CatalogMatchesSchemaAndMixedDefinitionsRoundTrip() {
@@ -153,8 +198,14 @@ public sealed class ReusableControlTests {
     [DoNotParallelize]
     public async Task LiveComponentsStartOnlyWhenVisibleAndDisposeOnHideAndClose() {
         int firstStarts = 0, secondStarts = 0, disposals = 0;
-        using var first = new TuiComponentHost("First", () => { firstStarts++; return new FakeApp(() => disposals++); });
-        using var second = new TuiComponentHost("Second", () => { secondStarts++; return new FakeApp(() => disposals++); });
+        using var first = new TuiComponentHost("First", () => {
+            firstStarts++;
+            return new FakeApp(() => disposals++);
+        });
+        using var second = new TuiComponentHost("Second", () => {
+            secondStarts++;
+            return new FakeApp(() => disposals++);
+        });
         var tabs = new TabControl(new TabPage("First", first), new TabPage("Second", second)) { HorizontalAlignment = Align.Stretch, VerticalAlignment = Align.Stretch };
         first.Tick(tabs);
         second.Tick(tabs);
@@ -190,7 +241,9 @@ public sealed class ReusableControlTests {
             preview.Tick(tabs);
             Assert.IsFalse(preview.Running);
         }
-        finally { typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null); }
+        finally {
+            typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null);
+        }
     }
     private sealed class FakeApp(Action disposed) : IFullscreenApp {
         public Visual Root { get; } = new TextBlock("Embedded worker fixture");

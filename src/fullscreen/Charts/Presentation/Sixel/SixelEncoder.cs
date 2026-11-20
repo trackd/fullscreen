@@ -9,6 +9,8 @@ internal sealed class SixelEncoder {
     private readonly Color[] _chartPalette = new Color[SixelPlot.MaximumInkColors + 1];
     private int _chartColorCount;
     private readonly StringBuilder _chartPaletteHeader = new(256);
+    private readonly int[] _paletteStarts = new int[SixelPlot.MaximumInkColors + 1];
+    private readonly int[] _paletteLengths = new int[SixelPlot.MaximumInkColors + 1];
     internal string EncodePlot(SixelPlot plot) {
         return BuildPlot(plot).ToString();
     }
@@ -24,7 +26,9 @@ internal sealed class SixelEncoder {
         if (_chartPaletteHeader.Length == 0 || _chartColorCount != plot.ColorCount || !plot.Palette.AsSpan().SequenceEqual(_chartPalette)) {
             _chartPaletteHeader.Clear();
             for (int color = 1; color <= plot.ColorCount; color++) {
+                _paletteStarts[color] = _chartPaletteHeader.Length;
                 _chartPaletteHeader.AddSixelColor(color, plot.Palette[color]);
+                _paletteLengths[color] = _chartPaletteHeader.Length - _paletteStarts[color];
             }
 
             plot.Palette.AsSpan().CopyTo(_chartPalette);
@@ -32,11 +36,13 @@ internal sealed class SixelEncoder {
         }
 
         output.AddSixelCanvas(plot.Width, plot.Height);
-        output.Append(_chartPaletteHeader);
-        int emittedBand = 0, selectedColor = plot.ColorCount;
+        Span<byte> defined = stackalloc byte[SixelPlot.MaximumInkColors + 1];
+        defined.Clear();
+        int emittedBand = 0, selectedColor = -1;
         bool painted = false;
         for (int band = 0; band < plot.BandCount; band++) {
             bool first = true;
+            int column = 0;
             for (int color = 1; color <= plot.ColorCount; color++) {
                 var (left, right) = plot.Columns(band, color);
                 if (left >= right) {
@@ -61,18 +67,25 @@ internal sealed class SixelEncoder {
                     output.Append('-', band - emittedBand);
                     emittedBand = band;
                 }
-                else {
+                else if (left < column) {
                     output.Append('$');
+                    column = 0;
                 }
 
                 first = false;
                 painted = true;
-                if (selectedColor != color) {
+                if (defined[color] == 0) {
+                    output.Append(_chartPaletteHeader, _paletteStarts[color], _paletteLengths[color]);
+                    defined[color] = 1;
+                    selectedColor = color;
+                }
+                else if (selectedColor != color) {
                     output.SelectSixelColor(color);
                     selectedColor = color;
                 }
 
-                output.AddSixelRepeat(0, left);
+                // Disjoint planes can continue from the preceding plane's cursor.
+                output.AddSixelRepeat(0, left - column);
                 int previous = -1, count = 0;
                 foreach (byte mask in plane[left..right]) {
                     if (mask == previous) {
@@ -86,6 +99,7 @@ internal sealed class SixelEncoder {
                 }
 
                 output.AddSixelRepeat(previous, count);
+                column = right;
             }
         }
 

@@ -11,6 +11,29 @@ namespace fullscreen.Tests;
 [TestClass]
 [DoNotParallelize]
 public sealed class ChartInspectionTests {
+    [TestMethod]
+    public async Task TooltipPaintedBoundsStayInsideEmbeddedPlotAtEveryCorner() {
+        var chart = new Chart([10, 80, 30]) { MinHeight = 14, MaxHeight = 14 };
+        var root = new VStack(new TextBlock("Hop table"), chart, new TextBlock("Outside chart"));
+        await using var ui = new DesignerUxTests.UiSession(root, () => { }, 90, 36);
+        foreach (bool right in new[] { false, true }) {
+            foreach (bool bottom in new[] { false, true }) {
+                var bounds = chart.PlotBounds;
+                ui.Mouse(TerminalMouseKind.Move, TerminalMouseButton.None,
+                    right ? bounds.Right - 1 : bounds.X, bottom ? bounds.Bottom - 1 : bounds.Y, () => true);
+                for (int tick = 0; tick < 25; tick++) {
+                    ui.Tick();
+                }
+                var host = chart.EnumerateVisualsDepthFirst().OfType<TooltipHost>().Single();
+                Assert.IsNotNull(host.TooltipContent?.App);
+                var painted = TerminalOverlayBounds.Window(host.TooltipContent!.Parent!);
+                Assert.IsTrue(painted.X >= bounds.X && painted.Right <= bounds.Right
+                    && painted.Y >= bounds.Y && painted.Bottom <= bounds.Bottom,
+                    $"Tooltip {painted} escaped plot {bounds} at right={right}, bottom={bottom}.");
+            }
+        }
+    }
+
     public static IEnumerable<TestDataRow<GraphKind>> GraphKinds =>
         Enum.GetValues<GraphKind>().Select(kind => new TestDataRow<GraphKind>(kind) { DisplayName = kind.ToString() });
 
@@ -143,7 +166,9 @@ public sealed class ChartInspectionTests {
     [DataRow(GraphKind.BoxPlot)]
     public async Task DistributionHover_WithHiddenSeries_ShowsTheVisibleSeriesStatistics(GraphKind kind) {
         var chart = new Chart { GraphKind = kind };
-        chart.Series.Add(new("Samples", [99]) { Visible = false });
+        chart.Series.Add(new("Samples", [99]) {
+            Visible = false
+        });
         chart.Series.Add(new("Samples", [1, 2, 2, 4, 8]));
         await using var ui = new DesignerUxTests.UiSession(chart, () => { }, 90, 28);
         var bounds = chart.PlotBounds;
@@ -240,13 +265,21 @@ public sealed class ChartInspectionTests {
         Set("Progress", .5);
         var document = new TuiDocument {
             Root = new() {
-                Id = "chart", Type = "Chart", Bind = "rows", GraphKind = kind.ToString(),
-                FrameNameProperty = "Name", TaskNameProperty = "Name", ProgressProperty = "Progress"
+                Id = "chart",
+                Type = "Chart",
+                Bind = "rows",
+                GraphKind = kind.ToString(),
+                FrameNameProperty = "Name",
+                TaskNameProperty = "Name",
+                ProgressProperty = "Progress"
             }
         };
         var events = new List<TuiEvent>();
         using var app = new CustomTuiApp(document, new Hashtable { ["rows"] = new[] { source } },
-            handler: (evt, _) => { events.Add(evt); return null; }, tickInterval: 1);
+            handler: (evt, _) => {
+                events.Add(evt);
+                return null;
+            }, tickInterval: 1);
         var chart = (Chart)app.Controls["chart"];
         await using var ui = new DesignerUxTests.UiSession(app.Root, () => {
             // Advance the real sampling clock on every UI frame, including the hover delay.
@@ -278,6 +311,60 @@ public sealed class ChartInspectionTests {
         ui.Mouse(TerminalMouseKind.Up, TerminalMouseButton.Left, hit.X, hit.Y, () => true);
         ui.Key(TerminalKey.Enter, () => events.Any(evt => evt.Kind == "Invoke"));
         Assert.AreSame(source, events.Last(evt => evt.Kind == "Invoke").Value);
+    }
+
+    [TestMethod]
+    public async Task LiveHopChart_KeepsNativeTooltipWhenRowsRefresh() {
+        static System.Management.Automation.PSObject Row(int sweep, double first, double second) {
+            var row = new System.Management.Automation.PSObject();
+            row.Properties.Add(new System.Management.Automation.PSNoteProperty("Sweep", sweep));
+            row.Properties.Add(new System.Management.Automation.PSNoteProperty("Hop 1", first));
+            row.Properties.Add(new System.Management.Automation.PSNoteProperty("Hop 2", second));
+            return row;
+        }
+        var document = new TuiDocument {
+            Root = new() {
+                Id = "root",
+                Type = "VStack",
+                VerticalAlignment = "Stretch",
+                Children = [
+                    new() { Id = "route", Type = "Text", Text = "Route" },
+                    new() {
+                        Id = "chart", Type = "Chart", GraphKind = "Line", Bind = "rows",
+                        XProperty = "Sweep", YProperty = ["Hop 1", "Hop 2", "Hop 3"],
+                        SeriesCountBind = "hopCount", HighlightSeriesBind = "highlight",
+                        Height = 18, ShowAxes = true, ShowLegend = true, Minimum = 0, Maximum = 50
+                    }
+                ]
+            }
+        };
+        using var app = new CustomTuiApp(document, new Hashtable {
+            ["rows"] = new[] { Row(1, 10, 30), Row(2, 10, 30) },
+            ["hopCount"] = 2
+        });
+        app.SetMinimal(true);
+        var chart = (Chart)app.Controls["chart"];
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => _ = app.Tick(), 90, 32);
+        var bounds = chart.PlotBounds;
+        var host = chart.EnumerateVisualsDepthFirst().OfType<TooltipHost>().Single();
+        ui.Mouse(TerminalMouseKind.Move, TerminalMouseButton.None, bounds.X + bounds.Width / 2, bounds.Bottom - 3,
+            () => host.TooltipContent is not null);
+        for (int tick = 0; tick < 25; tick++) {
+            ui.Tick();
+        }
+        var tooltip = Assert.IsInstanceOfType<Paragraph>(host.TooltipContent);
+        Assert.AreSame(ui.App, tooltip.App);
+        StringAssert.Contains(tooltip.Text, "Hop 1: 10");
+
+        app.State["rows"] = new[] { Row(1, 12, 30), Row(2, 12, 30), Row(3, 12, 30) };
+        app.State["highlight"] = "Hop 1";
+        ui.Tick();
+        Assert.AreSame(tooltip, host.TooltipContent);
+        Assert.AreSame(ui.App, tooltip.App);
+        StringAssert.Contains(tooltip.Text, "Hop 1: 12");
+        var series = chart.GetData(bounds.Width);
+        CollectionAssert.AreEqual(new[] { "Hop 2", "Hop 1" }, series.Select(item => item.Property).ToArray());
+        Assert.IsTrue(series[^1].Emphasized);
     }
 
     [TestMethod]
@@ -317,7 +404,10 @@ public sealed class ChartInspectionTests {
         };
         var copy = TuiDataFile.Parse(TuiDataFile.Generate(TuiDocument.FromJson(document.ToJson())));
         using var app = new CustomTuiApp(copy, new Hashtable { ["values"] = new[] { 10d, 20d, 30d } },
-            handler: (evt, _) => { events.Add(evt); return null; });
+            handler: (evt, _) => {
+                events.Add(evt);
+                return null;
+            });
         var chart = (Chart)app.Controls["chart"];
         Assert.IsFalse(chart.ShowTooltips);
         var restored = new Chart();

@@ -47,6 +47,26 @@ lists, grids and charts publish selections through SelectionBind. Replace bound
 collections to refresh their contents. Get-TuiControl describes each control's
 properties, options and events.
 
+Shared document commands emit `Command` using the command ID, whether invoked
+from a shortcut, menu, command bar or palette. Scoped/state-disabled actions are
+omitted from contextual footer hints. Existing item-label `Click` events remain
+available for layouts without shared commands.
+
+For a `TreeView` with `Lazy = $true`, rows advertise `HasChildren = $true`.
+The first expansion emits `Expand` with the original row; return
+`@{ Value = @(...child rows...) }`. Null or an empty collection completes a leaf.
+Child results are cached until the bound root collection is replaced. The control
+does not inspect `Children` properties in lazy mode. Requests are synchronous;
+prepare slow data in a background job. `Get-TuiControl TreeView` exposes the property
+and event, and exported scaffolds include the callback.
+
+Charts can share a `RangeBind` state key containing `MinimumX` and `MaximumX`, or
+null. Shift-dragging a chart updates this key before its `Range` callback; other
+charts sharing the key show the same interval. Updating state sets/clears ranges
+without echoing callbacks. Intervals must be finite and ordered. Relationship
+diagrams do not accept this binding. The repository's CommandTree sample combines
+lazy loading, shared commands and linked chart intervals.
+
 Charts prefer Sixel when supported and otherwise render terminal cells. Wheel zoom
 and keyboard zoom/pan are disabled by default; set `EnableZoom = $true` on a Chart
 to opt in, including scalar-bound history charts. Embedded charts otherwise leave

@@ -35,12 +35,28 @@ public partial class Chart {
             left + (int)Math.Round(Fraction(value, minX, maxX) * (width - 1));
         int Y(double value) =>
             top + height - 1 - (int)Math.Round(Fraction(value, minY, maxY) * (height - 1));
+        Color?[] bandRows = PlotBands.Length == 0 ? [] : new Color?[height];
+        for (int y = 0; y < bandRows.Length; y++) {
+            double value = YAxis.Inverse(maxY - (maxY - minY) * y / Math.Max(1, height - 1));
+            int band = ChartPlotBand.At(PlotBands, value);
+            if (band >= 0) {
+                Color background = Color.Mix(PixelBackground, PlotBands[band].Tint, .25f);
+                bandRows[y] = background;
+                for (int x = 0; x < width; x++) {
+                    buffer.SetCell(plotBounds.X + x, plotBounds.Y + y, new System.Text.Rune(' '), Palette.Body.WithBackground(background));
+                }
+            }
+        }
+
         void Dot(int x, int y, string glyph, Style ink) {
             if (UseSixel) {
                 return;
             }
 
             if (x >= left && x < left + width && y >= top && y < top + height) {
+                if (y < bandRows.Length && bandRows[y] is { } background) {
+                    ink = ink.WithBackground(background);
+                }
                 buffer.WriteText(plotBounds.X + x, plotBounds.Y + y, glyph, ink);
             }
         }

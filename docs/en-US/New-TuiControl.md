@@ -189,6 +189,44 @@ or ambiguous values remain unknown. Process totals are per account, not per logi
 FileCommander accepts Path and SecondaryPath for its two panes. ObjectExplorer
 accepts Bind, Columns and SelectionBind for deep inspection of an object collection.
 
+Fullscreen's custom controls are available through the same catalog, constructor,
+designer and definition export commands.
+
+| Control | Reusable behavior |
+| --- | --- |
+| FTable | Sortable, filterable object table with optional ColumnWidths and original-object selection. |
+| FLogView | Parsed log table with severity coloring and original-entry selection. |
+| ObjectExplorer | Nested object inspection and navigation. |
+| FileBrowser | File navigation and previews, with selected paths returned to state. |
+| FileCommander | Two file panes with independent initial paths. |
+| PerformanceMonitor | Live local system monitor, including its existing views and charts. |
+| UserList | Login sessions and optional per-account process expansion. |
+| Chart | Numeric, interval, hierarchical and relationship charts. |
+| Code | Source preview with optional TextMate highlighting. |
+| Image | Image preview through the optional Sixel module. |
+| Spectre | Runtime Spectre renderables embedded in a custom layout. |
+
+Use `Get-TuiControl -Name Chart` for the current property and event catalog.
+For native widgets, inspect `(Get-TuiControl DataGridControl).NativeProperties`.
+Set `Options.ReadOnly` to `$true` and `Options.SelectionMode` to `'Row'` to select
+whole rows in a DataGridControl.
+
+Object-bound Chart controls accept SeriesColor, one RGB color per YProperty,
+and PlotBands, an array of objects with `From` and `Color` properties. For example,
+a band starting at 0 can use `'#1FA763'`, and one starting at 50 can use
+`'#D89614'`. Bands begin at absolute Y-axis values.
+PlotBands supports Line and ColumnLine. SeriesCountBind names a state key
+containing the number of leading YProperty fields to display. It retains normal
+periodic sampling unless DataVersionBind explicitly opts out. HighlightSeriesBind
+names a state key containing the YProperty name to highlight. Assign an empty
+string to clear the highlight. These properties round-trip through definition
+exports and appear in the designer.
+
+DataVersionBind names an optional state key used as an explicit data revision.
+When it is set, update the revision after editing rows in place, or replace the
+bound collection. The chart refreshes when the revision or collection changes.
+Omit it to retain periodic sampling of mutable objects.
+
 ### Example 6: Configure a native slider
 
 ```powershell
@@ -211,6 +249,43 @@ and parsed log view; Table/LogControl select the native versions. EnumSelect add
 EnumType. Grid accepts Options.Rows/Columns lengths and GridCell children with
 Options.Row/Column/RowSpan/ColumnSpan. Padding and Margin accept a number, two
 horizontal/vertical numbers, or four left/top/right/bottom numbers.
+
+DataGridControl supports `CellColors`, an array of rules with `Column`, `From` and `Color` properties.
+`From` is an inclusive numeric threshold and must increase within each column;
+`Color` is `#RRGGBB`. Values below the first threshold, missing values and
+non-numeric values retain their normal foreground. Rules affect display only,
+preserving sorting, selection and source values. For example:
+
+```powershell
+$grid = New-TuiControl -Type DataGridControl -Id 'latency' -Bind 'hops' -Property @{
+    CellColors = @(
+        @{
+            Column = 'RTT'
+            From = 0
+            Color = '#65CD79'
+        }
+        @{
+            Column = 'RTT'
+            From = 50
+            Color = '#F4C65D'
+        }
+        @{
+            Column = 'RTT'
+            From = 150
+            Color = '#FF7279'
+        }
+    )
+}
+```
+
+For a visual latency overview, `CellRanges = @('Latency')` renders that column's
+objects with `Min`, `Avg`, `Max` and `Scale` properties as colored text-cell ranges. `Scale` is the
+shared upper bound in milliseconds. Background bands use absolute 50/150 ms
+thresholds, whiskers show min/max, and a bright dot marks the average. This
+uses no Sixel. Other columns size to content while range columns take the
+remaining width. Set `SelectionBind` to receive row-selection events from mouse
+clicks and keyboard navigation; the selected source row survives data refreshes
+at the same row position.
 
 ### Example 7: Highlight source and show an image
 
@@ -491,7 +566,7 @@ HelpMessage: ''
 
 ### -Property
 
-Hashtable of control-specific schema properties, for example Columns, SelectionBind, Path, View, RefreshInterval, Height, Width, Minimal, Maximum or TabTitle. TabTitle accepts up to 128 characters and is used when the control is a tab page; blank uses its Id. Unknown keys and invalid values are rejected.
+Hashtable of control-specific schema properties, for example Columns, SelectionBind, Path, View, RefreshInterval, Height, Width, Minimal, Maximum or TabTitle. FTable accepts an optional ColumnWidths array with one width of 2–1000 terminal cells per entry in Columns. Omit ColumnWidths to size columns automatically. TabTitle accepts up to 128 characters and is used when the control is a tab page; blank uses its Id. Unknown keys and invalid values are rejected.
 
 ```yaml
 Type: System.Collections.Hashtable

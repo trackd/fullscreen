@@ -11,6 +11,133 @@ namespace fullscreen.Tests;
 [DoNotParallelize]
 public sealed class NativeControlTests {
     [TestMethod]
+    public async Task ScrollableCardsKeepMultipleExpansionStatesAndRevealLowerCards() {
+        var document = new TuiDocument {
+            Root = new TuiNode {
+                Id = "scroll",
+                Type = "ScrollViewer",
+                VerticalAlignment = "Stretch",
+                Children = [new TuiNode {
+                Id = "cards", Type = "Accordion", Options = new() { ["SingleExpanded"] = System.Text.Json.JsonSerializer.SerializeToElement(false) },
+                Children = Enumerable.Range(1, 12).Select(index => new TuiNode {
+                    Id = "card" + index, Type = "Collapsible", Text = "Service " + index, Bind = "card" + index,
+                    Children = [new TuiNode { Id = "body" + index, Type = "TextBlock", Text = "Details\nSecond line\nThird line" }]
+                }).ToList()
+            }]
+            }
+        };
+        using var app = new CustomTuiApp(document, new Hashtable { ["card1"] = true, ["card2"] = false });
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 60, 12);
+        var first = (Collapsible)app.Controls["card1"];
+        var second = (Collapsible)app.Controls["card2"];
+        var scroll = (ScrollViewer)app.Controls["scroll"];
+        Assert.IsTrue(first.IsExpanded);
+        Assert.IsFalse(second.IsExpanded);
+        ui.App.Focus(second);
+        ui.Key(TerminalKey.Enter, () => second.IsExpanded);
+        ui.Tick();
+        Assert.IsTrue(first.IsExpanded, "Opening a second card must retain the first card's expansion.");
+        Assert.IsTrue((bool)app.State["card2"]!);
+        ui.Wheel(scroll.Bounds.X + 2, scroll.Bounds.Y + 2, -4, () => scroll.VerticalOffset > 0);
+        Assert.IsGreaterThan(0, scroll.VerticalOffset);
+        Assert.IsTrue(first.IsExpanded);
+        Assert.IsTrue(second.IsExpanded);
+        ui.App.Focus(first);
+        ui.Key(TerminalKey.Enter, () => !first.IsExpanded);
+        ui.Tick();
+        Assert.IsFalse((bool)app.State["card1"]!);
+        Assert.IsTrue(second.IsExpanded);
+    }
+
+    [TestMethod]
+    public async Task SortedGridRefreshRetainsSortAndSelectedDocumentRowWhenValuesMove() {
+        var definition = TuiDocument.FromJson("""{"Root":{"Id":"grid","Type":"DataGridControl","Bind":"rows","SelectionBind":"selected","Columns":["Name","Value"],"Options":{"SelectionMode":"Row"}}}""");
+        using var app = new CustomTuiApp(definition, new Hashtable { ["rows"] = new[] { new { Name = "A", Value = 10 }, new { Name = "B", Value = 20 } } });
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick());
+        var grid = (DataGridControl)app.Controls["grid"];
+        grid.TrySetColumnSortDirection("Value", XenoAtom.Terminal.UI.DataGrid.DataGridSortDirection.Descending, true);
+        grid.CurrentCell = new DataGridCell(0, 0);
+        ui.Tick();
+        Assert.AreEqual("B", System.Management.Automation.PSObject.AsPSObject(app.State["selected"]).Properties["Name"].Value);
+        app.State["rows"] = new[] { new { Name = "A", Value = 30 }, new { Name = "B", Value = 20 } };
+        ui.Tick();
+        ui.Tick();
+        Assert.AreEqual(XenoAtom.Terminal.UI.DataGrid.DataGridSortDirection.Descending, grid.GetColumnSortDirection("Value"));
+        Assert.AreEqual(1, grid.CurrentCell.Row);
+        Assert.AreEqual("B", System.Management.Automation.PSObject.AsPSObject(app.State["selected"]).Properties["Name"].Value);
+    }
+
+    [TestMethod]
+    public async Task RangeGridSelectionHighlightsHopAndSurvivesFreshRows() {
+        var definition = TuiDocument.FromJson("""
+            {"Root":{"Id":"root","Type":"VStack","Children":[
+              {"Id":"route","Type":"DataGridControl","Bind":"hops","SelectionBind":"selectedHop","Columns":["Hop","Latency"],"CellRanges":["Latency"],"Options":{"SelectionMode":"Row"}},
+              {"Id":"history","Type":"Chart","Bind":"samples","YProperty":["Hop 1","Hop 2"],"HighlightSeriesBind":"highlight","GraphKind":"Line"}]}}
+            """);
+        static object[] Rows() => [new { Hop = 1, Latency = new { Min = 10, Avg = 20, Max = 80, Scale = 200 } }, new { Hop = 2, Latency = new { Min = 50, Avg = 100, Max = 180, Scale = 200 } }];
+        using var app = new CustomTuiApp(definition, new Hashtable {
+            ["hops"] = Rows(),
+            ["samples"] = new[] { new Hashtable { ["Hop 1"] = 20, ["Hop 2"] = 100 } }
+        }, handler: (evt, state) => {
+            if (evt.Id == "route" && evt.Kind == "Selection" && evt.Value is not null) {
+                state["highlight"] = "Hop " + System.Management.Automation.PSObject.AsPSObject(evt.Value).Properties["Hop"].Value;
+            }
+            return null;
+        });
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 90, 30);
+        var grid = (DataGridControl)app.Controls["route"];
+        Assert.IsTrue(grid.EnumerateVisualsDepthFirst().OfType<LatencyRangeCell>().Any(), "Range cells must be native text visuals.");
+        Assert.Contains("●", ui.Output);
+        ui.App.Focus(grid);
+        ui.Key(TerminalKey.Down, () => grid.CurrentCell.Row == 1);
+        ui.Tick();
+        ui.Tick();
+        var chart = (fullscreen.Charts.Chart)app.Controls["history"];
+        Assert.AreEqual("Hop 2", chart.GetData(80).Single(series => series.Emphasized).Property);
+        app.State["hops"] = Rows();
+        ui.Tick();
+        ui.Tick();
+        Assert.AreEqual(1, grid.CurrentCell.Row);
+        Assert.AreEqual("Hop 2", chart.GetData(80).Single(series => series.Emphasized).Property);
+        var firstRange = grid.EnumerateVisualsDepthFirst().OfType<LatencyRangeCell>().Where(cell => cell.Bounds.Height > 0).OrderBy(cell => cell.Bounds.Y).First();
+        ui.Mouse(TerminalMouseKind.Down, TerminalMouseButton.Left, firstRange.Bounds.X + 1, firstRange.Bounds.Y, () => grid.CurrentCell.Row == 0);
+        ui.Tick();
+        ui.Tick();
+        Assert.AreEqual("Hop 1", chart.GetData(80).Single(series => series.Emphasized).Property);
+    }
+
+    [TestMethod]
+    public async Task GridCellColorsRoundTripThresholdsAndRefreshWithoutFormattingSourceValues() {
+        var definition = TuiDocument.FromJson("""
+            {"Root":{"Id":"grid","Type":"DataGridControl","Bind":"rows","Columns":["RTT"],
+              "CellColors":[{"Column":"RTT","From":0,"Color":"#00FF00"},
+                {"Column":"RTT","From":50,"Color":"#FFFF00"},{"Column":"RTT","From":150,"Color":"#FF0000"}]}}
+            """);
+        definition = TuiDataFile.Parse(TuiDataFile.Generate(definition));
+        Assert.Contains("CellColors", TuiControlCatalog.Describe("DataGridControl").Properties);
+        using var app = new CustomTuiApp(definition, new Hashtable {
+            ["rows"] = new[] { new { RTT = "49" }, new { RTT = "50" }, new { RTT = "150" }, new { RTT = "NaN" } }
+        });
+        await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 80, 24);
+        var grid = (DataGridControl)app.Controls["grid"];
+        foreach (var (value, color) in new[] { ("49", Color.Rgb(0, 255, 0)), ("50", Color.Rgb(255, 255, 0)), ("150", Color.Rgb(255, 0, 0)) }) {
+            var cell = grid.EnumerateVisualsDepthFirst().OfType<TextBlock>().First(text => text.Text == value);
+            Assert.AreEqual(color, cell.GetStyle<XenoAtom.Terminal.UI.Styling.TextBlockStyle>().Foreground);
+        }
+        Assert.AreEqual("150", ((XenoAtom.Terminal.UI.DataGrid.DataGridDataTableDocument)grid.Document!).Table.Rows[2]["RTT"]);
+        app.State["rows"] = new[] { new { RTT = "5" } };
+        app.Tick();
+        ui.Tick();
+        var refreshed = grid.EnumerateVisualsDepthFirst().OfType<TextBlock>().First(text => text.Text == "5");
+        Assert.AreEqual(Color.Rgb(0, 255, 0), refreshed.GetStyle<XenoAtom.Terminal.UI.Styling.TextBlockStyle>().Foreground);
+        definition.Root.CellRanges = ["RTT"];
+        Assert.Throws<ArgumentException>(() => definition.Validate(), "Range and numeric text templates cannot target the same column.");
+        definition.Root.CellRanges = [];
+        definition.Root.CellColors = [new("RTT", 50, "#00FF00"), new("RTT", 0, "#FF0000")];
+        Assert.Throws<ArgumentException>(() => definition.Validate());
+    }
+
+    [TestMethod]
     public void DesignerSearchDefaultsToAnExistingLogAndRejectsMissingTargetsWithoutMutation() {
         using var designer = new TuiDesignerApp(TuiDocument.Starter(), (_, _) => { });
         string before = designer.Document.ToJson();
@@ -76,7 +203,12 @@ public sealed class NativeControlTests {
         };
         var definition = TuiDocument.FromJson("""{"Root":{"Id":"grid","Type":"DataGridControl","Bind":"rows","Columns":["Label","Value"],"SelectionBind":"selected","Options":{"ReadOnly":false}}}""");
         TuiGridEdit? edit = null;
-        using var app = new CustomTuiApp(definition, new Hashtable { ["rows"] = new[] { first, second } }, handler: (ev, _) => { if (ev.Kind == "Edit") { edit = (TuiGridEdit)ev.Value!; } return null; });
+        using var app = new CustomTuiApp(definition, new Hashtable { ["rows"] = new[] { first, second } }, handler: (ev, _) => {
+            if (ev.Kind == "Edit") {
+                edit = (TuiGridEdit)ev.Value!;
+            }
+            return null;
+        });
         await using var ui = new DesignerUxTests.UiSession(app.Root, () => app.Tick(), 130, 40);
         var grid = (DataGridControl)app.Controls["grid"];
         Assert.IsFalse(grid.ReadOnly);

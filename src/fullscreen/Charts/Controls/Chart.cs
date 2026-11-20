@@ -85,6 +85,7 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
     internal bool PreferTerminalCells { get; set; }
     internal bool UseSixel => _exportingPixels || !PreferTerminalCells && ChartPresenters.Supports(App, GraphKind);
     internal Rectangle PlotBounds => ContentPlotBounds;
+    internal ChartPlotBand[] PlotBands { get; set; } = [];
     internal virtual bool UsesWidthForData => false;
     internal ChartPixelKey PixelKey {
         get {
@@ -128,8 +129,12 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
         HorizontalAlignment = Align.Stretch;
         VerticalAlignment = Align.Stretch;
         _inspection.Content = new InspectionAnchor(this) {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch
+            MinWidth = 0,
+            MaxWidth = 0,
+            MinHeight = 0,
+            MaxHeight = 0,
+            HorizontalAlignment = Align.Start,
+            VerticalAlignment = Align.Start
         };
         AttachChild(_inspection);
         PixelInk = Palette.ChartBlue;
@@ -332,7 +337,8 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
             GraphKind is GraphKind.Flamegraph or GraphKind.Gantt
                 ? Math.Max(1, PlotBounds.Height > 0 ? height / PlotBounds.Height : 16) * (GraphKind == GraphKind.Flamegraph ? FlameFrameRows : 1)
                 : 1,
-            TaskOffset
+            TaskOffset,
+            PlotBands
         );
     }
 
@@ -503,8 +509,8 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
                 }
 
                 previous = point;
-                if (distance < best || distance == best && GraphKind == GraphKind.ColumnLine
-                    && ChartColumns.Kind(series, GraphKind, seriesIndex) == GraphKind.Line) {
+                if (distance < best || distance == best && (series.Emphasized || GraphKind == GraphKind.ColumnLine
+                    && ChartColumns.Kind(series, GraphKind, seriesIndex) == GraphKind.Line)) {
                     best = distance;
                     selected = new(
                         seriesIndex,
@@ -562,6 +568,20 @@ public partial class Chart : Themes.ThemedSurface, IGraphicsRenderableVisual {
 
     internal static Color AutomaticSeriesColor(Themes.ThemePalette palette, Color ink, GraphKind kind, int index) =>
         index % Themes.ThemePalette.SeriesColorCount == 0 ? ink : palette.SeriesColor(index);
+}
+
+/// <summary>A tinted background region beginning at an absolute Y-axis value.</summary>
+/// <param name="From">The inclusive lower Y-axis boundary.</param>
+/// <param name="Tint">The color blended into the plot background.</param>
+public readonly record struct ChartPlotBand(double From, Color Tint) {
+    internal static int At(ChartPlotBand[] bands, double value) {
+        for (int index = bands.Length - 1; index >= 0; index--) {
+            if (value >= bands[index].From) {
+                return index;
+            }
+        }
+        return -1;
+    }
 }
 
 internal readonly record struct ChartPixelKey(

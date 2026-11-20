@@ -4,6 +4,9 @@ using fullscreen.Custom;
 using fullscreen.Files;
 using fullscreen.Monitoring;
 using fullscreen.Tables;
+using fullscreen.Hosting;
+using fullscreen.Charts;
+using fullscreen.Themes;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
@@ -13,6 +16,45 @@ namespace fullscreen.Tests;
 [TestClass]
 [DoNotParallelize]
 public sealed class DiagnosticsTests {
+    [TestMethod]
+    public async Task F12TerminalDetailsTrackRendererGeometryAndKeepInputFocus() {
+        using var application = new CustomTuiApp(new TuiDocument { Root = new TuiNode { Id = "draft", Type = "TextBox", Text = "Keep draft" } });
+        var chrome = new FullscreenChrome(application, ThemePalette.Default);
+        await using var ui = new DesignerUxTests.UiSession(chrome, () => {
+            application.Tick();
+            chrome.UpdateDiagnostics(ChartRenderer.Native, null);
+        });
+        ui.App.Focus(application.Controls["draft"]);
+        var focus = ui.App.FocusedElement;
+        Assert.AreEqual(default, chrome.DiagnosticsBounds);
+        ui.Key(TerminalKey.F12, () => TerminalOverlayBounds.DebugVisible(ui.App));
+        ui.Tick();
+        ui.Tick();
+        Assert.AreEqual(3, chrome.DiagnosticsBounds.Height, string.Join("; ", chrome.EnumerateVisualsDepthFirst().OfType<TextBlock>().Select(text => $"{text.Text}: visible={text.IsVisible} bounds={text.Bounds}")));
+        Assert.AreSame(focus, ui.App.FocusedElement);
+        Assert.Contains("120x40 cells", ui.Output);
+        Assert.Contains("Native -> Native", ui.Output);
+        var details = chrome.EnumerateVisualsDepthFirst().OfType<TextBlock>().Where(text => text.Text?.StartsWith("Terminal:", StringComparison.Ordinal) == true
+            || text.Text?.StartsWith("Graphics:", StringComparison.Ordinal) == true || text.Text?.StartsWith("Geometry:", StringComparison.Ordinal) == true).ToArray();
+        using var graphics = new SixelChartPresenter(new TerminalGraphicsCapabilities {
+            SupportState = TerminalGraphicsSupportState.Confirmed,
+            PreferredProtocol = TerminalGraphicsProtocol.None,
+            DetectionSource = "VT DA1"
+        }, new TerminalPixelMetrics(960, 640, 8, 16, 120, 40)) {
+            UsesFallbackMetrics = true
+        };
+        chrome.UpdateDiagnostics(ChartRenderer.Auto, graphics);
+        string text = string.Join("\n", details.Select(line => line.Text));
+        Assert.Contains("Auto -> Sixel", text);
+        Assert.Contains("source=VT DA1", text);
+        Assert.Contains("cell 8x16px; surface 960x640px (8x16 fallback)", text);
+        Assert.AreEqual(application.Root.Bounds, chrome.Bounds, "Diagnostics must not reduce the application canvas.");
+        Assert.IsTrue(details.All(line => !line.IsHitTestVisible));
+        ui.Key(TerminalKey.F12, () => chrome.DiagnosticsBounds.Height == 0);
+        Assert.AreSame(focus, ui.App.FocusedElement);
+        Assert.AreEqual("Keep draft", ((TextBox)application.Controls["draft"]).Text);
+    }
+
     [TestMethod]
     [DataRow("Monitor")]
     [DataRow("Files")]
@@ -29,9 +71,14 @@ public sealed class DiagnosticsTests {
             "Custom" => custom!.Root,
             _ => designer!.Root
         };
-        await using var ui = new DesignerUxTests.UiSession(root, () => { custom?.Tick(); designer?.Tick(); });
+        await using var ui = new DesignerUxTests.UiSession(root, () => {
+            custom?.Tick();
+            designer?.Tick();
+        });
         var focus = kind == "Custom" ? custom!.Controls["notes"] : ui.App.FocusedElement;
-        if (focus is not null) { ui.App.Focus(focus); }
+        if (focus is not null) {
+            ui.App.Focus(focus);
+        }
         var visible = typeof(TerminalApp).GetField("_debugOverlayVisible", BindingFlags.Instance | BindingFlags.NonPublic)!;
         bool IsVisible() =>
             (bool)visible.GetValue(ui.App)!;
@@ -45,9 +92,16 @@ public sealed class DiagnosticsTests {
             Assert.AreEqual("Keep this draft", ((TextArea)custom.Controls["notes"]).Text);
             Assert.IsTrue(custom.Tick());
         }
-        if (designer is not null) { Assert.IsFalse(designer.Dirty); }
-        if (root is MonitorSurface monitor) { Assert.IsFalse(monitor.ExitRequested); Assert.AreEqual(MonitorView.Processes, monitor.View); }
-        if (root is FileManagerSurface files) { Assert.IsFalse(files.ExitRequested); }
+        if (designer is not null) {
+            Assert.IsFalse(designer.Dirty);
+        }
+        if (root is MonitorSurface monitor) {
+            Assert.IsFalse(monitor.ExitRequested);
+            Assert.AreEqual(MonitorView.Processes, monitor.View);
+        }
+        if (root is FileManagerSurface files) {
+            Assert.IsFalse(files.ExitRequested);
+        }
 
         var editor = new TextBox("Modal draft");
         var dialog = new Dialog { Content = editor, IsModal = true, Width = 45, Height = 6 };

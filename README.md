@@ -44,6 +44,8 @@ ftop
 
 Press **F12** in any interactive cmdlet, including while a dialog is open, to
 toggle the diagnostic overlay with frame timings and keyboard focus.
+It also shows graphics statistics, terminal dimensions and the active graphics
+mode. Pixel dimensions and fallback sizing help diagnose misplaced graphics.
 
 ### Mouse support
 
@@ -82,6 +84,13 @@ Every app works with the mouse as well as the keyboard:
 </details>
 
 ## Custom TUIs
+
+For scrollable, expandable cards, run [ServiceCards.ps1](examples/ServiceCards.ps1).
+It composes the existing `ScrollViewer`, `Accordion` and `Collapsible` controls;
+multiple cards can remain open, with expansion stored in application state.
+Run [CommandTree.ps1](examples/CommandTree.ps1) for shared scoped actions, lazy
+tree expansion and two charts linked to one selected interval. Shared commands
+use one handler across keyboard, menus, command bars and palettes.
 
 Build your own apps from reusable controls. Design a layout visually with
 [Show-TuiDesigner](docs/en-US/Show-TuiDesigner.md), then save or export with

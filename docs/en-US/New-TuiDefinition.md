@@ -20,7 +20,7 @@ Create or validate a TUI definition as native PowerShell data.
 ### Parts (Default)
 
 ```
-New-TuiDefinition [[-Title] <string>] [-Root <psobject>] [-State <hashtable>] [<CommonParameters>]
+New-TuiDefinition [[-Title] <string>] [-Root <psobject>] [-State <hashtable>] [-Command <psobject[]>] [<CommonParameters>]
 ```
 
 ### Definition
@@ -42,6 +42,14 @@ Pipe existing definitions through Definition to validate and normalize them.
 Returns a plain PowerShell object with hashtable/array children, ready for Invoke-Tui, the designer or Export-TuiDefinition.
 No terminal opens and no handlers run.
 
+`Command` declares shared actions with `Id`, `Label`, optional `Gesture`, `Scope`,
+`EnabledBind` and `VisibleBind`. A blank scope means the layout root; a control ID
+limits the action to that control's focused descendants. State gates must be true
+for the action to appear and execute. Command bars and palettes reuse these actions;
+`MenuBar.CommandIds` selects menu entries. All routes emit `Id:Command`, so one
+handler owns the behavior. F4, F10, F12 and Escape without modifiers remain host keys.
+The repository's CommandTree sample demonstrates the complete workflow.
+
 ## EXAMPLES
 
 ### Example 1: Create a starter form
@@ -58,9 +66,20 @@ Root accepts ordinary hashtables or PSCustomObjects.
 
 ```powershell
 $layout = New-TuiDefinition -Title 'Greeting' -Root @{
-    Id = 'root'; Type = 'VStack'; Children = @(
-        @{ Id = 'hello'; Type = 'Text'; Text = 'Hello PowerShell' }
-        @{ Id = 'close'; Type = 'Button'; Text = 'Done'; Close = $true }
+    Id = 'root'
+    Type = 'VStack'
+    Children = @(
+        @{
+            Id = 'hello'
+            Type = 'Text'
+            Text = 'Hello PowerShell'
+        }
+        @{
+            Id = 'close'
+            Type = 'Button'
+            Text = 'Done'
+            Close = $true
+        }
     )
 }
 $layout | Invoke-Tui
@@ -77,6 +96,30 @@ $copy.Title = 'A separate copy'
 ```
 
 ## PARAMETERS
+
+### -Command
+
+Shared data-only action definitions. Up to 256 actions; IDs are unique and distinct
+from control IDs. Gestures must be unique within a scope. `EnabledBind` and
+`VisibleBind` refer to boolean state keys. Layout export preserves the definitions
+and generates one `Command` callback stub per action.
+
+```yaml
+Type: System.Management.Automation.PSObject[]
+DefaultValue: '@()'
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: Parts
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
 
 ### -Definition
 
