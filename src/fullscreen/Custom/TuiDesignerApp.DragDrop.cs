@@ -1,8 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
-using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Geometry;
+using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
 using IOPath = System.IO.Path;
 
@@ -26,12 +27,13 @@ public sealed partial class TuiDesignerApp {
     private readonly TextBlock _paletteHeading = new();
     private readonly TextBlock _paletteEmpty = new("No matching controls");
     private string _paletteQuery = "";
-    private Visual _paletteViewport = null!;
+    private Visual _paletteViewport;
     private string? _dragType, _dragId;
     private int _dragX, _dragY;
     private bool _dragging;
     private string _exportPath = "MyTui.ps1";
     private bool _linkedLayout = true;
+    [MemberNotNull(nameof(_paletteViewport))]
     private Visual CreatePalette() {
         var stack = new VStack();
         foreach (var category in TuiControlCatalog.All.GroupBy(control => control.Category).OrderBy(group => group.Key)) {

@@ -10,10 +10,8 @@ BeforeAll {
         }
         $width = [int]$header.Groups[1].Value
         $height = [int]$header.Groups[2].Value
-        $pixels = [byte[]]::new($width * $height)
         $x = 0
         $y = 0
-        $color = 0
         $painted = 0
         $position = $header.Index + $header.Length
         while ($position -lt $Payload.Length - 2) {
@@ -24,7 +22,6 @@ BeforeAll {
                 while ($position -lt $Payload.Length -and [char]::IsDigit($Payload[$position])) {
                     $position++
                 }
-                $color = [int]$Payload.Substring($start, $position - $start)
                 while ($position -lt $Payload.Length -and ($Payload[$position] -eq ';' -or [char]::IsDigit($Payload[$position]))) {
                     $position++
                 }
@@ -53,20 +50,15 @@ BeforeAll {
             if ($mask -lt 0 -or $mask -gt 63) {
                 throw 'Unexpected Sixel data character.'
             }
-            for ($column = 0; $column -lt $repeat; $column++) {
-                for ($bit = 0; $bit -lt 6; $bit++) {
-                    if (($mask -band (1 -shl $bit)) -ne 0 -and $x -lt $width -and ($y + $bit) -lt $height) {
-                        $pixels[($y + $bit) * $width + $x] = $color
-                        $painted++
-                    }
-                }
-                $x++
-            }
+            $rows = [math]::Clamp($height - $y, 0, 6)
+            $clippedMask = [uint32]($mask -band ((1 -shl $rows) - 1))
+            $columns = [math]::Clamp($width - $x, 0, $repeat)
+            $painted += $columns * [Numerics.BitOperations]::PopCount($clippedMask)
+            $x += $repeat
         }
         [pscustomobject]@{
             Width = $width
             Height = $height
-            Pixels = $pixels
             Painted = $painted
         }
     }
@@ -81,12 +73,16 @@ Describe 'Chart showcase' {
     }
 
     It 'Returns all chart kinds as portable data without entering the host' {
-        Mock Invoke-Tui { throw 'DefinitionOnly must not open a host.' }
+        Mock Invoke-Tui {
+            throw 'DefinitionOnly must not open a host.'
+        }
         $layout = & $example -DefinitionOnly
         $pages = $layout.Root.Children[0]
         $pages.Type | Should -Be 'TabControl'
         $pages.Bind | Should -Be 'currentChart'
-        $kinds = @($pages.Children | ForEach-Object { $_.Children[2].GraphKind })
+        $kinds = @($pages.Children | ForEach-Object {
+                $_.Children[2].GraphKind
+            })
         ($kinds -join ',') | Should -Be ([enum]::GetNames([fullscreen.Charts.GraphKind]) -join ',')
         $layout.State.secondsPerChart | Should -Be 3
         $layout.State.currentChart | Should -Be 0
@@ -96,10 +92,17 @@ Describe 'Chart showcase' {
             $page.Children[2].SelectionBind | Should -Be 'selectedPoint'
         }
         foreach ($kind in 'Gauge', 'RadialBars') {
-            $chart = ($pages.Children | Where-Object { $_.Children[2].GraphKind -eq $kind }).Children[2]
+            $chart = ($pages.Children | Where-Object {
+                    $_.Children[2].GraphKind -eq $kind
+                }).Children[2]
             $values = @($layout.State[$chart.Bind])
             $values.Count | Should -Be 4
-            $expected = if ($kind -eq 'Gauge') { '68,82,91,97' } else { '88,72,95,83' }
+            $expected = if ($kind -eq 'Gauge') {
+                '68,82,91,97'
+            }
+            else {
+                '88,72,95,83'
+            }
             ($values.Load -join ',') | Should -Be $expected
             foreach ($value in $values) {
                 $value.Load | Should -BeLessThan $chart.Maximum
@@ -120,8 +123,12 @@ Describe 'Chart showcase' {
     }
 
     It 'Cycles every chart in one module app with supported Sixel or native fallback (<Sixel>)' -ForEach @(
-        @{ Sixel = $true }
-        @{ Sixel = $false }
+        @{
+            Sixel = $true
+        }
+        @{
+            Sixel = $false
+        }
     ) {
         & $example
         $invocation = $capture[0]
@@ -150,7 +157,12 @@ Describe 'Chart showcase' {
         }
         $graphics.SupportedProtocols = $protocols
         $graphics.SupportState = [Enum]::Parse($graphics.GetType().GetProperty('SupportState').PropertyType,
-            $(if ($Sixel) { 'Confirmed' } else { 'Unsupported' }))
+            $(if ($Sixel) {
+                    'Confirmed'
+                }
+                else {
+                    'Unsupported'
+                }))
         $graphics.SupportsStaticImages = $Sixel
         $graphics.PixelMetrics = $metrics
         $capabilities = [Activator]::CreateInstance($terminalAssembly.GetType('XenoAtom.Terminal.TerminalCapabilities'))
@@ -181,7 +193,9 @@ Describe 'Chart showcase' {
         $terminal = [Activator]::CreateInstance($uiAssembly.GetType('XenoAtom.Terminal.UI.TerminalApp'),
             [object[]]@($app.Root, $session.Instance, $appOptions))
         $flags = [Reflection.BindingFlags]'Instance,NonPublic'
-        $clock = @{ Time = [System.Diagnostics.Stopwatch]::GetTimestamp() }
+        $clock = @{
+            Time = [System.Diagnostics.Stopwatch]::GetTimestamp()
+        }
         $renderTick = {
             $clock.Time += [long]([System.Diagnostics.Stopwatch]::Frequency / 100)
             $null = $terminal.GetType().GetMethod('Tick', $flags).Invoke($terminal, @($clock.Time))
@@ -221,7 +235,12 @@ Describe 'Chart showcase' {
                     if ($kind -in 'Bars', 'HorizontalBars', 'StackedBars') {
                         $chart.ShowLegend | Should -BeTrue
                         $pixels = $plot.GetType().GetField('_pixels', $flags).GetValue($plot)
-                        $lastColor = if ($kind -eq 'StackedBars') { 4 } else { 5 }
+                        $lastColor = if ($kind -eq 'StackedBars') {
+                            4
+                        }
+                        else {
+                            5
+                        }
                         foreach ($color in 2..$lastColor) {
                             [Array]::IndexOf[byte]($pixels, [byte]$color, 0, (640 * 320)) |
                                 Should -BeGreaterOrEqual 0 -Because "$kind must paint each category or series in its own legend color"
@@ -240,12 +259,14 @@ Describe 'Chart showcase' {
                         $mouse.Y = $chart.Bounds.Y + 5
                         $backend.PushEvent($mouse)
                         $tooltipHost = $chart.EnumerateVisualsDepthFirst() |
-                            Where-Object { $_.GetType().Name -eq 'TooltipHost' } |
+                            Where-Object {
+                                $_.GetType().Name -eq 'TooltipHost'
+                            } |
                             Select-Object -First 1
                         $shown = [System.Threading.SpinWait]::SpinUntil([Func[bool]] {
-                            & $renderTick
-                            $null -ne $tooltipHost.TooltipContent -and $null -ne $tooltipHost.TooltipContent.App
-                        }, 3000)
+                                & $renderTick
+                                $null -ne $tooltipHost.TooltipContent -and $null -ne $tooltipHost.TooltipContent.App
+                            }, 3000)
                         $shown | Should -BeTrue -Because 'The chart tooltip must work with both native and Sixel rendering.'
                         ($renderBuffer.GetValue($terminal).ToMarkupLines() -join "`n") | Should -Match 'Latency:'
                         $hoverContent = $tooltipHost.TooltipContent
@@ -300,22 +321,22 @@ Describe 'Chart showcase' {
         [bool]$invocation.Minimal | Should -BeFalse
         $state = @{} + $invocation.Definition.State
         $tick = $invocation.OnTick
-        $event = $invocation.OnEvent
+        $eventCallback = $invocation.OnEvent
         $tickEvent = [fullscreen.Custom.TuiEvent]::new('', 'Tick')
         $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($tick, $tickEvent, $state)
         $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($tick, $tickEvent, $state)
         $state.currentChart | Should -Be 0 -Because 'Ticks before the dwell time must not advance.'
-        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($event, [fullscreen.Custom.TuiEvent]::new('pause', 'Click'), $state)
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($eventCallback, [fullscreen.Custom.TuiEvent]::new('pause', 'Click'), $state)
         $state.paused | Should -BeTrue
         $state.playback | Should -Be 'Paused'
         $state.slideStarted = 1
         $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($tick, $tickEvent, $state)
         $state.currentChart | Should -Be 0
-        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($event, [fullscreen.Custom.TuiEvent]::new('next', 'Click'), $state)
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($eventCallback, [fullscreen.Custom.TuiEvent]::new('next', 'Click'), $state)
         $state.currentChart | Should -Be 1
-        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($event, [fullscreen.Custom.TuiEvent]::new('previous', 'Click'), $state)
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($eventCallback, [fullscreen.Custom.TuiEvent]::new('previous', 'Click'), $state)
         $state.currentChart | Should -Be 0
-        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($event, [fullscreen.Custom.TuiEvent]::new('pause', 'Click'), $state)
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($eventCallback, [fullscreen.Custom.TuiEvent]::new('pause', 'Click'), $state)
         $state.paused | Should -BeFalse
         $state.playback | Should -Be 'Playing - 5 seconds per chart'
         $state.currentChart = $state.chartCount - 1
@@ -330,11 +351,15 @@ Describe 'Chart showcase' {
         & $example -SecondsPerChart 5
         $invocation = $capture[0]
         $state = @{} + $invocation.Definition.State
-        $event = $invocation.OnEvent
+        $eventCallback = $invocation.OnEvent
         $tick = $invocation.OnTick
-        $row = [pscustomobject]@{ Sample = 3; Latency = 64.5; Target = 50 }
+        $row = [pscustomobject]@{
+            Sample = 3
+            Latency = 64.5
+            Target = 50
+        }
         $selection = [fullscreen.Custom.TuiEvent]::new('chart_Line', 'Selection', $row)
-        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($event, $selection, $state)
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($eventCallback, $selection, $state)
         $state.paused | Should -BeTrue
         $state.playback | Should -Be 'Paused - inspecting selection'
         $state.selectedDetails | Should -Match 'Latency\s*:\s*64.5'
@@ -342,7 +367,7 @@ Describe 'Chart showcase' {
         $state.slideStarted = 1
         $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($tick, [fullscreen.Custom.TuiEvent]::new('', 'Tick'), $state)
         $state.currentChart | Should -Be 0
-        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($event, [fullscreen.Custom.TuiEvent]::new('pause', 'Click'), $state)
+        $null = [fullscreen.Commands.InvokeTuiCommand]::Callback($eventCallback, [fullscreen.Custom.TuiEvent]::new('pause', 'Click'), $state)
         $state.paused | Should -BeFalse
         $state.slideStarted | Should -BeGreaterThan 1
         $state.playback | Should -Be 'Playing - 5 seconds per chart'

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.Json;
 using XenoAtom.Terminal.UI;
@@ -28,12 +29,13 @@ public sealed partial class TuiDesignerApp {
     private readonly WrapHStack _propertyGroups = new() {
         Spacing = 1
     };
-    private Visual _documentProperties = null!;
-    private ScrollViewer _propertyViewport = null!;
+    private Visual _documentProperties;
+    private ScrollViewer _propertyViewport;
     private string _inspectedType = "";
     private int _paneWidth = -1;
     private int _inspectorExtent = -1;
     private int _inspectorChrome = -1;
+    [MemberNotNull(nameof(_documentProperties), nameof(_propertyViewport))]
     private VStack CreateInspector() {
         var groups = _propertyGroups;
         foreach (string group in new[]
@@ -56,7 +58,9 @@ public sealed partial class TuiDesignerApp {
         groups.Children.Add(new Button("Hide").Click(HideInspector));
         groups.Children.Add(new Button("?").Click(ShowPropertyHelp));
         foreach (var button in groups.Children.OfType<Button>()) {
-            button.SetStyle(ButtonStyle.Default with { Padding = new(1, 0, 1, 0) });
+            button.SetStyle(ButtonStyle.Default with {
+                Padding = new(1, 0, 1, 0)
+            });
         }
 
         var fields = new WrapHStack {
@@ -238,7 +242,11 @@ public sealed partial class TuiDesignerApp {
         UpdateInspector(node.Type);
         foreach (var (name, editor) in _editors) {
             object? value = typeof(TuiNode).GetProperty(name)!.GetValue(node);
-            string text = value is string[] items ? string.Join('\n', items) : value is Dictionary<string, JsonElement> options ? JsonSerializer.Serialize(options, TuiDocument.JsonOptions) : Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+            string text = value switch {
+                string[] items => string.Join('\n', items),
+                int[] or TuiPlotBand[] or TuiCellColor[] or Dictionary<string, JsonElement> => JsonSerializer.Serialize(value, TuiDocument.JsonOptions),
+                _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? ""
+            };
             switch (editor) {
                 case TextBox input:
                     input.Text = text;
@@ -297,7 +305,10 @@ public sealed partial class TuiDesignerApp {
                     object? value = property.PropertyType == typeof(string[]) ? text.Length == 0 ? Array.Empty<string>() : text.Replace("\r\n", "\n", StringComparison.Ordinal).Split(
                         '\n',
                         metadata.Name == "Columns" ? StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries : StringSplitOptions.None
-                    ) : property.PropertyType == typeof(bool) ? bool.Parse(text) : property.PropertyType == typeof(int?) ? string.IsNullOrWhiteSpace(text) ? null : int.Parse(text, CultureInfo.InvariantCulture) : property.PropertyType == typeof(double?) ? string.IsNullOrWhiteSpace(text) ? null : double.Parse(text, CultureInfo.InvariantCulture) : property.PropertyType == typeof(int) ? int.Parse(text, CultureInfo.InvariantCulture) : property.PropertyType == typeof(double) ? double.Parse(text, CultureInfo.InvariantCulture) : property.PropertyType == typeof(Dictionary<string, JsonElement>) ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(text, TuiDocument.JsonOptions) ?? [] : text;
+                    ) : property.PropertyType == typeof(int[]) ? string.IsNullOrWhiteSpace(text) ? [] : JsonSerializer.Deserialize<int[]>(text) ?? []
+                    : property.PropertyType == typeof(TuiPlotBand[]) ? string.IsNullOrWhiteSpace(text) ? [] : JsonSerializer.Deserialize<TuiPlotBand[]>(text, TuiDocument.JsonOptions) ?? []
+                    : property.PropertyType == typeof(TuiCellColor[]) ? string.IsNullOrWhiteSpace(text) ? [] : JsonSerializer.Deserialize<TuiCellColor[]>(text, TuiDocument.JsonOptions) ?? []
+                    : property.PropertyType == typeof(bool) ? bool.Parse(text) : property.PropertyType == typeof(int?) ? string.IsNullOrWhiteSpace(text) ? null : int.Parse(text, CultureInfo.InvariantCulture) : property.PropertyType == typeof(double?) ? string.IsNullOrWhiteSpace(text) ? null : double.Parse(text, CultureInfo.InvariantCulture) : property.PropertyType == typeof(int) ? int.Parse(text, CultureInfo.InvariantCulture) : property.PropertyType == typeof(double) ? double.Parse(text, CultureInfo.InvariantCulture) : property.PropertyType == typeof(Dictionary<string, JsonElement>) ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(text, TuiDocument.JsonOptions) ?? [] : text;
                     property.SetValue(node, value);
                 }
                 catch (Exception error) when (error is FormatException or OverflowException or ArgumentException or JsonException) {

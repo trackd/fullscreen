@@ -1,22 +1,24 @@
 using System.Collections;
-using CodeControl = fullscreen.Files.TextMatePreview;
-using ImageControl = fullscreen.Files.ImagePreview;
 using System.Diagnostics;
 using System.Globalization;
 using fullscreen.Hosting;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Commands;
+using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Layout;
+using CodeControl = fullscreen.Files.TextMatePreview;
+using ImageControl = fullscreen.Files.ImagePreview;
 
 namespace fullscreen.Custom;
 /// <summary>Describes an interaction delivered to a custom TUI event handler.</summary>
 /// <param name="Id">The stable resource or process identifier.</param>
 /// <param name="Kind">The operation or event category.</param>
 /// <param name="Value">The input value to format, display, or append. Defaults to null.</param>
-public sealed record TuiEvent(string Id, string Kind, object? Value = null);
+public sealed record TuiEvent(string Id, string Kind, object? Value = null) {
+    internal Action<object?>? Complete { get; init; }
+}
 /// <summary>Describes state changes and an optional close request returned by a TUI event handler.</summary>
 /// <param name="State">The state exposed to the current view or callback. Defaults to null.</param>
 /// <param name="Close">Whether the callback requests closing the application. Defaults to false.</param>
@@ -27,6 +29,9 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
     private sealed record Binding(TuiNode Node, Visual Control) {
         public object? Last { get; set; }
         public object? LastEdges { get; set; }
+        public int LastSeriesCount { get; set; } = -1;
+        public string? LastHighlight { get; set; }
+        public object? LastDataVersion { get; set; }
         public bool Deferred { get; set; }
     }
 
@@ -132,6 +137,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
             VerticalAlignment = Align.Stretch
         };
         _chrome.Add(footer);
+        InitializeCommands(footer);
         foreach (var (_, control) in _native.Where(entry => entry.Control is CommandPalette)) {
             foreach (var command in control.Commands.ToArray()) {
                 control.Commands.Remove(command);
@@ -172,17 +178,8 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
     private void ApplyNodeStyles(TuiNode node) {
         var control = Controls[node.Id];
         if (node.Foreground.Length > 0 || node.Background.Length > 0 || node.Bold) {
-            static Color ReadColor(
-                string value,
-                Color fallback
-            ) =>
-                value.Length == 0 ? fallback : Color.Rgb(
-                    Convert.ToByte(value.Substring(1, 2), 16),
-                    Convert.ToByte(value.Substring(3, 2), 16),
-                    Convert.ToByte(value.Substring(5, 2), 16)
-                );
-            var foreground = ReadColor(node.Foreground, _theme.Foreground);
-            var background = ReadColor(node.Background, _theme.Background);
+            var foreground = ReadColor(node.Foreground) ?? _theme.Foreground;
+            var background = ReadColor(node.Background) ?? _theme.Background;
             var basis = control.GetTheme();
             control.SetStyle(new XenoAtom.Terminal.UI.Styling.Theme {
                 Foreground = foreground,
@@ -279,8 +276,10 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                         GraphKind = Enum.Parse<Charts.GraphKind>(node.GraphKind, true),
                         ShowLegend = node.ShowLegend,
                         ShowTooltips = node.ShowTooltips,
+                        FollowLiveHover = node.YProperty.Length > 0,
                         EnableZoom = node.EnableZoom,
                         ShowAxes = node.ShowAxes,
+                        PlotBands = [.. node.PlotBands.Select(band => new Charts.ChartPlotBand(band.From, ReadColor(band.Color)!.Value))],
                         MinHeight = node.Height ?? 8
                     };
                     if (Charts.ChartTopology.Supports(numericChart.GraphKind)) {
@@ -368,7 +367,9 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                         minimal: node.Minimal,
                         includeUserProcesses: node.IncludeProcesses,
                         usersOnly: node.Type == "UserList"
-                    ) { GraphType = Enum.Parse<Charts.GraphKind>(node.GraphKind, true) },
+                    ) {
+                        GraphType = Enum.Parse<Charts.GraphKind>(node.GraphKind, true)
+                    },
                     _preview
                 );
                 component.Closed += selected => Enqueue(node.Id, "Close", selected);
@@ -384,7 +385,7 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                     node,
                     value,
                     Build,
-                    ev => Enqueue(ev.Id, ev.Kind, ev.Value),
+                    Enqueue,
                     id => Controls.GetValueOrDefault(id)
                 ) : new TextBlock(text);
                 break;
@@ -417,7 +418,8 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
 
         Controls.Add(node.Id, control);
-        if (control is Charts.Chart frameChart) {
+        var frameChart = control as Charts.Chart ?? (control as Charts.HistoryChart)?.Plot;
+        if (frameChart is not null) {
             frameChart.SelectionChanged += selection => {
                 object value = selection.Source ?? selection.Y;
                 if (node.SelectionBind.Length > 0) {
@@ -426,6 +428,18 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
                 Enqueue(node.Id, "Selection", value);
             };
             frameChart.PointInvoked += selection => Enqueue(node.Id, "Invoke", selection.Source ?? selection.Y);
+            if (node.RangeBind.Length > 0) {
+                _rangeBindings.Add((node, frameChart));
+            }
+            frameChart.RangeSelected += range => {
+                if (_applyingRange) {
+                    return;
+                }
+                if (node.RangeBind.Length > 0) {
+                    State[node.RangeBind] = range;
+                }
+                Enqueue(node.Id, "Range", range);
+            };
         }
         if (node.Bind.Length != 0) {
             var binding = new Binding(node, control) {
@@ -539,8 +553,10 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
     }
 
     private void ReplaceChartObjectSeries(Charts.Chart chart, TuiNode node, object? value) {
+        var properties = node.YProperty[..ActiveSeriesCount(node)];
+        string? highlight = HighlightSeries(node);
         if (_preview && value is null) {
-            chart.SetData([.. node.YProperty.Select(name => new Charts.ChartDataSeries(name, []))]);
+            chart.SetData([.. properties.Select(name => new Charts.ChartDataSeries(name, []))]);
             return;
         }
         if (UnwrapChartValue(value) is not IEnumerable values || value is string) {
@@ -560,35 +576,59 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
         var projection = rows.Count == 0 ? null : new Charts.ObjectChartData(rows);
         var data = projection is null
-            ? [.. node.YProperty.Select(name => new Charts.ChartDataSeries(name, []))]
-            : projection.Project(node.XProperty.Length == 0 ? null : node.XProperty, node.YProperty);
+            ? [.. properties.Select(name => new Charts.ChartDataSeries(name, []))]
+            : projection.Project(node.XProperty.Length == 0 ? null : node.XProperty, properties);
         projection?.ApplyErrorBounds(data, node.LowerProperty.Length == 0 ? null : node.LowerProperty,
             node.UpperProperty.Length == 0 ? null : node.UpperProperty);
         if (projection is not null && !_objectSeriesSnapshots.ContainsKey(chart)) {
-            chart.XAxis = chart.XAxis with { Scale = projection.ScaleFor(node.XProperty.Length == 0 ? null : node.XProperty) };
+            chart.XAxis = chart.XAxis with {
+                Scale = projection.ScaleFor(node.XProperty.Length == 0 ? null : node.XProperty)
+            };
         }
         for (int series = 0; series < data.Length; series++) {
             data[series].SourceIndex = series;
+            if (node.SeriesColor.Length > 0) {
+                data[series].Color = ReadColor(node.SeriesColor[series]);
+            }
             data[series].Role = node.SeriesRole.Length == 0 ? Charts.ChartSeriesRole.Auto
                 : Enum.Parse<Charts.ChartSeriesRole>(node.SeriesRole[series], true);
             for (int index = 0; index < data[series].Points.Length; index++) {
-                data[series].Points[index] = data[series].Points[index] with { Source = sources[index] };
+                data[series].Points[index] = data[series].Points[index] with {
+                    Source = sources[index]
+                };
             }
+        }
+        if (highlight is not null && Array.Exists(data, series => series.Property == highlight)) {
+            for (int index = 0; index < data.Length; index++) {
+                var series = data[index];
+                var color = series.Color ?? Charts.Chart.AutomaticSeriesColor(_theme, _theme.ChartBlue, chart.GraphKind, index);
+                series.Emphasized = series.Property == highlight;
+                series.Color = series.Emphasized ? _theme.Foreground : Color.Mix(_theme.Background, color, .55f);
+            }
+            data = [.. data.OrderBy(series => series.Property == highlight)];
         }
         var previous = _objectSeriesSnapshots.GetValueOrDefault(chart) ?? [];
         bool unchanged = previous.Length == data.Length;
         for (int series = 0; series < data.Length; series++) {
-            if (series >= previous.Length || previous[series].Property != data[series].Property) {
+            int oldIndex = series < previous.Length && previous[series].Property == data[series].Property
+                ? series : Array.FindIndex(previous, item => item.Property == data[series].Property);
+            if (oldIndex != series || oldIndex < 0) {
                 unchanged = false;
+            }
+            if (oldIndex < 0) {
                 continue;
             }
-            data[series].Visible = previous[series].Visible;
-            data[series].Color = previous[series].Color;
-            data[series].LineStyle = previous[series].LineStyle;
-            data[series].Marker = previous[series].Marker;
+            var old = previous[oldIndex];
+            data[series].Visible = old.Visible;
+            if (node.HighlightSeriesBind.Length == 0) {
+                data[series].Color = old.Color;
+            }
+            data[series].LineStyle = old.LineStyle;
+            data[series].Marker = old.Marker;
             // Retain user-edited presentation when the sampled source rows change.
-            data[series].Role = previous[series].Role;
-            unchanged &= previous[series].Span.SequenceEqual(data[series].Span);
+            data[series].Role = old.Role;
+            unchanged &= old.Emphasized == data[series].Emphasized && old.Color == data[series].Color
+                && old.Span.SequenceEqual(data[series].Span);
         }
         if (unchanged) {
             return;
@@ -596,6 +636,20 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         chart.SetData(data);
         _objectSeriesSnapshots[chart] = data;
     }
+
+    private int ActiveSeriesCount(TuiNode node) =>
+        node.SeriesCountBind.Length == 0 ? node.YProperty.Length :
+        Math.Clamp((int)Number(State[node.SeriesCountBind]), 0, node.YProperty.Length);
+
+    private string? HighlightSeries(TuiNode node) =>
+        node.HighlightSeriesBind.Length == 0 ? null : State[node.HighlightSeriesBind] as string;
+
+    private static Color? ReadColor(string value) =>
+        value.Length == 0 ? null : Color.Rgb(
+            Convert.ToByte(value.Substring(1, 2), 16),
+            Convert.ToByte(value.Substring(3, 2), 16),
+            Convert.ToByte(value.Substring(5, 2), 16)
+        );
 
     private static bool Flag(object? value) =>
         Convert.ToBoolean(
@@ -654,9 +708,19 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
     }
 
     private void Enqueue(string id, string kind, object? value) {
-        if (_events.Count < 256) {
-            _events.Enqueue(new(id, kind, value));
+        Enqueue(new TuiEvent(id, kind, value));
+    }
+
+    private void Enqueue(TuiEvent value) {
+        TryEnqueue(value);
+    }
+
+    private bool TryEnqueue(TuiEvent value) {
+        if (_events.Count >= 256) {
+            return false;
         }
+        _events.Enqueue(value);
+        return true;
     }
 
     private void CaptureSelection(TuiNode node, object? selected) {
@@ -723,7 +787,13 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
 
             if (binding.Control is Charts.Chart numericChart) {
                 object? edges = binding.Node.EdgeBind.Length == 0 ? null : State[binding.Node.EdgeBind];
-                if (_chartSampleDue || binding.Deferred || !ReferenceEquals(value, binding.Last) || !ReferenceEquals(edges, binding.LastEdges)) {
+                int seriesCount = ActiveSeriesCount(binding.Node);
+                string? highlight = HighlightSeries(binding.Node);
+                object? dataVersion = binding.Node.DataVersionBind.Length == 0 ? null : State[binding.Node.DataVersionBind];
+                if (_chartSampleDue && binding.Node.DataVersionBind.Length == 0
+                    || binding.Deferred || !ReferenceEquals(value, binding.Last) || !ReferenceEquals(edges, binding.LastEdges)
+                    || seriesCount != binding.LastSeriesCount || highlight != binding.LastHighlight
+                    || !Equals(dataVersion, binding.LastDataVersion)) {
                     if (Charts.ChartTopology.Supports(numericChart.GraphKind)) {
                         ReplaceChartTopology(numericChart, binding.Node, value);
                     }
@@ -743,6 +813,9 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
 
                 binding.Last = value;
                 binding.LastEdges = edges;
+                binding.LastSeriesCount = seriesCount;
+                binding.LastHighlight = highlight;
+                binding.LastDataVersion = dataVersion;
                 binding.Deferred = false;
                 continue;
             }
@@ -838,9 +911,16 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
 
         Capture();
+        foreach (var (node, control) in _native) {
+            if (node.Lazy && control is TreeView tree && !_preview) {
+                NativeTuiControls.ExpandTree(tree, node.Id, TryEnqueue);
+            }
+        }
         for (int i = 0; i < 32 && !_closed && _events.TryDequeue(out var ev); i++) {
             LastEvent = ev.Id;
-            Reply(_handler?.Invoke(ev, State));
+            var reply = _handler?.Invoke(ev, State);
+            ev.Complete?.Invoke(reply?.Value);
+            Reply(reply);
             if (ev.Kind == "Click" && ev.Value is true && !_preview) {
                 _closed = true;
                 Cancelled = false;
@@ -854,6 +934,8 @@ public sealed partial class CustomTuiApp : IFullscreenApp {
         }
 
         ApplyState();
+        ApplyRanges();
+        UpdateCommandHints();
         SyncNativeOverlays();
         return !_closed;
     }

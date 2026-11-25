@@ -1,8 +1,8 @@
 using fullscreen.Tables;
 using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Layout;
-using XenoAtom.Terminal.UI.Controls;
 
 namespace fullscreen.Custom;
 /// <summary>Existing Fullscreen table surface, composed as a custom-TUI widget.</summary>
@@ -27,7 +27,8 @@ public sealed class ReusableTable : Visual {
         _node = node;
         Surface = new(new TableModel(node.Columns.Length > 0 ? node.Columns : ["Value"]), node.Text) {
             Embedded = true,
-            Minimal = node.Minimal
+            Minimal = node.Minimal,
+            PreferredWidths = node.ColumnWidths.Length > 0 ? node.ColumnWidths : null
         };
         Surface.InspectRequested += row => Submitted?.Invoke(row.Original);
         if (rows is not null) {
@@ -138,7 +139,11 @@ public sealed class ReusableTable : Visual {
 
     /// <inheritdoc/>
     protected override Visual GetChild(int index) =>
-        index switch { 0 => Surface, 1 => _scrollBar, _ => throw new ArgumentOutOfRangeException(nameof(index)) };
+        index switch {
+            0 => Surface,
+            1 => _scrollBar,
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
     /// <inheritdoc/>
     protected override SizeHints MeasureCore(in LayoutConstraints constraints) {
         Surface.Measure(constraints);

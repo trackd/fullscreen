@@ -1,32 +1,123 @@
 BeforeDiscovery {
     $exampleRoot = Join-Path $PSScriptRoot '../examples'
     $scriptCases = Get-ChildItem $exampleRoot -Filter '*.ps1' -File |
-        Where-Object { (Get-Command -Name $_.FullName).Parameters.ContainsKey('DefinitionOnly') } |
-        ForEach-Object { @{ ExampleName = $_.Name; ExamplePath = $_.FullName } }
-    $dataCases = Get-ChildItem $exampleRoot -Filter '*.psd1' -File | ForEach-Object { @{ ExampleName = $_.Name; ExamplePath = $_.FullName } }
-    $graphCases = 'Line','Area','Bars','Step','Scatter','Stem','Histogram','BoxPlot','HorizontalBars','StackedBars','Heatmap','ErrorBars' | ForEach-Object { @{ GraphKind = $_ } }
+        Where-Object {
+            (Get-Command -Name $_.FullName).Parameters.ContainsKey('DefinitionOnly')
+        } |
+        ForEach-Object {
+            @{
+                ExampleName = $_.Name
+                ExamplePath = $_.FullName
+            }
+        }
+    $dataCases = Get-ChildItem $exampleRoot -Filter '*.psd1' -File | ForEach-Object {
+        @{
+            ExampleName = $_.Name
+            ExamplePath = $_.FullName
+        }
+    }
+    $graphCases = 'Line', 'Area', 'Bars', 'Step', 'Scatter', 'Stem', 'Histogram', 'BoxPlot', 'HorizontalBars', 'StackedBars', 'Heatmap', 'ErrorBars' | ForEach-Object {
+        @{
+            GraphKind = $_
+        }
+    }
 }
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '../output/fullscreen.psd1') -Force
     $exampleRoot = Join-Path $PSScriptRoot '../examples'
+    function Get-ExampleNode {
+        param($Node)
+        $Node
+        foreach ($child in $Node.Children) {
+            Get-ExampleNode $child
+        }
+    }
 }
 
 Describe 'Custom TUI examples' {
+    It 'Runs shared command lazy-child and linked-range callbacks in the command tree example' {
+        Mock Invoke-Tui {
+            $Definition.Commands.Count | Should -Be 3
+            $working = @{}
+            foreach ($key in $Definition.State.Keys) {
+                $working[$key] = $Definition.State[$key]
+            }
+            $reply = & $OnEvent @{
+                Id = 'tree'
+                Kind = 'Expand'
+                Value = $working.services[0]
+            } $working
+            $reply.Value.Count | Should -Be 2
+            $reply.Value[0].HasChildren | Should -BeFalse
+            $working.status | Should -Match 'Example API'
+            $null = & $OnEvent @{
+                Id = 'editor'
+                Kind = 'Change'
+            } $working
+            $working.dirty | Should -BeTrue
+            $null = & $OnEvent @{
+                Id = 'save'
+                Kind = 'Command'
+            } $working
+            $working.dirty | Should -BeFalse
+            $null = & $OnEvent @{
+                Id = 'paletteAction'
+                Kind = 'Command'
+            } $working
+            $working.paletteOpen | Should -BeTrue
+            $range = [pscustomobject]@{
+                MinimumX = 2
+                MaximumX = 5
+            }
+            $working.window = $range
+            $null = & $OnEvent @{
+                Id = 'chart1'
+                Kind = 'Range'
+                Value = $range
+            } $working
+            $working.status | Should -Match 'Selected'
+            $null = & $OnEvent @{
+                Id = 'clearRange'
+                Kind = 'Command'
+            } $working
+            $working.window | Should -BeNullOrEmpty
+            @{
+                Cancelled = $true
+            }
+        }
+        & (Join-Path $exampleRoot 'CommandTree.ps1')
+    }
     It 'Keeps user sessions standalone and makes process loading optional (<IncludeProcesses>)' -ForEach @(
-        @{ IncludeProcesses = $false }
-        @{ IncludeProcesses = $true }
+        @{
+            IncludeProcesses = $false
+        }
+        @{
+            IncludeProcesses = $true
+        }
     ) {
         $layout = & (Join-Path $exampleRoot 'UserSessions.ps1') -DefinitionOnly -IncludeProcesses:$IncludeProcesses
         $layout.Root.Children[0].Type | Should -BeExactly 'UserList'
         $layout.Root.Children[0].IncludeProcesses | Should -Be $IncludeProcesses
         $layout.Root.Children[0].SelectionBind | Should -BeExactly 'selectedUser'
         Mock Invoke-Tui {
-            $selected = [pscustomobject]@{ UserName = 'fixture'; Logins = @(); Process = $null }
-            $reply = & $Handler['accept:Click'] @{ Id = 'accept'; Kind = 'Click' } @{ selectedUser = $selected }
+            $selected = [pscustomobject]@{
+                UserName = 'fixture'
+                Logins = @()
+                Process = $null
+            }
+            $reply = & $Handler['accept:Click'] @{
+                Id = 'accept'
+                Kind = 'Click'
+            } @{
+                selectedUser = $selected
+            }
             $reply.Close | Should -BeTrue
             [object]::ReferenceEquals($reply.Value, $selected) | Should -BeTrue
-            [pscustomobject]@{ Cancelled = $false; Value = $reply.Value }
+            [pscustomobject]@{
+                Cancelled = $false
+                Value = $reply.Value
+            }
         }
         $selectedUser = & (Join-Path $exampleRoot 'UserSessions.ps1') -IncludeProcesses:$IncludeProcesses
         $selectedUser.UserName | Should -BeExactly 'fixture'
@@ -38,19 +129,33 @@ Describe 'Custom TUI examples' {
             $Definition.State.details | Should -Match 'api-gateway'
             $Definition.State.source | Should -Match 'healthCheck: /health/ready'
             $working = @{}
-            foreach ($key in $Definition.State.Keys) { $working[$key] = $Definition.State[$key] }
+            foreach ($key in $Definition.State.Keys) {
+                $working[$key] = $Definition.State[$key]
+            }
             $chosen = $State.records[2]
             $working.selected = $chosen
-            $null = & $OnEvent @{ Id = 'inventory'; Kind = 'Selection'; Value = $chosen } $working
+            $null = & $OnEvent @{
+                Id = 'inventory'
+                Kind = 'Selection'
+                Value = $chosen
+            } $working
             $working.details | Should -Match $chosen.Name
             $working.source | Should -Match "replicas: $($chosen.Instances)"
-            $reply = & $OnEvent @{ Id = 'accept'; Kind = 'Click' } $working
+            $reply = & $OnEvent @{
+                Id = 'accept'
+                Kind = 'Click'
+            } $working
             $reply.Close | Should -BeTrue
             [object]::ReferenceEquals($reply.Value, $chosen) | Should -BeTrue
-            $null = & $OnTick @{ Kind = 'Tick' } $working
+            $null = & $OnTick @{
+                Kind = 'Tick'
+            } $working
             $working.metric | Should -BeGreaterThan 45
             $working.metric | Should -BeLessThan 70
-            @{ Cancelled = $false; Value = $chosen }
+            @{
+                Cancelled = $false
+                Value = $chosen
+            }
         }
         $result = & (Join-Path $exampleRoot 'ReusableControls.ps1')
         $result.Name | Should -Be 'catalog'
@@ -65,7 +170,9 @@ Describe 'Custom TUI examples' {
             $entries[1].level | Should -BeExactly 'Warning'
             $reply = & $OnTick $null $State
             $reply | Should -BeNullOrEmpty
-            @{ Cancelled = $true }
+            @{
+                Cancelled = $true
+            }
         }
         & (Join-Path $exampleRoot 'LogTail.ps1')
     }
@@ -76,38 +183,54 @@ Describe 'Custom TUI examples' {
             $reply = & $OnTick $null $State
             $reply.State.content | Should -BeExactly 'Live log fixture'
             $reply.State.status | Should -Match '^Read '
-            @{ Cancelled = $true }
+            @{
+                Cancelled = $true
+            }
         }
         & (Join-Path $exampleRoot 'LogTail.ps1') -Path $logPath
     }
     It 'Uses the inline deployment form layout and preserves preview and submit results' {
         Mock Invoke-Tui {
             $Definition.Title | Should -BeExactly 'Deployment request'
-            $working = @{ name = 'API'; environment = 'Production'; notify = $true }
-            $preview = & $OnEvent @{ Id = 'preview'; Kind = 'Click' } $working
+            $working = @{
+                name = 'API'
+                environment = 'Production'
+                notify = $true
+            }
+            $preview = & $OnEvent @{
+                Id = 'preview'
+                Kind = 'Click'
+            } $working
             $preview.State.message | Should -Match 'API.*Production'
-            $reply = & $OnEvent @{ Id = 'submit'; Kind = 'Click' } $working
+            $reply = & $OnEvent @{
+                Id = 'submit'
+                Kind = 'Click'
+            } $working
             $reply.Close | Should -BeTrue
             $reply.Value.Name | Should -BeExactly 'API'
             $reply.Value.Environment | Should -BeExactly 'Production'
             $reply.Value.Notify | Should -BeTrue
-            [pscustomobject]@{ Cancelled = $false; Value = $reply.Value }
+            [pscustomobject]@{
+                Cancelled = $false
+                Value = $reply.Value
+            }
         }
         $result = & (Join-Path $exampleRoot 'Invoke-ContactForm.ps1')
         $result.Value.Name | Should -BeExactly 'API'
     }
-    It 'Provides runnable example scripts' {
-        @(Get-ChildItem $exampleRoot -Filter '*.ps1' -File).Count | Should -BeGreaterOrEqual 6
-    }
-
     It 'Parses <ExampleName> and returns native layout data without starting jobs' -ForEach $scriptCases {
-        $tokens = $null; $parseErrors = $null
+        $tokens = $null
+        $parseErrors = $null
         $null = [Management.Automation.Language.Parser]::ParseFile($ExamplePath, [ref]$tokens, [ref]$parseErrors)
         $parseErrors | Should -BeNullOrEmpty
         $before = @(Get-Job).Count
         $definition = & $ExamplePath -DefinitionOnly
         $validated = $definition | New-TuiDefinition
         $validated.Root | Should -BeOfType ([hashtable])
+        $validated.Version | Should -Be 1
+        $validated.Title | Should -BeExactly $definition.Title
+        $validated.Root.Id | Should -BeExactly $definition.Root.Id
+        @(Get-ExampleNode $validated.Root).Count | Should -Be @(Get-ExampleNode $definition.Root).Count
         if ($ExampleName -eq 'EventViewer.ps1') {
             $validated.Title | Should -Be ''
             $validated.Root.Children[0].Children[0].Children[0].Text.Trim() | Should -Be 'EVENT VIEWER'
@@ -122,9 +245,11 @@ Describe 'Custom TUI examples' {
         $layout = & (Join-Path $exampleRoot 'LiveChart.ps1') -DefinitionOnly -GraphKind $GraphKind
         $layout.Root.Children[1].GraphKind | Should -Be $GraphKind
         $layout.Root.Children[2].GraphKind | Should -Be $GraphKind
-        ,$layout.State.load | Should -BeOfType ([array])
-        ,$layout.State.queue | Should -BeOfType ([array])
-        { $layout | New-TuiDefinition } | Should -Not -Throw
+        , $layout.State.load | Should -BeOfType ([array])
+        , $layout.State.queue | Should -BeOfType ([array])
+        {
+            $layout | New-TuiDefinition
+        } | Should -Not -Throw
     }
 
     It 'Binds all twelve gallery plots to the same signal' {
@@ -132,24 +257,37 @@ Describe 'Custom TUI examples' {
         $plots = @($gallery.Root.Children[1].Children)
         $plots.Count | Should -Be 12
         @($plots.GraphKind | Select-Object -Unique).Count | Should -Be 12
-        foreach ($plot in $plots) { $plot.Bind | Should -Be 'latency'; $plot.Type | Should -Be 'Chart' }
-        ,$gallery.State.latency | Should -BeOfType ([array])
+        foreach ($plot in $plots) {
+            $plot.Bind | Should -Be 'latency'
+            $plot.Type | Should -Be 'Chart'
+        }
+        , $gallery.State.latency | Should -BeOfType ([array])
     }
 
     It 'Loads the native data example <ExampleName>' -ForEach $dataCases {
-        { Import-TuiDefinition -LiteralPath $ExamplePath | New-TuiDefinition } | Should -Not -Throw
+        {
+            Import-TuiDefinition -LiteralPath $ExamplePath | New-TuiDefinition
+        } | Should -Not -Throw
     }
 
     It 'Preserves pipeline items, empty input and help in the reusable picker module' {
         Import-Module (Join-Path $exampleRoot 'ToolModule.psm1') -Force
         try {
-            $objects = @([pscustomobject]@{ Name = 'One' }, [pscustomobject]@{ Name = 'Two' })
+            $objects = @([pscustomobject]@{
+                    Name = 'One'
+                }, [pscustomobject]@{
+                    Name = 'Two'
+                })
             $layout = $objects | Select-TuiItem -DefinitionOnly
-            { $layout | New-TuiDefinition } | Should -Not -Throw
+            {
+                $layout | New-TuiDefinition
+            } | Should -Not -Throw
             $layout.Root.Children[0].Items.Count | Should -Be 2
             @(@() | Select-TuiItem).Count | Should -Be 0
             (Get-Help Select-TuiItem -Full).Examples.Example | Should -Not -BeNullOrEmpty
         }
-        finally { Remove-Module ToolModule }
+        finally {
+            Remove-Module ToolModule
+        }
     }
 }

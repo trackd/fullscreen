@@ -1,5 +1,5 @@
-using System.Text;
 using System.Management.Automation;
+using System.Text;
 using Wcwidth;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
@@ -127,6 +127,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         _documentX = 0;
         _documentSearching = false;
         _documentSearch = "";
+        InitializeJsonFolding(text);
         Refresh();
     }
 
@@ -158,6 +159,8 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
     /// <summary>Raised when inspect requested is requested.</summary>
     public event Action<TableRow>? InspectRequested;
+    /// <summary>Raised when Enter opens a row in its main browsing view.</summary>
+    public event Action<TableRow>? BrowseRequested;
     /// <summary>Raised when shortcut is requested.</summary>
     public event Action<string>? Shortcut;
     internal string[] PriorityShortcuts { get; set; } = [];
@@ -276,6 +279,11 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
             for (int i = _documentOffset; i < Math.Min(_document.Length, _documentOffset + DocumentRows); i++) {
                 var line = _document[i].AsSpan();
                 Style style = DocumentStyle(_document[i]);
+                if (_jsonFolds is { } folds) {
+                    bool opening = folds.Ends.ContainsKey(_jsonLineMap[i]);
+                    Write(buffer, 0, DocumentTop + i - _documentOffset,
+                        (opening ? folds.Collapsed.Contains(_jsonLineMap[i]) ? "▸" : "▾" : " ") + (i == _documentCaret.Line ? "›" : " "), Accent, 2);
+                }
                 Write(
                     buffer,
                     2,
@@ -337,7 +345,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                 buffer,
                 x,
                 HeaderTop,
-                Model.Columns[column] + (Model.ColumnFilters.ContainsKey(column) ? " ◆" : "") + (column == Model.GroupColumn ? " ▦" : "") + (column == Model.SortColumn ? Model.Descending ? " ↓" : " ↑" : ""),
+                Model.Columns[column] + (Model.ColumnFilters.ContainsKey(column) ? " ◆" : ColumnFiltering ? " ▾" : "") + (column == Model.GroupColumn ? " ▦" : "") + (column == Model.SortColumn ? Model.Descending ? " ↓" : " ↑" : ""),
                 Accent,
                 columnWidth - 1
             );
@@ -587,6 +595,15 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         }
     }
 
+    private void Browse() {
+        if (BrowseRequested is not null && Model.Current is { } row) {
+            BrowseRequested(row);
+        }
+        else {
+            Inspect();
+        }
+    }
+
     /// <summary>Opens a text-detail dialog.</summary>
     /// <param name="text">The source text to parse or display.</param>
     public void ShowDetail(string text) {
@@ -666,7 +683,9 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
             return;
         }
 
-        if (_document is not null && HandleDocumentSelectionKey(e)) { return; }
+        if (_document is not null && HandleDocumentSelectionKey(e)) {
+            return;
+        }
 
         if (e.Key == TerminalKey.F5) {
             Shortcut?.Invoke("refresh");
@@ -712,6 +731,9 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         }
 
         if (_document is not null) {
+            if (HandleJsonNavigation(e)) {
+                return;
+            }
             if (e.Key == TerminalKey.Enter && !EnterAccepts) {
                 e.Handled = true;
                 return;
@@ -785,7 +807,7 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                     ExitRequested = true;
                 }
                 else {
-                    Inspect();
+                    Browse();
                 }
 
                 break;
@@ -844,7 +866,10 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         }
 
         if (_document is not null && e.Text is not ("q" or "Q")) {
-            if (e.Text == "/") {
+            if (e.Text == " " && _jsonFolds is not null) {
+                ToggleJsonFold();
+            }
+            else if (e.Text == "/") {
                 _documentSearching = true;
                 Refresh();
             }
@@ -954,6 +979,11 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
     }
 
     private void FindDocument(bool next) {
+        if (_jsonFolds is { Collapsed.Count: > 0 } folds) {
+            int original = _jsonLineMap[_documentCaret.Line];
+            folds.Collapsed.Clear();
+            ProjectJsonFolds(original);
+        }
         if (_document is null || _document.Length == 0 || _documentSearch.Length == 0) {
             return;
         }
@@ -967,6 +997,9 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
             _documentOffset = index;
             _documentX = Math.Max(0, column - 8);
+            if (_jsonFolds is not null) {
+                _documentAnchor = _documentCaret = (index, column);
+            }
             Status = $"Found '{_documentSearch}' · line {index + 1} · N next · / search";
             Refresh();
             return;
@@ -1029,7 +1062,10 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
             IsModal = true,
             Width = Math.Max(1, Math.Min(70, Bounds.Width - 4)),
             Content = new VStack(new TextBlock("Contains text (case-insensitive); empty clears"), input,
-                new HStack(new Button("Apply").Click(Apply), new Button("Cancel").Click(Close)))
+                new HStack(new Button("Apply").Click(Apply), new Button("Clear").Click(() => {
+                    input.Text = "";
+                    Apply();
+                }), new Button("Cancel").Click(Close)))
         };
         dialog.KeyDown((_, e) => {
             if (e.Key == TerminalKey.Escape) {
@@ -1107,11 +1143,21 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
         }
 
         if (_document is not null) {
+            if (_jsonFolds is not null && e.Button == TerminalMouseButton.Left && e.LocalX < 2
+                && e.LocalY >= DocumentTop && e.LocalY < DocumentTop + DocumentRows) {
+                App?.Focus(this);
+                _documentCaret = (Math.Clamp(_documentOffset + e.LocalY - DocumentTop, 0, _document.Length - 1), 0);
+                ToggleJsonFold();
+                e.Handled = true;
+                return;
+            }
             if (e.Button == TerminalMouseButton.Left && e.LocalY >= DocumentTop
                 && e.LocalY < DocumentTop + DocumentRows) {
                 App?.Focus(this);
                 _documentCaret = DocumentPoint(e.LocalX, e.LocalY);
-                if ((e.Modifiers & TerminalModifiers.Shift) == 0) { _documentAnchor = _documentCaret; }
+                if ((e.Modifiers & TerminalModifiers.Shift) == 0) {
+                    _documentAnchor = _documentCaret;
+                }
                 _selectingDocument = true;
                 Refresh();
                 e.Handled = true;
@@ -1163,7 +1209,12 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
                 ContextRequested(e.UiX, e.UiY);
             }
             else if (e.Button == TerminalMouseButton.Right || e.ClickCount >= 2) {
-                Inspect();
+                if (e.Button == TerminalMouseButton.Left) {
+                    Browse();
+                }
+                else {
+                    Inspect();
+                }
             }
         }
 
@@ -1217,6 +1268,10 @@ public sealed partial class TableSurface : Themes.ThemedSurface {
 
     private void ScrollDocument(int delta) {
         _documentOffset = (int)Math.Clamp((long)_documentOffset + delta, 0, Math.Max(0, (_document?.Length ?? 0) - DocumentRows));
+        if (_jsonFolds is not null && !HasDocumentSelection
+            && (_documentCaret.Line < _documentOffset || _documentCaret.Line >= _documentOffset + DocumentRows)) {
+            _documentAnchor = _documentCaret = (_documentOffset, 0);
+        }
         Refresh();
     }
 
