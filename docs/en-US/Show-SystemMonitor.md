@@ -24,7 +24,7 @@ Show-SystemMonitor [-RefreshRate <int>] [-SampleInterval <int>] [-Filter <string
  [-SortBy <ProcessSort>] [-View <MonitorView>] [-GraphType <GraphKind>] [-ChartRenderer <ChartRenderer>] [-Tree] [-Column <ProcessColumn[]>]
  [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
- [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal]
+ [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Sudo] [-SudoPrompt <scriptblock>] [-Theme <Object>] [-Minimal]
  [<CommonParameters>]
 ```
 
@@ -35,7 +35,7 @@ Show-SystemMonitor -Session <PSSession> [-RefreshRate <int>] [-SampleInterval <i
  [-Filter <string>] [-SortBy <ProcessSort>] [-View <MonitorView>] [-GraphType <GraphKind>] [-ChartRenderer <ChartRenderer>] [-Tree]
  [-Column <ProcessColumn[]>] [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
- [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal]
+ [-ExcludeGpuColumn <GpuColumn[]>] [-TimeoutSeconds <int>] [-Sudo] [-SudoPrompt <scriptblock>] [-Theme <Object>] [-Minimal]
  [<CommonParameters>]
 ```
 
@@ -47,7 +47,7 @@ Show-SystemMonitor -ComputerName <string> [-RefreshRate <int>] [-SampleInterval 
  [-Column <ProcessColumn[]>] [-ExcludeColumn <ProcessColumn[]>] [-NetworkColumn <NetworkColumn[]>]
  [-ExcludeNetworkColumn <NetworkColumn[]>] [-GpuColumn <GpuColumn[]>]
  [-ExcludeGpuColumn <GpuColumn[]>] [-Credential <pscredential>] [-ConfigurationName <string>]
- [-TimeoutSeconds <int>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
+ [-TimeoutSeconds <int>] [-Sudo] [-SudoPrompt <scriptblock>] [-Theme <Object>] [-Minimal] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -57,24 +57,23 @@ ftop
 
 ## DESCRIPTION
 
-Monitor local or remote processes, services, network traffic, GPUs and user
-sessions in a fullscreen terminal app. Dashboard histories stay current across
-views until paused.
+Opens an interactive monitor for processes, services, network, graphics devices,
+disks, login sessions and a hardware dashboard. Use -Session or -ComputerName to
+monitor another computer. Collection and display intervals are independent.
 
-Use 1-6 to switch views, / to search, C to choose columns, T to toggle process
-trees, P to pause and Q to quit. Enter or D opens details; A or right-click opens
-available actions. Press ? for the full key reference.
+Press 1 through 7 to switch views, ? for keys, D for details, P to pause and Q to
+quit. Actions use your existing permissions and require confirmation. Logging off
+a Windows session closes its applications and may lose unsaved work.
 
-Actions use your existing permissions and require confirmation. Logging off a
-Windows session closes its applications and can lose unsaved work. Unsupported
-metrics are hidden; temporarily inaccessible values appear as unknown.
-Per-process network and GPU metrics require supported Windows providers.
-CPU is a percentage of total processor capacity; RSS includes shared pages.
+Available metrics depend on the operating system, hardware, drivers and access.
+Missing values are not measured zero. VMs report the guest's view; GPU shared
+memory and per-process totals are not necessarily physical VRAM usage.
 
-Remote metrics and actions apply to the target computer. Targets support
-PowerShell 7 or Windows PowerShell 5.1 with .NET Framework 4.7.2 or later and
-must allow in-memory assembly loading. If sampling fails, the last data remains
-visible while the monitor retries.
+Linux sudo is opt-in through -Sudo. -SudoPrompt can supply a SecureString when
+non-interactive sudo is insufficient; see those parameters for authentication
+behavior. Remote collection uses the target computer's permissions.
+
+See the system monitor guide for views, metric interpretation and troubleshooting.
 
 ## EXAMPLES
 
@@ -103,7 +102,9 @@ $session = New-PSSession -ComputerName server01
 try {
     Show-SystemMonitor -Session $session -View Dashboard -SampleInterval 2000
 }
-finally { Remove-PSSession -Session $session }
+finally {
+    Remove-PSSession -Session $session
+}
 ```
 
 ### Example 4: Keep dashboard histories current while managing sessions
@@ -113,6 +114,18 @@ Start in Users and continue sampling dashboard metrics when switching views.
 ```powershell
 ftop -View Users -SampleInterval 2000
 ```
+
+### Example 5: Opt in to sudo and provide an optional password prompt
+
+```powershell
+Show-SystemMonitor -View Gpu -Sudo -SudoPrompt {
+    param($request)
+    Read-Host -Prompt "Sudo on $($request.Target): $($request.Reason)" -AsSecureString
+}
+```
+
+The callback is skipped when ordinary permissions or non-interactive sudo are
+enough. Omit SudoPrompt for unattended operation using `-Sudo` alone.
 
 ## PARAMETERS
 
@@ -329,7 +342,9 @@ HelpMessage: ''
 
 ### -GpuColumn
 
-GPU device columns: Device, Provider, Utilization, UsedMemory, TotalMemory, Temperature.
+GPU device columns: Device, Provider, Utilization, UsedMemory, TotalMemory,
+Temperature, Render, Compute, Copy, Video, VideoEnhance, Encode, Decode,
+MemoryActivity, Clock and Power.
 C changes this table independently.
 
 ```yaml
@@ -516,6 +531,51 @@ AcceptedValues: []
 HelpMessage: ''
 ```
 
+### -Sudo
+
+Permit sudo for protected Linux device telemetry. Disabled by default, including
+when explicitly passed as `-Sudo:$false`. The collector first tries its current
+permissions, then an isolated non-interactive sudo reader when needed. This does
+not elevate the UI, process inspection or monitor actions. Applies to the target
+computer when using Session or ComputerName.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: ''
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+```
+
+### -SudoPrompt
+
+Optional password callback, requiring Sudo. Receives a request with Target and
+Reason properties and must return one SecureString or no output to cancel.
+Runs only when authentication is needed, before the fullscreen UI starts.
+Plaintext strings and multiple results are rejected. Credentials are sent to
+sudo through standard input on the collector host and are not retained for
+later prompts. A rejected authentication continues with unprivileged telemetry.
+
+```yaml
+Type: System.Management.Automation.ScriptBlock
+DefaultValue: ''
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+```
+
 ### -TimeoutSeconds
 
 Remote request timeout, 1 to 120 seconds.
@@ -597,9 +657,9 @@ HelpMessage: ''
 
 ### -View
 
-Processes, Services, Network, Gpu, Users or Dashboard.
+Processes, Services, Network, Gpu, Users, Dashboard or Disks.
 Overview remains an alias for Processes.
-Keys 1 through 6 switch to Processes, Services, Network, GPU, Users and Dashboard respectively. F8 also opens Users.
+Keys 1 through 7 switch to Processes, Services, Network, GPU, Disks, Users and Dashboard respectively. F8 also opens Users.
 Processes is the default. Press A or right-click a process/service for confirmed actions.
 Service headers provide sorting and column filters; F6 cycles sort columns and R reverses.
 P pauses; Q or Ctrl+Q exits.
@@ -637,3 +697,5 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 ## RELATED LINKS
 
 - [fullscreen documentation](https://github.com/trackd/fullscreen)
+
+- [System monitor guide](https://github.com/trackd/fullscreen/blob/main/docs/guides/system-monitor.md)
