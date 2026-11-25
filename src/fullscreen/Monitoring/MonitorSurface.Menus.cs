@@ -13,8 +13,9 @@ public sealed partial class MonitorSurface {
         ProcessColumn.Status => Supports(CollectorCapabilities.ProcessStatus),
         ProcessColumn.Disk => Supports(CollectorCapabilities.ProcessDisk),
         ProcessColumn.Network => Supports(CollectorCapabilities.ProcessNetwork),
-        ProcessColumn.Gpu => Supports(CollectorCapabilities.ProcessGpu),
+        ProcessColumn.Gpu or ProcessColumn.GpuAdapter or ProcessColumn.GpuEngine => Supports(CollectorCapabilities.ProcessGpu),
         ProcessColumn.GpuMemory => Supports(CollectorCapabilities.ProcessGpuMemory),
+        ProcessColumn.GpuDedicatedMemory or ProcessColumn.GpuSharedMemory => Supports(CollectorCapabilities.ProcessGpuMemory),
         _ => true
     };
 
@@ -23,6 +24,17 @@ public sealed partial class MonitorSurface {
         GpuColumn.UsedMemory => Supports(CollectorCapabilities.GpuUsedMemory),
         GpuColumn.TotalMemory => Supports(CollectorCapabilities.GpuTotalMemory),
         GpuColumn.Temperature => Supports(CollectorCapabilities.GpuTemperature),
+        GpuColumn.Render => Supports(CollectorCapabilities.GpuRender),
+        GpuColumn.Compute => Supports(CollectorCapabilities.GpuCompute),
+        GpuColumn.Copy => Supports(CollectorCapabilities.GpuCopy),
+        GpuColumn.Video => Supports(CollectorCapabilities.GpuVideo),
+        GpuColumn.VideoEnhance => Supports(CollectorCapabilities.GpuVideoEnhance),
+        GpuColumn.Encode => Supports(CollectorCapabilities.GpuEncode),
+        GpuColumn.Decode => Supports(CollectorCapabilities.GpuDecode),
+        GpuColumn.MemoryActivity => Supports(CollectorCapabilities.GpuMemoryActivity),
+        GpuColumn.Clock => Supports(CollectorCapabilities.GpuClock),
+        GpuColumn.Power => Supports(CollectorCapabilities.GpuPower),
+        GpuColumn.DedicatedMemory or GpuColumn.SharedMemory => Supports(CollectorCapabilities.GpuUsedMemory),
         _ => true
     };
 
@@ -68,7 +80,7 @@ public sealed partial class MonitorSurface {
                 Refresh();
             })
         };
-        if (column is ProcessColumn.Name or ProcessColumn.UserName or ProcessColumn.Status) {
+        if (column is ProcessColumn.Name or ProcessColumn.UserName or ProcessColumn.Status or ProcessColumn.GpuAdapter or ProcessColumn.GpuEngine) {
             var values = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (ref readonly var row in Frame.Processes.AsSpan(0, Frame.ProcessCount)) {
                 values.Add(ProcessView.TextValue(row, column));

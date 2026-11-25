@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
-using FullscreenHost = fullscreen.Hosting.FullscreenHost;
 using fullscreen.Monitoring;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Hosting;
+using FullscreenHost = fullscreen.Hosting.FullscreenHost;
 
 namespace fullscreen.Tests;
 
@@ -17,9 +17,9 @@ public sealed class MonitorControlTests {
     [TestMethod]
     public void NavigationStartsWithProcessesAndSixelMetricsCanFallBackWithoutEnablingUnsupportedTerminals() {
         Assert.AreEqual(MonitorView.Processes, new MonitorSurface().View);
-        CollectionAssert.AreEqual(new[] { MonitorView.Processes, MonitorView.Services, MonitorView.Network, MonitorView.Gpu, MonitorView.Users, MonitorView.Dashboard }, MonitorSurface.NavigationViews);
+        CollectionAssert.AreEqual(new[] { MonitorView.Processes, MonitorView.Services, MonitorView.Network, MonitorView.Gpu, MonitorView.Disks, MonitorView.Users, MonitorView.Dashboard }, MonitorSurface.NavigationViews);
         var supported = new TerminalGraphicsCapabilities { SupportState = TerminalGraphicsSupportState.Forced, SupportedProtocols = [TerminalGraphicsProtocol.Sixel] };
-        var fallback = FullscreenHost.ResolveChartMetrics(supported, null, new TerminalSize(100, 30));
+        TerminalPixelMetrics? fallback = FullscreenHost.ResolveChartMetrics(supported, null, new TerminalSize(100, 30));
         Assert.AreEqual(8, fallback!.Value.CellPixelWidth);
         Assert.AreEqual(16, fallback.Value.CellPixelHeight);
         Assert.IsNull(FullscreenHost.ResolveChartMetrics(TerminalGraphicsCapabilities.None, null, new TerminalSize(100, 30)));
@@ -35,7 +35,7 @@ public sealed class MonitorControlTests {
         using var monitor = new MonitorApp(60, 60000, "", ProcessSort.Cpu, MonitorView.Services, source);
         var surface = (MonitorSurface)monitor.Root;
         using var backend = new InMemoryTerminalBackend(new TerminalSize(120, 30));
-        using var session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
+        using TerminalSession session = Terminal.Open(backend, new TerminalOptions { ImplicitStartInput = true }, force: true);
         await using var terminal = new TerminalApp(surface, session.Instance, new TerminalAppOptions { HostKind = TerminalHostKind.Fullscreen });
         long timestamp = Stopwatch.GetTimestamp();
         void Tick() {
@@ -50,7 +50,7 @@ public sealed class MonitorControlTests {
             Tick();
             Assert.IsEmpty(source.Actions);
             Assert.Contains("fixture-target", backend.GetOutText());
-            var confirm = terminal.Root.EnumerateVisualsDepthFirst().OfType<Button>().Single(button => button.Content is TextBlock label && label.Text == "Confirm");
+            Button confirm = terminal.Root.EnumerateVisualsDepthFirst().OfType<Button>().Single(button => button.Content is TextBlock label && label.Text == "Confirm");
             terminal.Focus(confirm);
             backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Enter });
             Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return source.Actions.Count == 1 && !surface.ActionBusy; }, 3000));

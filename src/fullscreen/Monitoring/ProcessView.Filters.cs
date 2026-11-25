@@ -14,7 +14,7 @@ public sealed partial class ProcessView {
 
         foreach (var pair in ColumnFilters) {
             var number = pair.Key == ProcessColumn.MemoryPercent && TotalMemory is > 0 ? row.WorkingSet * 100.0 / TotalMemory.Value : NumericValue(row, pair.Key);
-            if (pair.Key is not (ProcessColumn.Name or ProcessColumn.UserName or ProcessColumn.Status)
+            if (pair.Key is not (ProcessColumn.Name or ProcessColumn.UserName or ProcessColumn.Status or ProcessColumn.GpuAdapter or ProcessColumn.GpuEngine)
                 && pair.Value.StartsWith('>')) {
                 if (!double.TryParse(pair.Value.AsSpan(1), CultureInfo.InvariantCulture, out double minimum)
                     || !number.HasValue
@@ -44,6 +44,8 @@ public sealed partial class ProcessView {
             ProcessColumn.Memory => row.WorkingSet,
             ProcessColumn.Gpu => row.GpuPercent,
             ProcessColumn.GpuMemory => row.GpuMemory,
+            ProcessColumn.GpuDedicatedMemory => row.GpuDedicatedMemory,
+            ProcessColumn.GpuSharedMemory => row.GpuSharedMemory,
             ProcessColumn.Threads => row.Threads,
             ProcessColumn.Disk => row.DiskBytesPerSecond,
             ProcessColumn.Network => row.NetworkBytesPerSecond,
@@ -59,6 +61,8 @@ public sealed partial class ProcessView {
             ProcessColumn.Name => row.Name,
             ProcessColumn.UserName => row.UserName ?? "—",
             ProcessColumn.Status => row.Status ?? "—",
+            ProcessColumn.GpuAdapter => row.GpuAdapter ?? "—",
+            ProcessColumn.GpuEngine => row.GpuEngine ?? "—",
             _ => NumericValue(row, column)?.ToString("G", CultureInfo.InvariantCulture) ?? "—"
         };
 }

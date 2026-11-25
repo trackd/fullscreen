@@ -61,9 +61,14 @@ public sealed class MonitorUserFilteringTests {
         frame.Processes[1] = new(2, "other", 1, 512, 1, UserName: "Ada");
         var view = new UserView();
         view.Update(frame);
+        Assert.HasCount(1, view.Rows);
+        Assert.AreEqual(10d, view.Rows[0].CpuPercent, "A differently cased process owner must not be folded into the logged-in account.");
+        frame.Users[1] = new("Ada", "pts/2", "Logged in", "", "");
+        frame.UserCount = 2;
+        view.Update(frame);
         Assert.HasCount(2, view.Rows);
         Assert.HasCount(1, view.Rows.Single(row => row.UserName == "ada").Logins);
-        Assert.IsEmpty(view.Rows.Single(row => row.UserName == "Ada").Logins);
+        Assert.HasCount(1, view.Rows.Single(row => row.UserName == "Ada").Logins);
     }
 
     [TestMethod]

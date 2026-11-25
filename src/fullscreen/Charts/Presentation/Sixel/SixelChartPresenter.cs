@@ -2,8 +2,8 @@ using System.Diagnostics;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Geometry;
 using static fullscreen.Charts.ChartClipping;
 
 namespace fullscreen.Charts;
@@ -14,6 +14,8 @@ internal sealed class SixelChartPresenter(
 ) : IBufferedTerminalGraphicsPresenter, ITerminalGraphicsPresenterDiagnostics {
     private readonly long _started = Stopwatch.GetTimestamp();
     internal bool HasPresented => _diagnostics.PresentationCount > 0;
+    internal TerminalPixelMetrics PixelMetrics => metrics;
+    internal bool UsesFallbackMetrics { get; init; }
     private TerminalGraphicsPresenterDiagnostics _diagnostics = new() {
         Name = "Sixel charts",
         Protocol = TerminalGraphicsProtocol.Sixel
@@ -62,6 +64,9 @@ internal sealed class SixelChartPresenter(
         foreach (var visual in context.App.Root.EnumerateVisualsDepthFirst()) {
             if (visual is Hosting.FullscreenChrome chrome) {
                 _overlays.Add((null, chrome.CloseBounds));
+                if (chrome.DiagnosticsBounds is { Width: > 0, Height: > 0 } diagnostics) {
+                    _overlays.Add((null, diagnostics));
+                }
             }
 
             if (visual is Chart chart && visual.IsVisible) {
@@ -70,7 +75,7 @@ internal sealed class SixelChartPresenter(
                 }
             }
 
-            if (visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)) {
+            if (visual is not Hosting.TerminalDiagnosticsOverlay && visual.IsVisible && visual.Parent is WindowLayer layer && !ReferenceEquals(visual, layer.Content)) {
                 _overlays.Add((visual, TerminalOverlayBounds.Window(visual)));
             }
         }

@@ -8,6 +8,7 @@ namespace fullscreen.Charts;
 /// <summary>Reusable XenoAtom visual and native-definition control for scalar live metrics.</summary>
 public sealed partial class HistoryChart : Themes.ThemedSurface {
     private readonly BuiltInTrend _trend = new();
+    internal Chart Plot => _trend;
     /// <summary>Initializes a new HistoryChart instance.</summary>
     public HistoryChart() {
         HorizontalAlignment = Align.Stretch;

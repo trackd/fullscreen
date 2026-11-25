@@ -8,6 +8,11 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace fullscreen.Custom;
+
+/// <summary>A tinted plot region beginning at a Y-axis value.</summary>
+public sealed record TuiPlotBand(double From, string Color);
+/// <summary>A numeric table cell foreground beginning at an inclusive value.</summary>
+public sealed record TuiCellColor(string Column, double From, string Color);
 /// <summary>Versioned data contract. No Visual, delegate, assembly-qualified type or executable expression is serialized.</summary>
 public sealed partial class TuiDocument {
     /// <summary>Gets or sets the serialized layout schema version.</summary>
@@ -16,6 +21,8 @@ public sealed partial class TuiDocument {
     public string Title { get; set; } = "Custom TUI";
     /// <summary>Gets or sets the state exposed to the current view or callback.</summary>
     public Dictionary<string, JsonElement> State { get; set; } = [];
+    /// <summary>Shared named actions; behavior is supplied by the Command event handler.</summary>
+    public TuiCommand[] Commands { get; set; } = [];
     /// <summary>Gets or sets the top-level control definition.</summary>
     public TuiNode Root { get; set; } = new() {
         Id = "root",
@@ -198,7 +205,12 @@ public sealed partial class TuiDocument {
         var nodes = new Dictionary<string, TuiNode>(StringComparer.OrdinalIgnoreCase);
         int count = 0;
         Visit(Root, 0);
+        ValidateCommands(nodes, validateTargets);
         foreach (var node in nodes.Values) {
+            if (node.RangeBind is null || node.RangeBind.Length > 128
+                || node.RangeBind.Length > 0 && (node.Type != "Chart" || Charts.ChartTopology.Supports(Enum.Parse<Charts.GraphKind>(node.GraphKind, true)))) {
+                throw new ArgumentException($"Control '{node.Id}': RangeBind requires a numeric Chart and a state key up to 128 characters.");
+            }
             if (node.Target is null || node.Target.Length > 64
                 || node.Target.Length > 0
                 && (!ControlIdPattern().IsMatch(node.Target) || validateTargets && !nodes.ContainsKey(node.Target))) {
@@ -249,6 +261,29 @@ public sealed partial class TuiDocument {
 
             ValidateColor(node.Foreground);
             ValidateColor(node.Background);
+            if (node.CellRanges is null || node.CellRanges.Length > 64
+                || node.CellRanges.Any(column => string.IsNullOrWhiteSpace(column) || column.Length > 128)
+                || node.CellRanges.Distinct(StringComparer.OrdinalIgnoreCase).Count() != node.CellRanges.Length
+                || node.CellRanges.Length > 0 && node.Type != "DataGridControl") {
+                throw new ArgumentException("CellRanges accepts up to 64 unique DataGridControl column names.");
+            }
+            if (node.CellColors is null || node.CellColors.Length > 64
+                || node.CellColors.Length > 0 && node.Type != "DataGridControl") {
+                throw new ArgumentException("CellColors allows at most 64 rules on DataGridControl.");
+            }
+            var cellThresholds = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rule in node.CellColors) {
+                if (rule is null || string.IsNullOrWhiteSpace(rule.Column) || rule.Column.Length > 128
+                    || !double.IsFinite(rule.From) || string.IsNullOrEmpty(rule.Color)
+                    || cellThresholds.TryGetValue(rule.Column, out double previous) && rule.From <= previous) {
+                    throw new ArgumentException("CellColors requires a column, finite ascending From values per column, and RGB Color.");
+                }
+                ValidateColor(rule.Color);
+                cellThresholds[rule.Column] = rule.From;
+            }
+            if (node.CellRanges.Any(column => cellThresholds.ContainsKey(column))) {
+                throw new ArgumentException("A column cannot use both CellRanges and CellColors.");
+            }
             if (!Enum.TryParse<XenoAtom.Terminal.UI.Align>(node.HorizontalAlignment, true, out var horizontal)
                 || !Enum.IsDefined(horizontal)
                 || !Enum.TryParse<XenoAtom.Terminal.UI.Align>(node.VerticalAlignment, true, out var vertical)
@@ -277,6 +312,27 @@ public sealed partial class TuiDocument {
                 if (node.SeriesRole is null || node.SeriesRole.Length > 0 && node.SeriesRole.Length != node.YProperty.Length
                     || node.SeriesRole.Any(role => !Enum.TryParse<Charts.ChartSeriesRole>(role, true, out var parsed) || !Enum.IsDefined(parsed))) {
                     throw new ArgumentException("Chart SeriesRole must contain one Auto/Column/Line role per YProperty.");
+                }
+                if (node.SeriesCountBind is null || node.HighlightSeriesBind is null || node.DataVersionBind is null
+                    || node.SeriesCountBind.Length > 128 || node.HighlightSeriesBind.Length > 128
+                    || node.DataVersionBind.Length > 128
+                    || node.YProperty.Length == 0 && (node.SeriesCountBind.Length > 0 || node.HighlightSeriesBind.Length > 0 || node.DataVersionBind.Length > 0)) {
+                    throw new ArgumentException("Chart series state bindings require YProperty and accept keys up to 128 characters.");
+                }
+                if (node.SeriesColor is null || node.SeriesColor.Length > 0 && node.SeriesColor.Length != node.YProperty.Length) {
+                    throw new ArgumentException("Chart SeriesColor must contain one color per YProperty.");
+                }
+                foreach (string color in node.SeriesColor) {
+                    ValidateColor(color);
+                }
+                if (node.PlotBands is null || node.PlotBands.Length > 4
+                    || node.PlotBands.Any(band => band is null || !double.IsFinite(band.From) || string.IsNullOrEmpty(band.Color))
+                    || node.PlotBands.Zip(node.PlotBands.Skip(1)).Any(pair => pair.First.From >= pair.Second.From)
+                    || node.PlotBands.Length > 0 && graphKind is not (Charts.GraphKind.Line or Charts.GraphKind.ColumnLine)) {
+                    throw new ArgumentException("PlotBands requires Line or ColumnLine and up to four bands with ascending finite From values and RGB colors.");
+                }
+                foreach (var band in node.PlotBands) {
+                    ValidateColor(band.Color);
                 }
                 if (node.LowerProperty is null || node.UpperProperty is null
                     || node.LowerProperty.Length > 128 || node.UpperProperty.Length > 128
@@ -337,6 +393,11 @@ public sealed partial class TuiDocument {
                 || node.Columns.Any(name => string.IsNullOrWhiteSpace(name) || name.Length > 128)
                 || node.Columns.Distinct(StringComparer.OrdinalIgnoreCase).Count() != node.Columns.Length) {
                 throw new ArgumentException("Columns must contain at most 256 unique property names of 1–128 characters.");
+            }
+            if (node.ColumnWidths is null || node.ColumnWidths.Length > 0
+                && (node.Type != "FTable" || node.ColumnWidths.Length != node.Columns.Length
+                    || node.ColumnWidths.Any(width => width is < 2 or > 1000))) {
+                throw new ArgumentException("FTable ColumnWidths must be empty or contain one width of 2–1000 cells per column.");
             }
 
             if (node.SelectionBind is null || node.SelectionBind.Length > 128
@@ -528,10 +589,18 @@ public sealed class TuiNode {
     public string Bind { get; set; } = "";
     /// <summary>Gets or sets the original items represented by the group or page.</summary>
     public string[] Items { get; set; } = [];
+    /// <summary>Shared document command IDs displayed by a MenuBar.</summary>
+    public string[] CommandIds { get; set; } = [];
+    /// <summary>TreeView requests and caches child rows through Expand callbacks.</summary>
+    public bool Lazy { get; set; }
     /// <summary>Gets or sets the table column names or column definitions.</summary>
     public string[] Columns { get; set; } = [];
+    /// <summary>Gets or sets explicit FTable widths in terminal cells.</summary>
+    public int[] ColumnWidths { get; set; } = [];
     /// <summary>Gets or sets the state key updated when selection changes.</summary>
     public string SelectionBind { get; set; } = "";
+    /// <summary>Chart state key holding a selected MinimumX/MaximumX interval, or null.</summary>
+    public string RangeBind { get; set; } = "";
     /// <summary>Gets or sets the filesystem or resource path.</summary>
     public string Path { get; set; } = "";
     /// <summary>Gets or sets the secondary directory used by a two-pane file manager.</summary>
@@ -594,12 +663,26 @@ public sealed class TuiNode {
     public string XProperty { get; set; } = "";
     /// <summary>Gets or sets up to 64 named numeric fields projected from Bind's original object rows.</summary>
     public string[] YProperty { get; set; } = [];
+    /// <summary>Gets or sets the state key containing the number of active Y properties.</summary>
+    public string SeriesCountBind { get; set; } = "";
+    /// <summary>Gets or sets the state key containing the highlighted Y property name.</summary>
+    public string HighlightSeriesBind { get; set; } = "";
+    /// <summary>Gets or sets an optional revision state key for explicitly refreshing object data.</summary>
+    public string DataVersionBind { get; set; } = "";
     /// <summary>Gets or sets the optional lower-bound field for object-bound ErrorBars.</summary>
     public string LowerProperty { get; set; } = "";
     /// <summary>Gets or sets the optional upper-bound field for object-bound ErrorBars.</summary>
     public string UpperProperty { get; set; } = "";
     /// <summary>Gets or sets optional Auto/Column/Line roles in YProperty order.</summary>
     public string[] SeriesRole { get; set; } = [];
+    /// <summary>Gets or sets optional RGB colors for bound chart series.</summary>
+    public string[] SeriesColor { get; set; } = [];
+    /// <summary>Gets or sets horizontal plot background bands in ascending Y order.</summary>
+    public TuiPlotBand[] PlotBands { get; set; } = [];
+    /// <summary>Gets or sets inclusive numeric foreground thresholds per DataGridControl column.</summary>
+    public TuiCellColor[] CellColors { get; set; } = [];
+    /// <summary>Gets or sets columns displaying Min/Avg/Max/Scale millisecond objects as colored text-cell ranges.</summary>
+    public string[] CellRanges { get; set; } = [];
     /// <summary>Gets or sets the visual representation used to draw the data.</summary>
     public string GraphKind { get; set; } = "Area";
     /// <summary>Gets or sets whether a chart shows its wrapping, clickable series legend.</summary>

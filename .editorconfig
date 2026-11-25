@@ -2,63 +2,32 @@ root = true
 
 [*]
 end_of_line = lf
+charset = utf-8
+insert_final_newline = true
 
-[*.cs]
+[*.{ps1,psm1,psd1}]
 indent_style = space
 indent_size = 4
+
+[*.{json,yaml,yml,md,resx,ruleset,stylecop,xml,xsd,xsl,props,targets,config,nuspec}]
+indent_size = 2
+
+[*.tsv]
+indent_style = tab
+
+[*.{cs,csproj}]
+indent_style = space
+indent_size = 4
+
+[*.cs]
+# Advisory in Roslyn; dotnet format does not automatically wrap long expressions.
 max_line_length = 120
-charset = utf-8
-csharp_new_line_before_open_brace = none
-csharp_new_line_before_else = true
-csharp_new_line_before_catch = true
-csharp_new_line_before_finally = true
-# Keep compact auto-properties such as public bool Paused { get; set; }.
-csharp_preserve_single_line_blocks = true
-csharp_preserve_single_line_statements = false
-csharp_prefer_braces = true:warning
-# Prefer readable control flow over conditional expressions.
-dotnet_style_prefer_conditional_expression_over_assignment = false:suggestion
-dotnet_style_prefer_conditional_expression_over_return = false:suggestion
-# Expression-bodied methods put the expression on the line after =>.
-# Roslyn cannot enforce that wrap, so preserve intentional method layouts.
-csharp_style_expression_bodied_methods = true:none
-csharp_style_expression_bodied_properties = when_on_single_line:suggestion
-csharp_style_expression_bodied_accessors = when_on_single_line:suggestion
+dotnet_sort_system_directives_first = true
+csharp_using_directive_placement = outside_namespace
 
-# Prefer modern C# constructs without changing public API contracts.
-csharp_style_namespace_declarations = file_scoped
-csharp_style_implicit_object_creation_when_type_is_apparent = true:suggestion
-csharp_style_pattern_matching_over_is_with_cast_check = true
-csharp_style_prefer_not_pattern = true
-csharp_style_pattern_matching_over_as_with_null_check = true
-csharp_style_inlined_variable_declaration = true
-csharp_style_throw_expression = true
-csharp_style_prefer_switch_expression = true
-csharp_prefer_simple_using_statement = true
-dotnet_style_prefer_collection_expression = when_types_exactly_match:suggestion
-dotnet_style_operator_placement_when_wrapping = end_of_line
-dotnet_style_prefer_is_null_check_over_reference_equality_method = true
-
-# Defaults for enabled rules. SDK Recommended mode has more-specific rule settings.
-# Style is enabled by intent, not in bulk: IDE0010/IDE0072 generate enum stubs,
-# and IDE0058 adds discard assignments to intentionally ignored fluent results.
-dotnet_diagnostic.IDE0161.severity = warning
-dotnet_diagnostic.IDE0090.severity = warning
-dotnet_diagnostic.IDE0020.severity = warning
-dotnet_diagnostic.IDE0038.severity = warning
-dotnet_diagnostic.IDE0019.severity = warning
-dotnet_diagnostic.IDE0083.severity = warning
-dotnet_diagnostic.IDE0018.severity = warning
-dotnet_diagnostic.IDE0016.severity = warning
-dotnet_diagnostic.IDE0066.severity = warning
-dotnet_diagnostic.IDE0063.severity = warning
-dotnet_diagnostic.IDE0041.severity = warning
-dotnet_diagnostic.IDE0300.severity = warning
-dotnet_diagnostic.IDE0301.severity = warning
-dotnet_diagnostic.IDE0302.severity = warning
-dotnet_diagnostic.IDE0303.severity = warning
-dotnet_diagnostic.IDE0304.severity = warning
-dotnet_diagnostic.IDE0305.severity = warning
+# Keep the existing build's correctness/performance checks.
+dotnet_analyzer_diagnostic.severity = suggestion
+dotnet_analyzer_diagnostic.category-Style.severity = warning
 dotnet_analyzer_diagnostic.category-Performance.severity = error
 dotnet_analyzer_diagnostic.category-Naming.severity = suggestion
 dotnet_analyzer_diagnostic.category-Maintainability.severity = suggestion
@@ -70,11 +39,85 @@ dotnet_analyzer_diagnostic.category-Reliability.severity = warning
 dotnet_analyzer_diagnostic.category-Security.severity = error
 dotnet_analyzer_diagnostic.category-Usage.severity = warning
 
-# Rider/ReSharper controls; dotnet format ignores these extension settings.
-resharper_csharp_place_simple_enum_on_single_line = false
-resharper_csharp_place_simple_blocks_on_single_line = false
-resharper_csharp_place_simple_accessorholder_on_single_line = true
+# Stroustrup: opening braces on the declaration/control line; else/catch/finally
+# start their own lines. Always use braces, including for one-statement bodies.
+csharp_new_line_before_open_brace = none
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_prefer_braces = true:warning
 dotnet_diagnostic.IDE0011.severity = warning
+
+# Auto-properties such as { get; set; } stay compact. Executable statements must
+# be written on separate lines, never packed together with semicolons.
+# Roslyn's block-preservation option also preserves existing compact executable
+# blocks; it cannot express an auto-property-only exception. Do not use that
+# limitation as an authoring convention. Rider/ReSharper overrides below express
+# the distinction; dotnet format alone cannot enforce it fully.
+csharp_preserve_single_line_blocks = true
+csharp_preserve_single_line_statements = false
+csharp_indent_block_contents = true
+csharp_indent_braces = false
+csharp_indent_case_contents = true
+csharp_indent_case_contents_when_block = true
+csharp_indent_switch_labels = true
+csharp_indent_labels = one_less_than_current
+
+# Prefer readable control flow; do not turn returns into long ternaries.
+# IDE0046's fix also crashes on some existing return/throw combinations.
+dotnet_style_prefer_conditional_expression_over_assignment = false:suggestion
+dotnet_style_prefer_conditional_expression_over_return = false:suggestion
+dotnet_diagnostic.IDE0045.severity = none
+dotnet_diagnostic.IDE0046.severity = none
+csharp_style_expression_bodied_methods = false:suggestion
+csharp_style_expression_bodied_constructors = false:suggestion
+csharp_style_expression_bodied_accessors = false:suggestion
+csharp_style_expression_bodied_properties = false:suggestion
+
+# IDE2001 also flags valid end-of-line Stroustrup braces; it is not a substitute
+# for a rule that distinguishes auto-properties from executable blocks.
+dotnet_diagnostic.IDE2001.severity = none
+
+# Granular Rider/ReSharper formatting. Roslyn ignores these editor-specific keys.
+resharper_csharp_place_simple_blocks_on_single_line = false
+resharper_csharp_place_abstract_accessorholder_on_single_line = true
+resharper_csharp_place_simple_accessorholder_on_single_line = false
+resharper_csharp_place_simple_accessor_on_single_line = false
+resharper_csharp_place_simple_method_on_single_line = false
+resharper_csharp_place_simple_embedded_block_on_same_line = false
+resharper_csharp_place_simple_embedded_statement_on_same_line = false
+resharper_csharp_place_simple_anonymousmethod_on_single_line = false
+
+# Existing language preferences; no duplicate keys or unrecognized aliases.
+csharp_style_namespace_declarations = file_scoped
+csharp_style_implicit_object_creation_when_type_is_apparent = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_pattern_matching_over_is_with_cast_check = true
+csharp_style_prefer_not_pattern = true
+csharp_style_pattern_matching_over_as_with_null_check = true
+csharp_style_inlined_variable_declaration = true
+csharp_style_throw_expression = true
+csharp_style_prefer_switch_expression = true
+csharp_prefer_simple_using_statement = true
+dotnet_style_operator_placement_when_wrapping = end_of_line
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true
+csharp_style_unused_value_expression_statement_preference = unused_local_variable
+csharp_style_prefer_primary_constructors = false
+
+# Each severity is a single value; explanatory comments belong on separate lines.
+dotnet_diagnostic.IDE0041.severity = warning
+dotnet_diagnostic.IDE0029.severity = warning
+dotnet_diagnostic.IDE0030.severity = warning
+dotnet_diagnostic.IDE0270.severity = warning
+dotnet_diagnostic.IDE0019.severity = warning
+dotnet_diagnostic.IDE0010.severity = none
+dotnet_diagnostic.IDE0072.severity = none
+dotnet_diagnostic.IDE0005.severity = suggestion
+dotnet_diagnostic.IDE0059.severity = suggestion
+dotnet_diagnostic.IDE0051.severity = suggestion
+dotnet_diagnostic.IDE0060.severity = suggestion
+dotnet_diagnostic.IDE0058.severity = suggestion
+
 [src/fullscreen.Collector/**]
 # Collector namespaces are shared with the host and intentionally span folders.
 dotnet_style_namespace_match_folder = false
@@ -84,5 +127,5 @@ dotnet_style_namespace_match_folder = false
 dotnet_style_namespace_match_folder = false
 
 [tests/**/*.cs]
-# Keep expected test data beside its assertion rather than hoisting it into shared fields.
+# Keep expected test data beside its assertions rather than hoisting arrays.
 dotnet_diagnostic.CA1861.severity = none

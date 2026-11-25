@@ -1,3 +1,5 @@
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using XenoAtom.Terminal.UI;
 
 namespace fullscreen.Charts;
@@ -7,12 +9,14 @@ internal sealed partial class SixelPlot {
     private byte[] _planes = [];
     private int[] _firstColumns = [], _lastColumns = [];
     internal const int InkColors = Themes.ThemePalette.SeriesColorCount + 1;
-    internal const int MaximumInkColors = Themes.ThemePalette.GaugeColorCount + 1;
+    internal const int MaximumSeriesColors = 64;
+    internal const int MaximumInkColors = MaximumSeriesColors + 5;
     internal int ColorCount { get; private set; } = InkColors;
     private double[] _observations = [];
     private readonly int[] _bins = new int[32];
     private Color _ink, _background;
     private bool _hasPalette;
+    private int _firstBandColor;
     public int Width { get; private set; }
     public int Height { get; private set; }
     public ReadOnlySpan<byte> Pixels =>
@@ -31,14 +35,19 @@ internal sealed partial class SixelPlot {
         _bins.AsSpan(0, BinCount);
     private int BinCount { get; set; }
 
-    private void Initialize(int width, int height, Color ink, Color background, GraphKind kind) {
+    private void Initialize(int width, int height, Color ink, Color background, GraphKind kind, int plotBandCount, int seriesSlots) {
         if (width < 1 || height < 1 || (long)width * height > 16_777_216) {
             throw new ArgumentOutOfRangeException(nameof(width));
         }
 
         Width = width;
         Height = height;
-        ColorCount = kind == GraphKind.Gauge ? MaximumInkColors : InkColors;
+        int inkColors = Math.Max(InkColors, seriesSlots + 1);
+        if (kind == GraphKind.Gauge) {
+            inkColors = Themes.ThemePalette.GaugeColorCount + 1;
+        }
+        _firstBandColor = plotBandCount == 0 ? byte.MaxValue : inkColors + 1;
+        ColorCount = inkColors + plotBandCount;
         if (!Enum.IsDefined(kind)) {
             throw new ArgumentOutOfRangeException(nameof(kind));
         }
@@ -110,9 +119,11 @@ internal sealed partial class SixelPlot {
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Paint(int x, int y, byte color) {
         if ((uint)x < (uint)Width && (uint)y < (uint)Height) {
-            SetPixel(x, y, Math.Max(_pixels[y * Width + x], color));
+            byte previous = _pixels[y * Width + x];
+            SetPixel(x, y, previous >= _firstBandColor ? color : Math.Max(previous, color));
         }
     }
 
@@ -181,7 +192,7 @@ internal sealed partial class SixelPlot {
             _firstColumns[plane] = Math.Min(_firstColumns[plane], x);
             _lastColumns[plane] = Math.Max(_lastColumns[plane], x + 1);
             for (uint rows = mask; rows != 0; rows &= rows - 1) {
-                int y = band * 6 + System.Numerics.BitOperations.TrailingZeroCount(rows);
+                int y = band * 6 + BitOperations.TrailingZeroCount(rows);
                 _pixels[y * Width + x] = color;
             }
         }

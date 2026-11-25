@@ -4,18 +4,13 @@ namespace fullscreen.Monitoring;
 
 public sealed partial class MonitorSurface {
     private void RenderDetailTable(CellBuffer buffer, bool network) {
-        var enabled = network ? _networkColumns : _gpuColumns;
         var names = network ? NetworkColumnNames : GpuColumnNames;
         int top = TableTop, page = PageSize;
-        Span<int> positions = stackalloc int[7];
+        Span<int> positions = stackalloc int[names.Length];
         positions.Fill(-1);
-        Span<int> widths = stackalloc int[7];
+        Span<int> widths = stackalloc int[names.Length];
         int x = 1;
-        for (int i = 0; i < names.Length; i++) {
-            if (!enabled[i] || !network && !AvailableColumn((GpuColumn)i)) {
-                continue;
-            }
-
+        foreach (int i in DetailColumns(network)) {
             int width = DetailColumnWidth(network, i);
             if (x >= Bounds.Width - 4) {
                 break;
@@ -97,6 +92,24 @@ public sealed partial class MonitorSurface {
                         case 5:
                             Metric(buffer, x, y, row.Temperature, Hot, w);
                             break;
+                        case 16:
+                            Quantity(buffer, x, y, row.DedicatedMemory, false, Green, w);
+                            break;
+                        case 17:
+                            Quantity(buffer, x, y, row.SharedMemory, false, Green, w);
+                            break;
+                        case 18:
+                            Write(buffer, x, y, row.Id ?? "—", Muted, w);
+                            break;
+                        case 19:
+                            Write(buffer, x, y, row.MemoryKind ?? "—", Muted, w);
+                            break;
+                        case 20:
+                            Write(buffer, x, y, row.Status ?? "No provider detail", Muted, w);
+                            break;
+                        default:
+                            Metric(buffer, x, y, GpuValue(row, c), c == (int)GpuColumn.Power ? Hot : Purple, w);
+                            break;
                     }
                 }
             }
@@ -104,6 +117,9 @@ public sealed partial class MonitorSurface {
 
         if (DetailCount == 0) {
             Write(buffer, 2, top, network ? Frame.NetworkStatus : Frame.GpuStatus, Muted, Bounds.Width - 4);
+        }
+        else if (!network && top + DetailCount < Bounds.Height - 2) {
+            Write(buffer, 2, top + DetailCount, Frame.GpuStatus, Muted, Bounds.Width - 4);
         }
     }
 }

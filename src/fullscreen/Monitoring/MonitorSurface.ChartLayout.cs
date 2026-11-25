@@ -45,9 +45,28 @@ public sealed partial class MonitorSurface {
         Array.Clear(_chartBounds);
         foreach (var chart in _plots) {
             chart.InspectionColumn = -1;
+            chart.IsVisible = false;
         }
 
         if (ColumnsOpen || View is MonitorView.Services or MonitorView.Users || width < 35 || height < 12) {
+            return;
+        }
+        if (View == MonitorView.Disks) {
+            var layout = StorageGraphLayout(width, height);
+            if (layout.Height > 0) {
+                PanelChart(1, layout.Top, layout.Width, layout.Height, _storageRead, 0, Green, _storageWrite);
+                PanelChart(layout.Width + 2, layout.Top, width - layout.Width - 3, layout.Height, _storageReads, 0, Green, _storageWrites);
+            }
+            var rows = VisibleDisks;
+            int page = Math.Max(1, (height - layout.Top - layout.Height - 4) / 5);
+            int selected = Math.Max(0, Array.FindIndex(rows, disk => disk.Id == _diskSelectedId));
+            int offset = Math.Max(0, selected - page + 1);
+            int top = layout.Top + layout.Height + 2;
+            for (int index = offset; index < Math.Min(rows.Length, offset + page); index++) {
+                if (_diskIops.TryGetValue(rows[index].Id, out var history)) {
+                    AddChart(new(16, top + (index - offset) * 5 + 3, Math.Max(1, width / 2 - 21), 1), history, 0, Purple);
+                }
+            }
             return;
         }
 
@@ -55,8 +74,9 @@ public sealed partial class MonitorSurface {
             int top = Minimal ? 0 : 2;
             int w = Math.Max(12, (width - 3) / 2), right = width - 3 - w;
             var (upper, lower) = DashboardHeights(height);
-            PanelChart(1, top, w, upper, _cpuHistory, 100, Accent);
-            PanelChart(w + 2, top, right, upper, _memoryHistory, 100, Green);
+            int detailRows = ResourceFooterRows(w, upper);
+            PanelChart(1, top, w, upper - detailRows, _cpuHistory, 100, Accent);
+            PanelChart(w + 2, top, right, upper - detailRows, _memoryHistory, 100, Green);
             PanelChart(1, upper + top, w, lower, _receiveHistory, 0, Green, _sendHistory);
             PanelChart(w + 2, upper + top, right, lower, _gpuHistory, 100, Purple);
         }
@@ -68,7 +88,7 @@ public sealed partial class MonitorSurface {
                     2,
                     w,
                     h,
-                    View == MonitorView.Network ? _receiveHistory : _gpuHistory,
+                    View == MonitorView.Network ? NetworkGraphReceive : _gpuHistory,
                     View == MonitorView.Network ? 0 : 100,
                     View == MonitorView.Network ? Green : Purple
                 );
@@ -77,7 +97,7 @@ public sealed partial class MonitorSurface {
                     2,
                     w,
                     h,
-                    View == MonitorView.Network ? _sendHistory : _vramHistory,
+                    View == MonitorView.Network ? NetworkGraphSend : _vramHistory,
                     0,
                     View == MonitorView.Network ? Purple : Green
                 );
@@ -88,6 +108,7 @@ public sealed partial class MonitorSurface {
                 AddChart(new(4 + w, 5, w - 4, Math.Max(1, h - 4)), _memoryHistory, 100, Green);
                 AddChart(new(5 + 2 * w, 5, w - 4, Math.Max(1, h - 4)), _gpuHistory, 100, Purple);
                 AddChart(new(6 + 3 * w, 6, w - 4, Math.Max(1, h - 5)), _receiveHistory, 0, Green, _sendHistory);
+                if (ProcessTable) { AddChart(new(28, h + 3, Math.Max(1, width - 30), 2), _storageIops, 0, Accent); }
             }
         }
     }
@@ -127,11 +148,15 @@ public sealed partial class MonitorSurface {
 
         DateTimeOffset end = secondary is not null && secondary.Latest > history.Latest ? secondary.Latest : history.Latest;
         void Lane(Rectangle bounds, TimeSeries source, Style style) {
-            if (_chartCount >= _plots.Length) {
-                return;
+            if (_chartCount >= _plots.Count) {
+                var chart = new BuiltInTrend { Interactive = false };
+                _plots.Add(chart);
+                AttachChild(chart);
+                if (_chartCount == _chartBounds.Length) { Array.Resize(ref _chartBounds, _chartBounds.Length * 2); }
             }
 
             _chartBounds[_chartCount] = bounds;
+            _plots[_chartCount].IsVisible = true;
             _plots[_chartCount].GraphKind = GraphType;
             _plots[_chartCount].PixelInk = style == Green ? Palette.Success : style == Purple ? Palette.Purple : Palette.Accent;
             _plots[_chartCount].PixelBackground = Palette.Background;

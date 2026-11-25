@@ -4,7 +4,7 @@ using System.Management.Automation.Runspaces;
 
 namespace fullscreen.Monitoring;
 /// <summary>Owns a typed collector handle. The caller retains ownership of the PSSession/runspace.</summary>
-public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource, IMonitorProcessDetailSource {
+public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource, IMonitorProcessDetailSource, IMonitorSudoSource {
     private readonly Runspace _runspace;
     private readonly string _handle = Guid.NewGuid().ToString("N");
     private static readonly string RegistryName = typeof(CollectorSessions).AssemblyQualifiedName!;
@@ -12,7 +12,7 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource,
     // Normal calls resolve the loaded type directly. The MVID fallback also handles
     // a newer build loaded into a long-lived runspace with the same assembly version.
     private const string SessionScript = """
-        param([string]$RegistryName, [guid]$ModuleId, [string]$Handle, [string]$Operation, [int]$Metrics, [string]$TargetName, [long]$LogonTime)
+        param([string]$RegistryName, [guid]$ModuleId, [string]$Handle, [string]$Operation, [int]$Metrics, [string]$TargetName, [long]$LogonTime, [securestring]$SudoPassword)
         $registry = [Type]::GetType($RegistryName, $false)
         if ($null -eq $registry -or $registry.Module.ModuleVersionId -ne $ModuleId) {
             $registry = $null
@@ -30,10 +30,15 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource,
             Close { $registry::Close($Handle) }
             Logoff { $registry::LogoffSession($Metrics, $TargetName, $LogonTime) }
             CommandLine { $registry::ReadProcessCommandLine($Handle, $Metrics, $LogonTime) }
+            SudoRequired { $registry::NeedsSudoAuthentication($Handle) }
+            SudoAuthenticate { $registry::AuthenticateSudo($Handle, $SudoPassword) }
         }
         """;
     private readonly int _timeoutSeconds;
     private bool _deployed;
+    private readonly bool _useSudo;
+    /// <inheritdoc/>
+    public string SudoReason => "Read protected Linux GPU counters";
     /// <summary>Gets the human-readable label.</summary>
     public string Label { get; }
     /// <summary>Gets whether collection targets a remote computer.</summary>
@@ -47,12 +52,24 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource,
         int timeoutSeconds = 15
     ) : this(session.Runspace, session.ComputerName, timeoutSeconds) {
     }
+    /// <summary>Creates a remote source with an explicit sudo policy.</summary>
+    /// <param name="session">The caller-owned session.</param>
+    /// <param name="timeoutSeconds">Remote request timeout.</param>
+    /// <param name="useSudo">Whether sudo readers are permitted on the target.</param>
+    public RemoteMonitorSource(PSSession session, int timeoutSeconds, bool useSudo)
+        : this(session.Runspace, session.ComputerName, timeoutSeconds, useSudo) { }
 
     /// <summary>Initializes a new RemoteMonitorSource instance.</summary>
     /// <param name="runspace">The PowerShell runspace used for commands.</param>
     /// <param name="label">The human-readable label.</param>
     /// <param name="timeoutSeconds">The timeout in seconds. Defaults to 15.</param>
-    public RemoteMonitorSource(Runspace runspace, string label, int timeoutSeconds = 15) {
+    public RemoteMonitorSource(Runspace runspace, string label, int timeoutSeconds = 15) : this(runspace, label, timeoutSeconds, false) { }
+    /// <summary>Creates a runspace-backed source with an explicit sudo policy.</summary>
+    /// <param name="runspace">The caller-owned runspace.</param>
+    /// <param name="label">The target label.</param>
+    /// <param name="timeoutSeconds">Remote request timeout.</param>
+    /// <param name="useSudo">Whether sudo readers are permitted.</param>
+    public RemoteMonitorSource(Runspace runspace, string label, int timeoutSeconds, bool useSudo) {
         ArgumentNullException.ThrowIfNull(runspace);
         if (timeoutSeconds < 1 || timeoutSeconds > 120) {
             throw new ArgumentOutOfRangeException(nameof(timeoutSeconds));
@@ -61,6 +78,7 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource,
         _runspace = runspace;
         Label = label;
         _timeoutSeconds = timeoutSeconds;
+        _useSudo = useSudo;
     }
 
     /// <inheritdoc/>
@@ -72,7 +90,7 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource,
         if (!_deployed) {
             byte[] assembly = File.ReadAllBytes(typeof(PerformanceCollector).Assembly.Location);
             Invoke("""
-                param([byte[]]$CollectorBytes, [string]$Handle, [guid]$ModuleId)
+                param([byte[]]$CollectorBytes, [string]$Handle, [guid]$ModuleId, [bool]$UseSudo)
                 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') { throw 'The endpoint does not permit loading the Fullscreen collector.' }
                 $collectorAssembly = $null
                 foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
@@ -83,10 +101,24 @@ public sealed class RemoteMonitorSource : IMonitorSource, IMonitorControlSource,
                 }
                 if ($null -eq $collectorAssembly) { $collectorAssembly = [System.Reflection.Assembly]::Load($CollectorBytes) }
                 $registry = $collectorAssembly.GetType('fullscreen.Monitoring.CollectorSessions', $true)
-                $registry::Open($Handle)
-                """, cancellationToken, assembly, _handle, ModuleId);
+                $registry::SetCollectorImage($CollectorBytes)
+                $registry::Open($Handle, $UseSudo)
+                """, cancellationToken, assembly, _handle, ModuleId, _useSudo);
             _deployed = true;
         }
+    }
+
+    /// <inheritdoc/>
+    public bool NeedsSudoAuthentication(CancellationToken token) {
+        EnsureDeployed(token);
+        var result = Invoke(SessionScript, token, RegistryName, ModuleId, _handle, "SudoRequired", 0, "", 0);
+        return result.Count == 1 && result[0].BaseObject is true;
+    }
+    /// <inheritdoc/>
+    public bool AuthenticateSudo(System.Security.SecureString password, CancellationToken token) {
+        EnsureDeployed(token);
+        var result = Invoke(SessionScript, token, RegistryName, ModuleId, _handle, "SudoAuthenticate", 0, "", 0, password);
+        return result.Count == 1 && result[0].BaseObject is true;
     }
 
     /// <inheritdoc/>

@@ -11,6 +11,24 @@ namespace fullscreen.Tests;
 [DoNotParallelize]
 public sealed class MonitorDialogTests {
     [TestMethod]
+    public async Task GpuDetailsExposeAvailabilityAndDismissWithoutExitingMonitor() {
+        var surface = new MonitorSurface { View = MonitorView.Gpu };
+        surface.Frame.GpuCount = 1;
+        surface.Frame.Gpus[0] = new("diagnostic fixture", "provider", null, null, null, null) {
+            Id = "adapter-fixture",
+            MemoryKind = "unified allocations",
+            Status = "permission denied for protected counters"
+        };
+        await using var ui = new DesignerUxTests.UiSession(surface, () => { }, 100, 32);
+        ui.App.Focus(surface);
+        ui.Text("d", () => Dialog(ui) is not null);
+        Assert.Contains("GPU details", ui.Output);
+        Assert.Contains("adapter-fixture", ui.Output);
+        Assert.Contains("permission denied", ui.Output);
+        ui.Text("q", () => Dialog(ui) is null);
+        Assert.IsFalse(surface.ExitRequested);
+    }
+    [TestMethod]
     [DataRow("text")]
     [DataRow("key")]
     [DataRow("child")]
@@ -120,7 +138,7 @@ public sealed class MonitorDialogTests {
         string tall = surface.HelpText(96, 60), compact = surface.HelpText(96, 24);
         Assert.Contains("C: columns\nF6: sort\nR: reverse sort", tall);
         Assert.Contains("PgUp/PgDn: select or scroll a page", tall);
-        Assert.Contains("←/→: process columns (Shift in tree) / user branches", tall);
+        Assert.Contains("←/→: process/GPU columns (Shift in tree) / user branches", tall);
         Assert.IsLessThan(tall.Split('\n').Length, compact.Split('\n').Length);
         Assert.Contains("C: columns · F6: sort", compact);
     }

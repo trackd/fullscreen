@@ -29,5 +29,7 @@ public enum CollectorMetrics {
     /// <summary>Collects users metrics.</summary>
     Users = 1024,
     /// <summary>Collects all supported metric groups.</summary>
-    All = 2047
+    All = 4095,
+    /// <summary>Collects volume capacity and storage device activity.</summary>
+    Disks = 2048
 }

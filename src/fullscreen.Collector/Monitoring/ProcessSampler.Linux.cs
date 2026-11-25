@@ -35,7 +35,8 @@ public sealed partial class ProcessSampler {
 
                 string name = _previous.TryGetValue(id, out var previous) && previous.StartTicks == stat.StartTicks ? previous.Name : Encoding.UTF8.GetString(_procBuffer, stat.NameStart, stat.NameLength);
                 long ticks = (long)(stat.CpuTicks * ((double)TimeSpan.TicksPerSecond / _clockTicks));
-                long? disk = _collectDisk ? ReadLinuxDisk(directory, id, stat.StartTicks) : null;
+                long? read = null, write = null;
+                long? disk = _collectDisk ? ReadLinuxDisk(directory, id, stat.StartTicks, out read, out write) : null;
                 Add(id, name, ticks, stat.StartTicks, checked(stat.ResidentPages * Environment.SystemPageSize), stat.Threads, seconds, stat.ParentId, status: stat.State switch {
                     'R' => "Running",
                     'S' => "Sleeping",
@@ -44,7 +45,7 @@ public sealed partial class ProcessSampler {
                     'Z' => "Zombie",
                     'I' => "Idle",
                     _ => null
-                }, diskBytes: disk);
+                }, diskBytes: disk, diskRead: read, diskWrite: write);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException) {
                 // A process may disappear or deny access between enumeration and read.
@@ -134,7 +135,8 @@ public sealed partial class ProcessSampler {
         return true;
     }
 
-    private long? ReadLinuxDisk(string directory, int id, long birth) {
+    private long? ReadLinuxDisk(string directory, int id, long birth, out long? read, out long? write) {
+        read = write = null;
         // Other users' io files stay unreadable for the process lifetime; don't throw for them every sample.
         if (_ioDenied.TryGetValue(id, out long denied) && denied == birth) {
             return null;
@@ -143,7 +145,7 @@ public sealed partial class ProcessSampler {
         try {
             using var handle = File.Open(Path.Combine(directory, "io"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             int length = handle.Read(_procBuffer, 0, _procBuffer.Length);
-            return TryReadLinuxDisk(new ByteWindow(_procBuffer, 0, length));
+            return TryReadLinuxDisk(new ByteWindow(_procBuffer, 0, length), out read, out write);
         }
         catch (UnauthorizedAccessException) {
             _ioDenied[id] = birth;
@@ -154,8 +156,9 @@ public sealed partial class ProcessSampler {
         }
     }
 
-    internal static long? TryReadLinuxDisk(ByteWindow data) {
-        long? read = null, write = null;
+    internal static long? TryReadLinuxDisk(ByteWindow data) => TryReadLinuxDisk(data, out _, out _);
+    internal static long? TryReadLinuxDisk(ByteWindow data, out long? read, out long? write) {
+        read = write = null;
         foreach (var line in data.Split((byte)'\n')) {
             bool reading = line.StartsWith("read_bytes:"), writing = line.StartsWith("write_bytes:");
             if (!reading && !writing) {

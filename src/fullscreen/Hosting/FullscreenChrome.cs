@@ -11,8 +11,48 @@ internal sealed class FullscreenChrome : Visual {
     private readonly IFullscreenApp _app;
     private readonly Visual _content;
     private readonly Button _close;
+    private readonly TerminalDiagnosticsOverlay _diagnostics = new();
     private Visual? _layer;
     internal Rectangle CloseBounds => _close.Bounds;
+    internal Rectangle DiagnosticsBounds => _diagnostics.PaintedBounds;
+    internal IReadOnlyList<string> DiagnosticsLines => _diagnostics.Lines;
+
+    internal void UpdateDiagnostics(Charts.ChartRenderer requested, ITerminalGraphicsPresenter? graphics) {
+        if (App is not { } app) {
+            return;
+        }
+        bool visible = Charts.TerminalOverlayBounds.DebugVisible(app);
+        _diagnostics.IsVisible = visible;
+        if (!visible) {
+            return;
+        }
+        var capabilities = graphics?.Capabilities ?? app.Terminal.Graphics.Capabilities;
+        var pixels = graphics is Charts.SixelChartPresenter sixel ? sixel.PixelMetrics : capabilities.PixelMetrics;
+        string geometry = pixels is { } size
+            ? $"cell {size.CellPixelWidth}x{size.CellPixelHeight}px; surface {size.WindowPixelWidth}x{size.WindowPixelHeight}px"
+            : "pixel geometry unavailable";
+        string actual = graphics switch {
+            null => "Native",
+            Charts.SixelChartPresenter => "Sixel",
+            Charts.RegisChartPresenterPrototype => "Regis",
+            _ => graphics.GetType().Name
+        };
+        _diagnostics.TerminalDetails = $"Terminal: {app.Terminal.Size.Columns}x{app.Terminal.Size.Rows} cells; TERM={Safe(Environment.GetEnvironmentVariable("TERM"))}; program={Safe(Environment.GetEnvironmentVariable("TERM_PROGRAM"))}";
+        _diagnostics.GraphicsDetails = $"Graphics: {requested} -> {actual}; {capabilities.SupportState}; source={Safe(capabilities.DetectionSource)}";
+        _diagnostics.GeometryDetails = $"Geometry: {geometry}" + (graphics is Charts.SixelChartPresenter { UsesFallbackMetrics: true } ? " (8x16 fallback)" : "");
+        _diagnostics.Refresh();
+        if (_layer is WindowLayer layer && !ReferenceEquals(layer.EnumerateVisualsDepthFirst().LastOrDefault(visual => ReferenceEquals(visual.Parent, layer)), _diagnostics)) {
+            layer.RemoveWindow(_diagnostics);
+            layer.AddWindow(_diagnostics);
+        }
+    }
+
+    private static string Safe(string? value) =>
+        string.IsNullOrEmpty(value) ? "unknown" : string.Create(Math.Min(80, value.Length), value, static (output, source) => {
+            for (int index = 0; index < output.Length; index++) {
+                output[index] = char.IsControl(source[index]) ? '?' : source[index];
+            }
+        });
 
     internal FullscreenChrome(IFullscreenApp app, Themes.ThemePalette palette) {
         _app = app;
@@ -43,10 +83,16 @@ internal sealed class FullscreenChrome : Visual {
         base.OnAttachedToApp(app);
         _layer = Parent;
         _layer?.PointerPressedRouted += OnLayerPointerPressed;
+        if (_layer is WindowLayer layer) {
+            layer.AddWindow(_diagnostics);
+        }
     }
 
     protected override void OnDetachedFromApp(TerminalApp app) {
         _layer?.PointerPressedRouted -= OnLayerPointerPressed;
+        if (_layer is WindowLayer layer) {
+            layer.RemoveWindow(_diagnostics);
+        }
         _layer = null;
         base.OnDetachedFromApp(app);
     }
@@ -67,7 +113,11 @@ internal sealed class FullscreenChrome : Visual {
     protected override int ChildrenCount => 2;
 
     protected override Visual GetChild(int index) =>
-        index == 0 ? _content : _close;
+        index switch {
+            0 => _content,
+            1 => _close,
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
     protected override SizeHints MeasureCore(in LayoutConstraints constraints) {
         _content.Measure(new(constraints.MaxWidth, constraints.MaxHeight));
         _close.Measure(new(3, 1));

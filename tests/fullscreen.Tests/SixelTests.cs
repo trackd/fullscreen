@@ -1,21 +1,62 @@
-using fullscreen.Themes;
-using System.Text.RegularExpressions;
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using fullscreen.Charts;
-using fullscreen.Monitoring;
 using fullscreen.Custom;
+using fullscreen.Monitoring;
+using fullscreen.Themes;
+using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Hosting;
 using XenoAtom.Terminal.UI.Geometry;
-using XenoAtom.Ansi;
+using XenoAtom.Terminal.UI.Hosting;
 
 namespace fullscreen.Tests;
 
 [TestClass]
 public sealed partial class SixelTests {
+    [TestMethod]
+    public void DirectPlanesContinueDisjointColumnsAndResetOverlapsAndBands() {
+        var plot = new SixelPlot();
+        typeof(SixelPlot).GetMethod("Initialize", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, Color, Color, GraphKind, int, int>>(plot)
+            (19, 19, Color.Rgb(200, 200, 200), Color.Rgb(0, 0, 0), GraphKind.Heatmap, 0, 8);
+        var paint = typeof(SixelPlot).GetMethod("SetPixel", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<int, int, byte>>(plot);
+        foreach (var (x, y, color) in new[] {
+            (4, 0, 1), (5, 0, 1), (6, 1, 2), (7, 1, 2),
+            (12, 2, 3), (13, 2, 3), (2, 3, 4), (3, 3, 4),
+            (3, 4, 5), (4, 4, 5), (1, 6, 1), (5, 7, 2), (9, 18, 1)
+        }) {
+            paint(x, y, (byte)color);
+        }
+        string encoded = new SixelEncoder().EncodePlot(plot);
+        var decoded = Decode(encoded);
+        Assert.AreEqual(19, decoded.Width);
+        Assert.AreEqual(19, decoded.Height);
+        CollectionAssert.AreEqual(plot.Pixels.ToArray(), decoded.Pixels);
+        Assert.AreEqual(2, encoded.Count(character => character == '$'),
+            "Only backwards or overlapping planes need a carriage return; new bands reset the cursor themselves.");
+    }
+
+    [TestMethod]
+    public void NumericRasterKeepsExplicitColorsForTwentyFourHopLines() {
+        var chart = new Chart { GraphKind = GraphKind.Line, Minimum = 0, Maximum = 25 };
+        var series = Enumerable.Range(0, 24).Select(index => new ChartDataSeries($"Hop {index + 1}", [
+            new(0, 0, index + 1, "First"), new(1, 1, index + 1, "Last")
+        ]) {
+            Color = Color.Rgb((byte)(index * 9), (byte)(255 - index * 7), (byte)(index * 3))
+        }).ToArray();
+        series[^1].Emphasized = true;
+        chart.SetData(series);
+        var plot = new SixelPlot();
+        chart.DrawPixels(plot, 80, 251);
+        for (int index = 0; index < series.Length; index++) {
+            Assert.AreEqual(series[index].Color, plot.Palette[index + 2]);
+            Assert.IsTrue(plot.Pixels.Contains((byte)(index + 2)), series[index].Property);
+        }
+    }
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
@@ -398,7 +439,8 @@ public sealed partial class SixelTests {
                 document.Root.Bind = "nodes";
                 document.Root.EdgeBind = "edges";
                 using var diagramApp = new CustomTuiApp(TuiDocument.FromJson(document.ToJson()), new System.Collections.Hashtable {
-                    ["nodes"] = new[] { new { NodeId = "a", Name = "A" } }, ["edges"] = Array.Empty<object>()
+                    ["nodes"] = new[] { new { NodeId = "a", Name = "A" } },
+                    ["edges"] = Array.Empty<object>()
                 });
                 Assert.AreEqual(kind, ((Chart)diagramApp.Controls["plot"]).GraphKind);
                 continue;
@@ -645,8 +687,12 @@ public sealed partial class SixelTests {
                 plot.Draw(history, history.Latest, 100, size.Item1, size.Item2, ink, Color.Rgb(13, 20, 32), kind, 5);
                 var actual = Decode(encoder.EncodePlot(plot));
                 CollectionAssert.AreEqual(plot.Pixels.ToArray(), actual.Pixels, $"{kind}: {size}");
-                var expectedColor = (ChartRadial.IsRadial(kind) || kind is GraphKind.Waterfall or GraphKind.Bars or GraphKind.HorizontalBars ? plot.Palette[6] : ink).ToRgb();
-                Assert.AreEqual(((expectedColor.R * 100 + 127) / 255, (expectedColor.G * 100 + 127) / 255, (expectedColor.B * 100 + 127) / 255), actual.Colors[6]);
+                foreach (byte color in plot.Pixels.ToArray().Distinct().Where(color => color != 0)) {
+                    var rgb = plot.Palette[color].ToRgb();
+                    Assert.AreEqual(((rgb.R * 100 + 127) / 255, (rgb.G * 100 + 127) / 255, (rgb.B * 100 + 127) / 255), actual.Colors[color]);
+                }
+                Assert.HasCount(plot.Pixels.ToArray().Distinct().Count(color => color != 0), actual.Colors,
+                    "Each frame defines exactly its painted colors, without unused palette registers.");
             }
         }
     }
@@ -941,7 +987,9 @@ public sealed partial class SixelTests {
             string cleanup = backend.GetOutText()[length..];
             Assert.Contains("X", cleanup, "Removing plots must erase their streamed image regions.");
         }
-        finally { typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null); }
+        finally {
+            typeof(TerminalApp).GetMethod("EndRun", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(terminal, null);
+        }
     }
 
     // Independent protocol interpreter: no encoder helpers or chart rasterization.

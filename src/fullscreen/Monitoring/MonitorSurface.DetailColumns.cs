@@ -32,7 +32,37 @@ public enum GpuColumn {
     /// <summary>Displays the total graphics memory in bytes.</summary>
     TotalMemory,
     /// <summary>Displays the device temperature in degrees Celsius.</summary>
-    Temperature
+    Temperature,
+    /// <summary>Render engine activity percentage.</summary>
+    Render,
+    /// <summary>Compute engine activity percentage.</summary>
+    Compute,
+    /// <summary>Copy engine activity percentage.</summary>
+    Copy,
+    /// <summary>Combined video engine activity percentage.</summary>
+    Video,
+    /// <summary>Video processing activity percentage.</summary>
+    VideoEnhance,
+    /// <summary>Encoder activity percentage.</summary>
+    Encode,
+    /// <summary>Decoder activity percentage.</summary>
+    Decode,
+    /// <summary>Memory read/write activity percentage.</summary>
+    MemoryActivity,
+    /// <summary>Reported graphics clock in MHz.</summary>
+    Clock,
+    /// <summary>Device or SoC power in watts.</summary>
+    Power,
+    /// <summary>Dedicated GPU memory usage in bytes.</summary>
+    DedicatedMemory,
+    /// <summary>Shared system or unified GPU allocation bytes.</summary>
+    SharedMemory,
+    /// <summary>Stable provider adapter identity.</summary>
+    Identity,
+    /// <summary>Meaning of the GPU memory counters.</summary>
+    MemoryKind,
+    /// <summary>Provider-specific coverage and availability.</summary>
+    Availability
 }
 
 public sealed partial class MonitorSurface {
@@ -51,10 +81,26 @@ public sealed partial class MonitorSurface {
         "Utilization",
         "UsedMemory",
         "TotalMemory",
-        "Temperature"
+        "Temperature", "Render%", "Compute%", "Copy%", "Video%", "VideoProc%", "Encode%", "Decode%", "MemActive%", "ClockMHz", "PowerW",
+        "Dedicated", "Shared", "Adapter ID", "Memory kind", "Availability"
     ];
     private readonly bool[] _networkColumns = [true, true, true, true, true, true, true];
-    private readonly bool[] _gpuColumns = [true, true, true, true, true, true];
+    private readonly bool[] _gpuColumns = Enumerable.Repeat(true, Enum.GetValues<GpuColumn>().Length).ToArray();
+    private static readonly int[] GpuDisplayOrder = [0, 2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 3, 4, 5, 1, 18, 19, 20];
+    private int _firstGpuColumn;
+    internal int FirstGpuColumn => _firstGpuColumn;
+    private IEnumerable<int> DetailColumns(bool network) {
+        var columns = (network ? Enumerable.Range(0, NetworkColumnNames.Length) : GpuDisplayOrder)
+            .Where(index => network ? _networkColumns[index] : _gpuColumns[index] && AvailableColumn((GpuColumn)index)).ToArray();
+        if (!network) { _firstGpuColumn = Math.Clamp(_firstGpuColumn, 0, Math.Max(0, columns.Length - 1)); }
+        return columns.Skip(network ? 0 : _firstGpuColumn);
+    }
+    private void ScrollGpuColumns(int delta) {
+        int count = GpuDisplayOrder.Count(index => _gpuColumns[index] && AvailableColumn((GpuColumn)index));
+        _firstGpuColumn = Math.Clamp(_firstGpuColumn + delta, 0, Math.Max(0, count - 1));
+        Dirty = true;
+        Refresh();
+    }
     private readonly List<ProcessColumn> _pickerProcesses = [];
     private readonly List<GpuColumn> _pickerGpu = [];
     private CollectorCapabilities? _pickerCapabilities;

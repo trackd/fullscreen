@@ -4,6 +4,7 @@ using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Layout;
+using XenoAtom.Terminal.UI.Styling;
 
 namespace fullscreen.Charts;
 
@@ -35,6 +36,8 @@ public partial class Chart {
         VerticalAlignment = Align.Stretch
     };
     private ChartSelection? _hoverPoint;
+    internal bool FollowLiveHover { get; init; }
+    private int _hoverX, _hoverY;
     private readonly record struct InspectionKey(long Data, GraphKind Kind, double? Minimum, double? Maximum, ChartViewKey View);
     private InspectionKey InspectionVersion => new(DataVersion, GraphKind, Minimum, Maximum, ViewVersion);
     private InspectionKey _hoverVersion;
@@ -61,8 +64,18 @@ public partial class Chart {
             enabled &= visual.IsEnabled && visual.IsVisible;
         }
         _inspection.IsVisible = enabled;
-        if (_hoverPoint is not null && (_hoverVersion != InspectionVersion || !enabled)) {
-            ClearInspection();
+        if (_hoverPoint is not null) {
+            if (!enabled || _hoverBounds != PlotBounds) {
+                ClearInspection();
+            }
+            else if (_hoverVersion != InspectionVersion) {
+                if (FollowLiveHover && _inspection.IsHovered) {
+                    InspectPointer(_hoverX, _hoverY, refresh: true);
+                }
+                else {
+                    ClearInspection();
+                }
+            }
         }
         _inspection.Measure(new Size(constraints.MaxWidth, constraints.MaxHeight));
     }
@@ -72,7 +85,7 @@ public partial class Chart {
         _inspection.TooltipContent = null;
     }
 
-    private void InspectPointer(int x, int y) {
+    private void InspectPointer(int x, int y, bool refresh = false) {
         if (!ShowTooltips && GraphKind != GraphKind.Flamegraph) {
             return;
         }
@@ -92,18 +105,47 @@ public partial class Chart {
         if (point == _hoverPoint && _hoverVersion == InspectionVersion && _hoverBounds == PlotBounds) {
             return;
         }
-        // Reattach to reschedule the native delay when the target changes without leaving the plot.
-        DetachChild(_inspection);
-        AttachChild(_inspection);
+        _hoverX = x;
+        _hoverY = y;
         _hoverPoint = point;
         _hoverVersion = InspectionVersion;
         _hoverBounds = PlotBounds;
-        _inspection.TooltipContent = new Paragraph(InspectionText(point)) {
-            Wrap = true,
-            MaxWidth = Math.Max(1, Math.Min(72, Bounds.Width - 2))
-        };
-        _inspection.OffsetX = Math.Max(0, x - PlotBounds.X);
-        _inspection.OffsetY = y - PlotBounds.Bottom + 1;
+        if (refresh && _inspection.TooltipContent is Paragraph tooltip) {
+            tooltip.Text = InspectionText(point);
+            PositionInspection(tooltip, x, y);
+            return;
+        }
+        // Reattach to reschedule the native delay when the pointer moves to another target.
+        DetachChild(_inspection);
+        AttachChild(_inspection);
+        // Detaching the inspection anchor clears its previous tooltip.
+        _hoverPoint = point;
+        var content = new Paragraph(InspectionText(point)) { Wrap = true };
+        PositionInspection(content, x, y);
+    }
+
+    private void PositionInspection(Paragraph content, int x, int y) {
+        var style = _inspection.GetStyle<TooltipStyle>();
+        int frameWidth = style.Padding.Horizontal + 2, frameHeight = style.Padding.Vertical + 2;
+        var bounds = PlotBounds;
+        if (bounds.Width <= frameWidth || bounds.Height <= frameHeight) {
+            ClearInspection();
+            return;
+        }
+        int width = Math.Min(72, Math.Min(bounds.Width, style.MaxWidth ?? bounds.Width) - frameWidth);
+        content.MaxWidth = Math.Max(1, width);
+        content.MaxHeight = bounds.Height - frameHeight;
+        content.Measure(new LayoutConstraints(0, content.MaxWidth, 0, content.MaxHeight));
+        int popupWidth = content.DesiredSize.Width + frameWidth;
+        int popupHeight = content.DesiredSize.Height + frameHeight;
+        // Anchor to the measured popup position; native viewport clamping alone
+        // cannot keep a tooltip inside a chart embedded in a larger terminal.
+        _inspection.Content!.Margin = new Thickness(
+            Math.Clamp(x + 1, bounds.X, bounds.Right - popupWidth) - bounds.X,
+            Math.Clamp(y + 1, bounds.Y, bounds.Bottom - popupHeight) - bounds.Y, 0, 0);
+        _inspection.OffsetX = 0;
+        _inspection.OffsetY = 0;
+        _inspection.TooltipContent = content;
     }
 
     private string InspectionText(ChartSelection point) {

@@ -14,6 +14,34 @@ namespace fullscreen.Tests;
 [DoNotParallelize]
 public sealed class ChartFeatureTests {
     [TestMethod]
+    public void SvgExportPreservesAbsolutePlotBandColors() {
+        var chart = new Chart([10, 100, 200]) {
+            GraphKind = GraphKind.Line,
+            Minimum = 0,
+            Maximum = 250,
+            PlotBands = [
+                new(0, Color.Rgb(31, 167, 99)),
+                new(50, Color.Rgb(216, 150, 20)),
+                new(150, Color.Rgb(229, 77, 85))
+            ]
+        };
+        var svg = XDocument.Parse(chart.ExportSvg(80, 20));
+        var fills = svg.Descendants().Attributes("fill").Select(attribute => attribute.Value).ToHashSet();
+        foreach (var band in chart.PlotBands) {
+            var color = Color.Mix(chart.Palette.Background, band.Tint, .25f).ToRgb();
+            Assert.Contains($"rgb({color.R},{color.G},{color.B})", fills);
+        }
+        var restored = new Chart();
+        restored.ImportSettings(chart.ExportSettings());
+        CollectionAssert.AreEqual(chart.PlotBands, restored.PlotBands);
+        string before = restored.ExportSettings();
+        Assert.ThrowsExactly<ArgumentException>(() => restored.ApplySettings(restored.CaptureSettings() with {
+            PlotBands = [new(50, Color.Rgb(0, 255, 0)), new(10, Color.Rgb(255, 0, 0))]
+        }));
+        Assert.AreEqual(before, restored.ExportSettings(), "Rejected settings must leave the chart unchanged.");
+    }
+
+    [TestMethod]
     public async Task WheelScrollsParentUnlessZoomIsExplicitlyEnabledAndSettingsPreserveOptIn() {
         var chart = new Chart([10, 30, 20]) { MinHeight = 12, MaxHeight = 12, Title = "Chart" };
         var scroll = new ScrollViewer(new VStack(chart, new TextBlock("More content") { MinHeight = 40, MaxHeight = 40 })) {
@@ -387,8 +415,13 @@ public sealed class ChartFeatureTests {
         series.UpperValues.Add(6);
         chart.Series.Add(series);
         string text = string.Join('\n', VisualSnapshotRenderer.Render(chart, 40, 12).ToMarkupLines());
-        if (kind == GraphKind.ErrorBars) { Assert.Contains("│", text); Assert.Contains("─", text); }
-        else { Assert.Contains("█", text); }
+        if (kind == GraphKind.ErrorBars) {
+            Assert.Contains("│", text);
+            Assert.Contains("─", text);
+        }
+        else {
+            Assert.Contains("█", text);
+        }
         Assert.IsFalse(chart.UseSixel);
     }
     [TestMethod]

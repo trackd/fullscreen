@@ -71,6 +71,19 @@ Describe 'Parameter binding and passive completion' {
         { & $Call } | Should -Throw -ExceptionType ([Management.Automation.ParameterBindingException])
     }
 
+    It 'Requires explicit sudo opt in before invoking a sudo callback' {
+        foreach ($call in @(
+            { Show-SystemMonitor -SudoPrompt { throw 'Callback must not run' } -ErrorAction Stop }
+            { Show-SystemMonitor -Sudo:$false -SudoPrompt { throw 'Callback must not run' } -ErrorAction Stop }
+        )) {
+            $failure = $null
+            try { & $call }
+            catch { $failure = $_ }
+            $failure | Should -Not -BeNullOrEmpty
+            $failure.FullyQualifiedErrorId | Should -Match '^SudoPromptRequiresSudo'
+        }
+    }
+
     It 'Still transforms the legacy Overview view before validating Theme' {
         { Show-SystemMonitor -View Overview -Theme @{ Accent = 'invalid' } -ErrorAction Stop } | Should -Throw "*parameter 'Theme'*"
     }

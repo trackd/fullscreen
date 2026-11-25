@@ -38,26 +38,14 @@ ftui
 
 ## DESCRIPTION
 
-Run a custom terminal app from a layout created with New-TuiDefinition,
-Export-TuiDefinition or Show-TuiDesigner. Layouts contain data, not executable
-handlers; behavior comes from the script blocks passed to this command.
+Runs a validated TUI definition with shared state and optional event/tick handlers.
+Bound controls read and update the supplied state. Handlers can request closure
+and return a result; see the callback parameters for their contracts.
 
-Controls bind to the shared State dictionary. Inputs update their bound values;
-lists, grids and charts publish selections through SelectionBind. Replace bound
-collections to refresh their contents. Get-TuiControl describes each control's
-properties, options and events.
-
-Charts prefer Sixel when supported and otherwise render terminal cells. Wheel zoom
-and keyboard zoom/pan are disabled by default; set `EnableZoom = $true` on a Chart
-to opt in, including scalar-bound history charts. Embedded charts otherwise leave
-the wheel to their surrounding scroll viewer.
-Single-series Bars and HorizontalBars automatically color each category and show
-matching category legends. Grouped and stacked bars retain per-series colors;
-explicit series colors take precedence.
-
-Handlers run on the UI thread and can update State or request that the app close.
-Keep callbacks short, avoid host output, and use background jobs for long work.
-When the app closes, the command returns State, Value, Cancelled and LastEvent.
+Callbacks run on the UI thread. Keep them short, avoid host output, and use
+background jobs for sustained work. Runtime objects belong in State rather than
+saved layout files. See the custom TUI guide for commands, trees, linked charts,
+styling and export workflows.
 
 ## EXAMPLES
 
@@ -371,3 +359,5 @@ A native PowerShell object with State, Value, Cancelled and LastEvent. Value pre
 ## RELATED LINKS
 
 - [fullscreen documentation](https://github.com/trackd/fullscreen)
+
+- [Custom TUI guide](https://github.com/trackd/fullscreen/blob/main/docs/guides/custom-tuis.md)

@@ -14,28 +14,39 @@ public sealed class MonitorCapabilityTests {
             .GetValue(surface)!)];
 
     [TestMethod]
-    [DataRow("Linux")]
     [DataRow("macOS")]
-    public void UnixProcessColumnsExcludeUnimplementedGpuAndNetworkButKeepDiskAndIdentity(string platform) {
+    public void AppleProcessColumnsExposeGpuTimeAndGraphicsFootprintWithoutNetwork(string platform) {
         var supported = Detect(platform);
-        Assert.AreEqual(CollectorCapabilities.None, supported & (CollectorCapabilities.ProcessNetwork | CollectorCapabilities.ProcessGraphics));
+        Assert.AreEqual(CollectorCapabilities.None, supported & CollectorCapabilities.ProcessNetwork);
         Assert.AreEqual(CollectorCapabilities.ProcessDisk, supported & CollectorCapabilities.ProcessDisk);
         var surface = new MonitorSurface { Minimal = true, Frame = new CollectorFrame { Platform = platform, Capabilities = supported } };
         surface.ColumnSettings.Configure(Enum.GetValues<ProcessColumn>(), null, false);
         var columns = Available(surface);
-        foreach (var column in new[] { ProcessColumn.Network, ProcessColumn.Gpu, ProcessColumn.GpuMemory }) {
+        foreach (var column in new[] { ProcessColumn.Network }) {
             Assert.DoesNotContain(column, columns);
         }
-        foreach (var column in new[] { ProcessColumn.Disk, ProcessColumn.ParentId, ProcessColumn.UserName, ProcessColumn.Status }) {
+        foreach (var column in new[] { ProcessColumn.Disk, ProcessColumn.ParentId, ProcessColumn.UserName, ProcessColumn.Status, ProcessColumn.Gpu, ProcessColumn.GpuMemory }) {
             Assert.Contains(column, columns);
         }
-        Assert.AreEqual(CollectorMetrics.None, surface.RequiredMetrics & (CollectorMetrics.ProcessNetwork | CollectorMetrics.ProcessGpu));
+        Assert.AreEqual(CollectorMetrics.ProcessGpu, surface.RequiredMetrics & (CollectorMetrics.ProcessNetwork | CollectorMetrics.ProcessGpu));
         Assert.IsTrue(surface.ColumnSettings.Contains(ProcessColumn.Network), "Unsupported selections must not be erased from configuration.");
         surface.OpenColumns();
         string picker = string.Join("\n", VisualSnapshotRenderer.Render(surface, 80, 40).ToMarkupLines());
-        Assert.DoesNotContain("GpuMemory", picker);
+        Assert.Contains("GpuMemory", picker);
         Assert.DoesNotContain("Network", picker);
         Assert.Contains("Disk", picker);
+    }
+
+    [TestMethod]
+    public void LinuxExposesDrmProcessGpuColumnsWithoutClaimingNetworkSupport() {
+        var supported = Detect("Linux");
+        Assert.AreEqual(CollectorCapabilities.ProcessGraphics, supported & CollectorCapabilities.ProcessGraphics);
+        Assert.AreEqual(CollectorCapabilities.None, supported & CollectorCapabilities.ProcessNetwork);
+        var surface = new MonitorSurface { Frame = new CollectorFrame { Platform = "Linux", Capabilities = supported } };
+        surface.ColumnSettings.Configure([ProcessColumn.Name, ProcessColumn.Gpu, ProcessColumn.GpuMemory], null, false);
+        CollectionAssert.Contains(Available(surface), ProcessColumn.Gpu);
+        CollectionAssert.Contains(Available(surface), ProcessColumn.GpuMemory);
+        Assert.AreEqual(CollectorMetrics.ProcessGpu, surface.RequiredMetrics & CollectorMetrics.ProcessGpu);
     }
 
     [TestMethod]
@@ -80,7 +91,7 @@ public sealed class MonitorCapabilityTests {
         Assert.DoesNotContain("GpuMemory", picker, "An open chooser must update when the target reports a missing counter provider.");
         frame.Capabilities = Detect("Linux");
         surface.SetFrame(frame);
-        CollectionAssert.AreEqual(new[] { ProcessColumn.Name }, Available(surface));
+        CollectionAssert.AreEqual(new[] { ProcessColumn.Name, ProcessColumn.Gpu, ProcessColumn.GpuMemory }, Available(surface));
         Assert.IsTrue(surface.ColumnSettings.Contains(ProcessColumn.Network));
     }
 
@@ -112,6 +123,19 @@ public sealed class MonitorCapabilityTests {
         Assert.IsTrue(surface.IsColumnVisible(GpuColumn.Device));
         Assert.IsTrue(surface.IsColumnVisible(GpuColumn.Provider));
         Assert.IsFalse(surface.IsColumnVisible(GpuColumn.Utilization));
+    }
+
+    [TestMethod]
+    public void WindowsGpuMemoryCanExposeAnAdapterBeforeUtilizationWarmsUp() {
+        Assert.IsNull(GpuSampler.WindowsDevice(null, null));
+        var warming = GpuSampler.WindowsDevice(null, 1024);
+        Assert.IsNotNull(warming);
+        Assert.IsNull(warming.Value.Utilization);
+        Assert.AreEqual(1024UL, warming.Value.UsedMemory);
+        var idle = GpuSampler.WindowsDevice(0, 0);
+        Assert.IsNotNull(idle);
+        Assert.AreEqual(0d, idle.Value.Utilization);
+        Assert.AreEqual(0UL, idle.Value.UsedMemory);
     }
 
     [TestMethod]

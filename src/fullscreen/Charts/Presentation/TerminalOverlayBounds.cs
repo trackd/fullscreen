@@ -15,6 +15,9 @@ internal static class TerminalOverlayBounds {
     internal static bool DebugVisible(TerminalApp app) =>
         ReadVisible(app);
     internal static Rectangle Window(Visual visual) {
+        if (visual is Hosting.TerminalDiagnosticsOverlay diagnostics) {
+            return diagnostics.PaintedBounds;
+        }
         if (visual is Popup { Content: { } popup }) {
             return popup.Bounds;
         }

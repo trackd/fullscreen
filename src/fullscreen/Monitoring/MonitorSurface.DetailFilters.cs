@@ -46,6 +46,18 @@ public sealed partial class MonitorSurface {
             3 => row.UsedMemory,
             4 => row.TotalMemory,
             5 => row.Temperature,
+            6 => row.Activity.Render,
+            7 => row.Activity.Compute,
+            8 => row.Activity.Copy,
+            9 => row.Activity.Video,
+            10 => row.Activity.VideoEnhance,
+            11 => row.Activity.Encode,
+            12 => row.Activity.Decode,
+            13 => row.Activity.Memory,
+            14 => row.ClockMHz,
+            15 => row.PowerWatts,
+            16 => row.DedicatedMemory,
+            17 => row.SharedMemory,
             _ => null
         };
     private static bool DetailNumberMatches(
@@ -76,8 +88,9 @@ public sealed partial class MonitorSurface {
         }
 
         foreach (var pair in _gpuFilters) {
-            if (pair.Key < 2) {
-                if (!string.Equals(pair.Value, pair.Key == 0 ? row.Name : row.Provider, StringComparison.OrdinalIgnoreCase)) {
+            if (pair.Key < 2 || pair.Key is 18 or 19 or 20) {
+                string? text = pair.Key switch { 0 => row.Name, 1 => row.Provider, 18 => row.Id ?? "—", 19 => row.MemoryKind ?? "—", _ => row.Status ?? "No provider detail" };
+                if (!string.Equals(pair.Value, text, StringComparison.OrdinalIgnoreCase)) {
                     return false;
                 }
             }
@@ -91,14 +104,9 @@ public sealed partial class MonitorSurface {
 
     private void OpenDetailHeaderMenu(PointerEventArgs e) {
         bool network = View == MonitorView.Network;
-        var enabled = network ? _networkColumns : _gpuColumns;
         var names = network ? NetworkColumnNames : GpuColumnNames;
         int x = 1, column = -1;
-        for (int i = 0; i < names.Length; i++) {
-            if (!enabled[i] || !network && !AvailableColumn((GpuColumn)i)) {
-                continue;
-            }
-
+        foreach (int i in DetailColumns(network)) {
             int width = DetailColumnWidth(network, i);
             if (e.LocalX >= x && e.LocalX < x + width) {
                 column = i;
@@ -123,7 +131,7 @@ public sealed partial class MonitorSurface {
                 Refresh();
             })
         };
-        if (column == 0 || !network && column == 1) {
+        if (column == 0 || !network && column is 1 or 18 or 19 or 20) {
             var values = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             if (network) {
                 foreach (ref readonly var row in Frame.Networks.AsSpan(0, Frame.NetworkCount)) {
@@ -132,7 +140,7 @@ public sealed partial class MonitorSurface {
             }
             else {
                 foreach (ref readonly var row in Frame.Gpus.AsSpan(0, Frame.GpuCount)) {
-                    values.Add(column == 0 ? row.Name : row.Provider);
+                    values.Add(column switch { 0 => row.Name, 1 => row.Provider, 18 => row.Id ?? "—", 19 => row.MemoryKind ?? "—", _ => row.Status ?? "No provider detail" });
                 }
             }
 
@@ -153,5 +161,5 @@ public sealed partial class MonitorSurface {
         bool network,
         int column
     ) =>
-        column == 0 ? (Bounds.Width >= 100 ? 27 : 18) : !network && column == 1 ? 19 : 15;
+        column == 0 ? (Bounds.Width >= 100 ? 27 : 18) : !network && column is 1 or 18 or 19 or 20 ? 35 : !network && column >= 6 ? 12 : 15;
 }

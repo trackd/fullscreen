@@ -176,6 +176,15 @@ if ($DefinitionOnly.IsPresent) {
             if (node.SelectionBind.Length > 0) {
                 script.Append("#   ").Append(StateKey(node.SelectionBind)).Append(" <- ").Append(node.Id).Append(" selection: ").AppendLine(node.Type == "FileBrowser" ? "selected file path string or $null." : node.Type == "FLogView" ? "original selected log entry or $null." : "original selected row object or $null.");
             }
+            if (node.SeriesCountBind.Length > 0) {
+                script.Append("#   ").Append(StateKey(node.SeriesCountBind)).Append(" -> ").Append(node.Id).AppendLine(": number of leading YProperty entries to plot; mutable rows are still sampled unless DataVersionBind is set.");
+            }
+            if (node.HighlightSeriesBind.Length > 0) {
+                script.Append("#   ").Append(StateKey(node.HighlightSeriesBind)).Append(" -> ").Append(node.Id).AppendLine(": YProperty name to highlight; use an empty string to clear highlighting.");
+            }
+            if (node.DataVersionBind.Length > 0) {
+                script.Append("#   ").Append(StateKey(node.DataVersionBind)).Append(" -> ").Append(node.Id).AppendLine(": revision value; change it after editing bound rows in place.");
+            }
         }
 
         script.AppendLine("""
@@ -202,12 +211,22 @@ $handler = @{
 """);
         foreach (var node in Nodes(document.Root)) {
             foreach (string kind in TuiControlCatalog.Describe(node.Type).Events) {
+                if (kind == "Expand" && !node.Lazy) {
+                    continue;
+                }
                 script.Append("        '").Append(node.Id).Append(':').Append(kind).AppendLine("' = {");
                 script.AppendLine("            param($tuiEvent, $state)");
                 script.Append("            # $tuiEvent.Value: ").AppendLine(EventDescription(node, kind));
                 script.AppendLine(kind == "Click" ? "            # Handle this button. Example: return @{ Close = $true; Value = $state }" : "            # Inspect $tuiEvent.Value and update bound $state values here.");
                 script.AppendLine("        }");
             }
+        }
+
+        foreach (var command in document.Commands) {
+            script.Append("        '").Append(command.Id).AppendLine(":Command' = {");
+            script.AppendLine("            param($tuiEvent, $state)");
+            script.AppendLine("            # One shared handler for keyboard, menu, command bar and palette invocation.");
+            script.AppendLine("        }");
         }
 
         script.AppendLine("""
@@ -275,6 +294,8 @@ if (-not $result.Cancelled) {
     private static string EventDescription(TuiNode node, string kind) =>
         kind switch {
             "Click" => node.Type is "MenuBar" or "CommandBar" or "CommandPalette" ? "activated command label string." : "Close flag ($true or $false). Read other controls' values from $state.",
+            "Expand" => "original lazy tree row. Return @{ Value = @(...child rows...) }; null/empty completes a leaf. Results are cached until the root collection is replaced.",
+            "Range" => "selected interval with MinimumX/MaximumX, or null when cleared; RangeBind is updated before this callback.",
             "Change" => node.Type is "CheckBox" or "Switch" or "RadioButton" or "Collapsible" ? "$true or $false (new value)." : "new typed input value; see the STATE REFERENCE above.",
             "Selection" when node.Type == "UserList" => "UserViewRow containing typed Logins and an optional Process.",
             "Selection" when node.Type == "SelectionList" => "array of checked strings.",

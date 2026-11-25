@@ -26,8 +26,8 @@ Describe 'Cmdlet help' {
             }
         }
     }
-    It 'Generates complete chart input in the error bounds and column line examples without opening a host' {
-        $text = Get-Content (Join-Path $PSScriptRoot '../docs/en-US/Out-Chart.md') -Raw
+    It 'Generates complete chart input in the cookbook error bounds and column line examples without opening a host' {
+        $text = Get-Content (Join-Path $PSScriptRoot '../docs/guides/charts.md') -Raw
         foreach ($kind in 'ErrorBars', 'ColumnLine') {
             $block = @([regex]::Matches($text, '(?ms)^```powershell\s*\r?\n(.*?)^```') |
                 Where-Object { $_.Groups[1].Value -match "-GraphType $kind\b" })

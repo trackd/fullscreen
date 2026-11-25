@@ -28,7 +28,15 @@ public enum ProcessColumn {
     /// <summary>Displays the disk throughput in bytes per second.</summary>
     Disk,
     /// <summary>Displays the network throughput in bytes per second.</summary>
-    Network
+    Network,
+    /// <summary>Dedicated GPU allocation bytes.</summary>
+    GpuDedicatedMemory,
+    /// <summary>Shared system GPU allocation bytes.</summary>
+    GpuSharedMemory,
+    /// <summary>Reported adapter identities.</summary>
+    GpuAdapter,
+    /// <summary>Reported active GPU engine classes.</summary>
+    GpuEngine
 }
 
 /// <summary>Ordered per-monitor selection with horizontally accessible overflow columns.</summary>

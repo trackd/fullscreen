@@ -33,25 +33,16 @@ fobject
 
 ## DESCRIPTION
 
-Collects pipeline input and opens it in an interactive table.
-Formatted uses the object's normal PowerShell table formatting. Inspect shows
-the selected object's property kinds, short types, values and highlighted method declarations,
-or collection items and dictionary entries. JSON shows a highlighted snapshot of the current object.
-Browsing methods never invokes them. Circular references,
-depth limits and failing properties are marked rather than causing errors. Switch
-tabs with Tab, Shift+Tab, 1-3 or the tab headers.
+Collects pipeline objects and opens an interactive table with Formatted, Inspect
+and JSON views. Enter or O browses children; I opens details. Press ? for controls.
+Column selection, sorting, grouping and filters help explore large collections.
 
-Enter or I inspects the selected item, and Backspace, Escape or Back returns to
-the parent with its selection, filter and sort restored. Filter with / using
-plain text, wildcard: or regex: patterns; sort by clicking a column or with S,
-and reverse with R. G groups, C chooses columns, Space marks rows, and M, F10 or
-right-click opens the menu. In JSON, / searches and Enter or N finds the next
-match. Drag or use Shift+arrows to select JSON text, Ctrl+A selects all, and Ctrl+C copies.
-Values are colored by type, and ANSI colors in displayed values are kept.
+With PassThru, Enter in the root Formatted table returns marked objects or the
+current selection; Q cancels. O still browses in that mode. Displaying and
+serializing objects runs their property getters, which can execute custom code.
+Browsing method declarations does not invoke them.
 
-With PassThru, Enter in the root Formatted table returns the marked objects or the current selection; Q
-cancels. Displaying and serializing objects runs their property getters, which can
-execute custom code.
+See the object exploration guide for navigation, filtering and JSON folding.
 
 ## EXAMPLES
 
@@ -452,3 +443,5 @@ With PassThru, the selected original input objects. Without PassThru, no objects
 ## RELATED LINKS
 
 - [fullscreen documentation](https://github.com/trackd/fullscreen)
+
+- [Object exploration](https://github.com/trackd/fullscreen/blob/main/docs/guides/objects.md)

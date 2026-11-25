@@ -24,7 +24,7 @@ internal sealed class EtwIoCounters(bool disk, bool network) {
     }
 
     private struct Bytes {
-        internal long Birth, Disk, Network;
+        internal long Birth, Disk, Network, DiskRead, DiskWrite;
     }
 
     private readonly record struct Thread(int ProcessId, long ProcessBirth, long Birth, long End = 0);
@@ -95,7 +95,7 @@ internal sealed class EtwIoCounters(bool disk, bool network) {
                     pid = (uint)thread.ProcessId;
                 }
 
-                Add(pid, ByteNumbers.UInt32(payload[8..]), true, timestamp);
+                Add(pid, ByteNumbers.UInt32(payload[8..]), true, timestamp, opcode == 10);
             }
             else {
                 if (opcode is not (1 or 2 or 3 or 4)) {
@@ -138,13 +138,15 @@ internal sealed class EtwIoCounters(bool disk, bool network) {
         }
     }
 
-    private void Add(uint pid, uint size, bool diskEvent, long timestamp) {
+    private void Add(uint pid, uint size, bool diskEvent, long timestamp, bool read = false) {
         if (pid > int.MaxValue || !_bytes.TryGetValue((int)pid, out var value) || timestamp < value.Birth) {
             return;
         }
 
         if (diskEvent) {
             value.Disk = checked(value.Disk + size);
+            if (read) { value.DiskRead = checked(value.DiskRead + size); }
+            else { value.DiskWrite = checked(value.DiskWrite + size); }
         }
         else {
             value.Network = checked(value.Network + size);
@@ -184,6 +186,8 @@ internal sealed class EtwIoCounters(bool disk, bool network) {
                 bool known = _bytes.TryGetValue(row.Id, out var value) && value.Birth == row.StartTimeTicks && value.Birth > 0;
                 rows[i] = row with {
                     DiskBytesPerSecond = disk && known && complete && !_diskIncomplete ? value.Disk / seconds : null,
+                    DiskReadBytesPerSecond = disk && known && complete && !_diskIncomplete ? value.DiskRead / seconds : null,
+                    DiskWriteBytesPerSecond = disk && known && complete && !_diskIncomplete ? value.DiskWrite / seconds : null,
                     NetworkBytesPerSecond = network && known && complete && !_networkIncomplete ? value.Network / seconds : null
                 };
                 _bytes[row.Id] = new Bytes {

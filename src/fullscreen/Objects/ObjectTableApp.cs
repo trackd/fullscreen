@@ -259,8 +259,10 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
         _objects = objects;
         _options = options;
         Surface = new(new TableModel(["Value"]), options.Title) {
+            ColumnFiltering = true,
+            EnableJsonFolding = true,
             Tabs = ["Formatted", "Inspect", "JSON"],
-            ExtraHelp = "Tab / 1–3 views · M/F10 menu · Backspace/Esc back · G group"
+            ExtraHelp = "F column filters · right-click header · Tab / 1–3 views · M/F10 menu · Backspace/Esc back · G group"
         };
         SwitchView(options.View);
         Surface.TabRequested += index => {
@@ -273,12 +275,19 @@ public sealed partial class ObjectTableApp : IFullscreenApp {
             }
         };
         Surface.InspectRequested += InspectSelected;
+        Surface.BrowseRequested += BrowseSelected;
         Surface.BackRequested = GoBack;
         Surface.ContextRequested += ShowMenu;
-        Surface.PriorityShortcuts = ["m", "M"];
+        Surface.PriorityShortcuts = ["m", "M", "f", "F", "o", "O"];
         Surface.Shortcut += key => {
             if (key is "menu" or "m" or "M") {
                 ShowMenu(Surface.Bounds.X + 2, Surface.Bounds.Y + 3);
+            }
+            else if (key is "f" or "F" && View != ObjectView.Json) {
+                Surface.ShowColumnFilterMenu();
+            }
+            else if (key is "o" or "O" && View != ObjectView.Json && Surface.Model.Current is { } row) {
+                BrowseSelected(row);
             }
         };
         UpdateNavigation();

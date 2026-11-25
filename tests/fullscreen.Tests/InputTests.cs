@@ -1,10 +1,10 @@
+using System.Diagnostics;
+using System.Reflection;
 using fullscreen.Monitoring;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Hosting;
-using System.Reflection;
-using System.Diagnostics;
 
 namespace fullscreen.Tests;
 
@@ -38,10 +38,10 @@ public sealed class InputTests {
                 Assert.IsTrue(SpinWait.SpinUntil(() => { Tick(); return observed?.Invoke() ?? true; }, 2000), "Input was not delivered by the framework reader.");
             }
             Tick();
-            Assert.Contains("5 Users", backend.GetOutText());
-            Assert.Contains("6 Dashboard", backend.GetOutText());
+            Assert.Contains("6 Users", backend.GetOutText());
+            Assert.Contains("7 Dashboard", backend.GetOutText());
             Assert.AreEqual(MonitorView.Processes, surface.View);
-            Send(new TerminalTextEvent { Text = "6" }, () => surface.View == MonitorView.Dashboard);
+            Send(new TerminalTextEvent { Text = "7" }, () => surface.View == MonitorView.Dashboard);
             Assert.AreEqual(MonitorView.Dashboard, surface.View);
             Send(new TerminalTextEvent { Text = "g" }, () => surface.GraphType == Charts.GraphKind.Bars);
             Assert.AreEqual(Charts.GraphKind.Bars, surface.GraphType);
@@ -49,14 +49,14 @@ public sealed class InputTests {
             Assert.AreEqual(MonitorView.Processes, surface.View);
             Send(new TerminalKeyEvent { Key = TerminalKey.Down }, () => surface.Model.SelectedId == 2);
             Assert.AreEqual(2, surface.Model.SelectedId);
-            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Left, X = 18, Y = 10 }, () => surface.Model.Sort == ProcessSort.Memory);
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Left, X = 18, Y = 13 }, () => surface.Model.Sort == ProcessSort.Memory);
             Assert.AreEqual(ProcessSort.Memory, surface.Model.Sort);
-            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Left, X = 18, Y = 10 });
-            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Left, X = 8, Y = 10 }, () => backend.GetOutText().Contains("Clear this filter", StringComparison.Ordinal));
-            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Left, X = 8, Y = 10 });
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Left, X = 18, Y = 13 });
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Left, X = 8, Y = 13 }, () => backend.GetOutText().Contains("Clear this filter", StringComparison.Ordinal));
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Left, X = 8, Y = 13 });
             Send(new TerminalKeyEvent { Key = TerminalKey.Escape }, () => surface.HasFocus);
-            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Right, X = 10, Y = 12 }, () => backend.GetOutText().Contains("Filter this name", StringComparison.Ordinal));
-            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Right, X = 10, Y = 12 });
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Down, Button = TerminalMouseButton.Right, X = 10, Y = 15 }, () => backend.GetOutText().Contains("Filter this name", StringComparison.Ordinal));
+            Send(new TerminalMouseEvent { Kind = TerminalMouseKind.Up, Button = TerminalMouseButton.Right, X = 10, Y = 15 });
             Send(new TerminalKeyEvent { Key = TerminalKey.Escape }, () => surface.HasFocus);
             Send(new TerminalTextEvent { Text = "t" }, () => surface.Model.Tree);
             Send(new TerminalTextEvent { Text = "c" }, () => surface.ColumnsOpen);

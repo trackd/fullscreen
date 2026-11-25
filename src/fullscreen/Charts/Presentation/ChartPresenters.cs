@@ -32,6 +32,8 @@ public static class ChartPresenters {
             ? TerminalProbeResult.Unknown
             : TerminalFeatureProbe.Get(terminal, cancellationToken);
         var capabilities = evidence.Completed ? evidence.Capabilities : terminal.Graphics.Capabilities;
+        bool fallbackMetrics = (metrics ?? evidence.Metrics) is not { CellPixelWidth: > 0, CellPixelHeight: > 0 }
+            && capabilities.PixelMetrics is not { CellPixelWidth: > 0, CellPixelHeight: > 0 };
         metrics = FullscreenHost.ResolveChartMetrics(
             capabilities,
             metrics ?? evidence.Metrics ?? terminal.Graphics.Capabilities.PixelMetrics,
@@ -42,7 +44,7 @@ public static class ChartPresenters {
             // ChartRenderer.DrcsUniversal => new DrcsChartPresenter(capabilities, DrcsFontScope.Universal),
             ChartRenderer.Regis when evidence.Regis => new RegisChartPresenterPrototype(terminal, evidence),
             ChartRenderer.Auto or ChartRenderer.Sixel when SixelChartPresenter.SupportsSixel(capabilities)
-                && metrics is { CellPixelWidth: > 0, CellPixelHeight: > 0 } value => new SixelChartPresenter(capabilities, value),
+                && metrics is { CellPixelWidth: > 0, CellPixelHeight: > 0 } value => new SixelChartPresenter(capabilities, value) { UsesFallbackMetrics = fallbackMetrics },
             _ => null
         };
         if (presenter is not null) {

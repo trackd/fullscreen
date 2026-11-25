@@ -37,7 +37,22 @@ public readonly record struct ProcessRow(
     string? Status = null,
     double? DiskBytesPerSecond = null,
     double? NetworkBytesPerSecond = null
-);
+) {
+    /// <summary>Attributed disk read throughput in bytes per second, when available.</summary>
+    public double? DiskReadBytesPerSecond { get; init; }
+    /// <summary>Attributed disk write throughput in bytes per second, when available.</summary>
+    public double? DiskWriteBytesPerSecond { get; init; }
+    /// <summary>Dedicated GPU allocation bytes, where independently reported.</summary>
+    public ulong? GpuDedicatedMemory { get; init; }
+    /// <summary>Shared system GPU allocation bytes, where independently reported.</summary>
+    public ulong? GpuSharedMemory { get; init; }
+    /// <summary>Immutable readings for each GPU associated with this process.</summary>
+    public ProcessGpuUsage[]? GpuDetails { get; init; }
+    /// <summary>Reported adapter identities for the process, or null when unattributed.</summary>
+    public string? GpuAdapter => GpuDetails is { Length: > 0 } details ? string.Join(", ", details.Select(item => item.AdapterId).Distinct()) : null;
+    /// <summary>Reported active engine classes; this does not classify the application's workload.</summary>
+    public string? GpuEngine => GpuProcessAccounting.EngineSummary(GpuDetails);
+}
 /// <summary>Single-writer sampler. Buffers are reused; consumers copy under the gate.</summary>
 public sealed partial class ProcessSampler : IDisposable {
     private readonly Dictionary<int, Entry> _previous = new(1024);
@@ -66,7 +81,7 @@ public sealed partial class ProcessSampler : IDisposable {
     /// <summary>Gets the source rows or requested terminal row count.</summary>
     public ArraySegment<ProcessRow> Rows => new(_rows, 0, _count);
 
-    private readonly record struct Entry(long CpuTicks, long StartTicks, string Name, int Generation, long? DiskBytes);
+    private readonly record struct Entry(long CpuTicks, long StartTicks, string Name, int Generation, long? DiskBytes, long? DiskRead, long? DiskWrite);
     /// <summary>Refreshes process counters and optional ownership and disk metrics.</summary>
     public void Sample() =>
         Sample(true, true);
@@ -130,14 +145,16 @@ public sealed partial class ProcessSampler : IDisposable {
                     uint? uid = null;
                     string? status = null;
                     long? diskBytes = null;
+                    long? diskRead = null, diskWrite = null;
                     if (Platform.IsMacOS()) {
                         if (_collectDisk) {
-                            diskBytes = ProcessOwnerReader.ReadMacDisk(id);
+                            diskBytes = ProcessOwnerReader.ReadMacDisk(id, out diskRead, out diskWrite);
                         }
 
                         ProcessOwnerReader.ReadMacIdentity(id, birth, out parent, out uid, out status);
                         if (!parent.HasValue) {
                             diskBytes = null;
+                            diskRead = diskWrite = null;
                         }
                     }
 
@@ -152,7 +169,9 @@ public sealed partial class ProcessSampler : IDisposable {
                         parent,
                         uid,
                         status,
-                        diskBytes
+                        diskBytes,
+                        diskRead,
+                        diskWrite
                     );
                 }
                 catch (Exception error) when (error is Win32Exception or InvalidOperationException or NotSupportedException
@@ -179,7 +198,9 @@ public sealed partial class ProcessSampler : IDisposable {
         int? parent = null,
         uint? uid = null,
         string? status = null,
-        long? diskBytes = null
+        long? diskBytes = null,
+        long? diskRead = null,
+        long? diskWrite = null
     ) {
         bool known = _previous.TryGetValue(id, out var previous) && previous.StartTicks == birth;
         double percent = known && seconds > 0 ? Compat.Clamp(
@@ -189,7 +210,8 @@ public sealed partial class ProcessSampler : IDisposable {
         ) : 0;
         double? diskRate = known && seconds > 0 && diskBytes.HasValue && previous.DiskBytes.HasValue
             && diskBytes >= previous.DiskBytes ? (diskBytes.Value - previous.DiskBytes.Value) / seconds : null;
-        _previous[id] = new(cpu, birth, name, _generation, diskBytes);
+        double? Rate(long? value, long? before) => known && seconds > 0 && value.HasValue && before.HasValue && value >= before ? (value - before) / seconds : null;
+        _previous[id] = new(cpu, birth, name, _generation, diskBytes, diskRead, diskWrite);
         if (_count == _rows.Length) {
             Array.Resize(ref _rows, _rows.Length * 2);
         }
@@ -206,7 +228,7 @@ public sealed partial class ProcessSampler : IDisposable {
             CpuTimeTicks: cpu,
             Status: status,
             DiskBytesPerSecond: diskRate
-        );
+        ) { DiskReadBytesPerSecond = Rate(diskRead, previous.DiskRead), DiskWriteBytesPerSecond = Rate(diskWrite, previous.DiskWrite) };
         TotalWorkingSet += memory;
     }
 
