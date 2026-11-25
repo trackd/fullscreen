@@ -2,8 +2,8 @@ using System.Text;
 
 namespace fullscreen.Monitoring;
 /// <summary>Versioned wire format. Only populated rows cross PSRP; no TUI dependencies or deserialized CLR types.</summary>
-public static class FrameCodec {
-    private const int Magic = 0x46534D38;
+public static partial class FrameCodec {
+    private const int Magic = 0x46534D3D;
     /// <summary>Serializes the active portions of a collector frame.</summary>
     /// <param name="frame">The reusable collector frame to encode or populate.</param>
     /// <returns>The encoded frame bytes.</returns>
@@ -41,6 +41,21 @@ public static class FrameCodec {
             writer.Write(row.Status ?? "");
             Write(writer, row.DiskBytesPerSecond);
             Write(writer, row.NetworkBytesPerSecond);
+            Write(writer, row.GpuDedicatedMemory);
+            Write(writer, row.GpuSharedMemory);
+            writer.Write(row.GpuDetails?.Length ?? 0);
+            foreach (var detail in row.GpuDetails ?? []) {
+                writer.Write(detail.AdapterId);
+                writer.Write(detail.Provider);
+                Write(writer, detail.Utilization);
+                Write(writer, detail.Memory);
+                WriteActivity(writer, detail.Activity);
+                writer.Write(detail.Status);
+                Write(writer, detail.DedicatedMemory);
+                Write(writer, detail.SharedMemory);
+                Write(writer, detail.SmActivity);
+                writer.Write(detail.MemoryKind ?? "");
+            }
         }
 
         writer.Write(frame.NetworkCount);
@@ -65,6 +80,22 @@ public static class FrameCodec {
             Write(writer, row.UsedMemory);
             Write(writer, row.TotalMemory);
             Write(writer, row.Temperature);
+            Write(writer, row.Activity.Render);
+            Write(writer, row.Activity.Compute);
+            Write(writer, row.Activity.Copy);
+            Write(writer, row.Activity.Video);
+            Write(writer, row.Activity.VideoEnhance);
+            Write(writer, row.Activity.Encode);
+            Write(writer, row.Activity.Decode);
+            Write(writer, row.Activity.Memory);
+            Write(writer, row.ClockMHz);
+            Write(writer, row.PowerWatts);
+            writer.Write(row.PowerScope ?? "");
+            writer.Write(row.Id ?? "");
+            Write(writer, row.DedicatedMemory);
+            Write(writer, row.SharedMemory);
+            writer.Write(row.MemoryKind ?? "");
+            writer.Write(row.Status ?? "");
         }
 
         writer.Write(frame.ServiceStatus);
@@ -98,6 +129,7 @@ public static class FrameCodec {
             writer.Write(row.Protocol);
         }
 
+        WriteResources(writer, frame);
         return stream.ToArray();
     }
 
@@ -111,7 +143,8 @@ public static class FrameCodec {
 
         using var stream = new MemoryStream(bytes, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
-        if (reader.ReadInt32() != Magic) {
+        int version = reader.ReadInt32();
+        if (version != Magic && version != 0x46534D3C && version != 0x46534D3B && version != 0x46534D3A && version != 0x46534D39 && version != 0x46534D38) {
             throw new InvalidDataException("Unsupported Fullscreen collector protocol.");
         }
 
@@ -161,6 +194,23 @@ public static class FrameCodec {
                 disk,
                 network
             );
+            if (version >= 0x46534D3A) {
+                frame.Processes[i] = frame.Processes[i] with { GpuDedicatedMemory = ReadUnsigned(reader), GpuSharedMemory = ReadUnsigned(reader) };
+            }
+            if (version >= 0x46534D3B) {
+                int count = ReadCount(reader, 256);
+                var details = count == 0 ? null : new ProcessGpuUsage[count];
+                for (int entry = 0; entry < count; entry++) {
+                    details![entry] = new(reader.ReadString(), reader.ReadString(), ReadDouble(reader), ReadUnsigned(reader),
+                        ReadActivity(reader), reader.ReadString()) {
+                        DedicatedMemory = ReadUnsigned(reader),
+                        SharedMemory = ReadUnsigned(reader),
+                        SmActivity = ReadDouble(reader),
+                        MemoryKind = reader.ReadString() is { Length: > 0 } kind ? kind : null
+                    };
+                }
+                frame.Processes[i] = frame.Processes[i] with { GpuDetails = details };
+            }
         }
 
         frame.NetworkCount = ReadCount(reader, 4096);
@@ -189,6 +239,24 @@ public static class FrameCodec {
                 ReadUnsigned(reader),
                 ReadDouble(reader)
             );
+            if (version != 0x46534D38) {
+                frame.Gpus[i] = frame.Gpus[i] with {
+                    Activity = new(ReadDouble(reader), ReadDouble(reader), ReadDouble(reader), ReadDouble(reader),
+                        ReadDouble(reader), ReadDouble(reader), ReadDouble(reader), ReadDouble(reader)),
+                    ClockMHz = ReadDouble(reader),
+                    PowerWatts = ReadDouble(reader),
+                    PowerScope = reader.ReadString() is { Length: > 0 } scope ? scope : null
+                };
+            }
+            if (version >= 0x46534D3A) {
+                frame.Gpus[i] = frame.Gpus[i] with {
+                    Id = reader.ReadString() is { Length: > 0 } id ? id : null,
+                    DedicatedMemory = ReadUnsigned(reader),
+                    SharedMemory = ReadUnsigned(reader),
+                    MemoryKind = reader.ReadString() is { Length: > 0 } kind ? kind : null
+                };
+            }
+            if (version >= 0x46534D3B) { frame.Gpus[i] = frame.Gpus[i] with { Status = reader.ReadString() is { Length: > 0 } status ? status : null }; }
         }
 
         frame.ServiceStatus = reader.ReadString();
@@ -233,6 +301,10 @@ public static class FrameCodec {
             );
         }
 
+        frame.CpuDetails = null;
+        frame.MemoryDetails = null;
+        frame.Disks = [];
+        if (version >= 0x46534D3C) { ReadResources(reader, frame, version); }
         if (stream.Position != stream.Length) {
             throw new InvalidDataException("Unexpected trailing snapshot data.");
         }
@@ -259,6 +331,18 @@ public static class FrameCodec {
 
     private static void Write(BinaryWriter writer, double? value) =>
         writer.Write(value ?? double.NaN);
+    private static void WriteActivity(BinaryWriter writer, GpuActivity activity) {
+        Write(writer, activity.Render);
+        Write(writer, activity.Compute);
+        Write(writer, activity.Copy);
+        Write(writer, activity.Video);
+        Write(writer, activity.VideoEnhance);
+        Write(writer, activity.Encode);
+        Write(writer, activity.Decode);
+        Write(writer, activity.Memory);
+    }
+    private static GpuActivity ReadActivity(BinaryReader reader) => new(ReadDouble(reader), ReadDouble(reader), ReadDouble(reader),
+        ReadDouble(reader), ReadDouble(reader), ReadDouble(reader), ReadDouble(reader), ReadDouble(reader));
     private static void Write(BinaryWriter writer, ulong? value) =>
         writer.Write(value ?? ulong.MaxValue);
     private static double? ReadDouble(BinaryReader reader) {

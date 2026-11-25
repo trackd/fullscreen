@@ -3,11 +3,19 @@ using System.Text;
 
 namespace fullscreen.Monitoring;
 /// <summary>Optional NVIDIA driver API. Cached entry points keep their library loaded for process lifetime.</summary>
-internal sealed class NvmlSampler : IDisposable {
+internal sealed partial class NvmlSampler : IDisposable {
+    internal static string Availability(int status) => status switch {
+        0 => "measured",
+        3 => "unsupported",
+        4 => "permission denied",
+        6 => "not found",
+        _ => "temporarily unavailable (NVML " + status + ")"
+    };
     private static readonly Lazy<DriverApi?> Driver = new(DriverApi.Load);
     private readonly DriverApi? _api;
     private readonly nint[] _devices = new nint[32];
     private readonly string[] _names = new string[32];
+    private readonly string?[] _identities = new string?[32];
     private bool _initialized;
     private readonly int _count;
     internal CollectorCapabilities Capabilities { get; private set; }
@@ -42,15 +50,23 @@ internal sealed class NvmlSampler : IDisposable {
 
             int end = Array.IndexOf(name, (byte)0);
             _names[_count] = Encoding.UTF8.GetString(name, 0, end < 0 ? name.Length : end);
+            _identities[_count] = DeviceIdentity(device);
             _devices[_count++] = device;
         }
     }
 
-    internal void Sample(CollectorFrame frame) {
+    internal void Sample(CollectorFrame frame, bool devices = true, bool processes = false) {
         if (!_initialized) {
             return;
         }
 
+        _processRows.Clear();
+        if (processes) {
+            SampleProcesses();
+        }
+        if (!devices) {
+            return;
+        }
         if (_count > 0) {
             Capabilities = CollectorCapabilities.None;
         }
@@ -60,12 +76,74 @@ internal sealed class NvmlSampler : IDisposable {
             int memoryStatus = _api.Memory(device, out Memory memory);
             int temperatureStatus = _api.Temperature(device, 0, out uint temp);
             // NVML_ERROR_NOT_SUPPORTED is structural; permissions and temporary errors are not.
-            if (utilizationStatus != 3) { Capabilities |= CollectorCapabilities.GpuUtilization; }
-            if (memoryStatus != 3) { Capabilities |= CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory; }
-            if (temperatureStatus != 3) { Capabilities |= CollectorCapabilities.GpuTemperature; }
+            if (utilizationStatus != 3) {
+                Capabilities |= CollectorCapabilities.GpuUtilization;
+            }
+            if (memoryStatus != 3) {
+                Capabilities |= CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuTotalMemory;
+            }
+            if (temperatureStatus != 3) {
+                Capabilities |= CollectorCapabilities.GpuTemperature;
+            }
             double? busy = utilizationStatus == 0 ? value.Gpu : null;
             bool hasMemory = memoryStatus == 0;
             double? temperature = temperatureStatus == 0 ? temp : null;
+            double? encode = null, decode = null, clock = null, power = null, memoryClock = null, pcieRx = null, pcieTx = null;
+            int? pstate = null;
+            int encoderStatus = 3, decoderStatus = 3, clockStatus = 3, powerStatus = 3;
+            if (_api.Encoder is { } encoder) {
+                int status = encoderStatus = encoder(device, out uint percent, out _);
+                if (status != 3) {
+                    Capabilities |= CollectorCapabilities.GpuEncode;
+                }
+                if (status == 0) {
+                    encode = percent;
+                }
+            }
+            if (_api.Decoder is { } decoder) {
+                int status = decoderStatus = decoder(device, out uint percent, out _);
+                if (status != 3) {
+                    Capabilities |= CollectorCapabilities.GpuDecode;
+                }
+                if (status == 0) {
+                    decode = percent;
+                }
+            }
+            if (_api.Clock is { } clockInfo) {
+                int status = clockStatus = clockInfo(device, 0, out uint mhz);
+                if (status != 3) {
+                    Capabilities |= CollectorCapabilities.GpuClock;
+                }
+                if (status == 0) {
+                    clock = mhz;
+                }
+                if (clockInfo(device, 2, out uint memoryMhz) == 0) {
+                    memoryClock = memoryMhz;
+                }
+            }
+            if (_api.Pcie is { } pcie) {
+                if (pcie(device, 0, out uint tx) == 0) {
+                    pcieTx = tx * 1024d;
+                }
+                if (pcie(device, 1, out uint rx) == 0) {
+                    pcieRx = rx * 1024d;
+                }
+            }
+            if (_api.State is { } state && state(device, out uint stateValue) == 0 && stateValue <= 15) {
+                pstate = (int)stateValue;
+            }
+            if (_api.Power is { } powerInfo) {
+                int status = powerStatus = powerInfo(device, out uint milliwatts);
+                if (status != 3) {
+                    Capabilities |= CollectorCapabilities.GpuPower;
+                }
+                if (status == 0) {
+                    power = milliwatts / 1000d;
+                }
+            }
+            if (utilizationStatus != 3) {
+                Capabilities |= CollectorCapabilities.GpuMemoryActivity;
+            }
             frame.Gpus = CollectorFrame.EnsureCapacity(frame.Gpus, frame.GpuCount + 1);
             frame.Gpus[frame.GpuCount++] = new(
                 _names[i],
@@ -74,7 +152,23 @@ internal sealed class NvmlSampler : IDisposable {
                 hasMemory ? memory.Used : null,
                 hasMemory ? memory.Total : null,
                 temperature
-            );
+            ) {
+                Id = _identities[i],
+                Status = "NVML usage: " + Availability(utilizationStatus) + "; memory: " + Availability(memoryStatus)
+                    + "; temperature: " + Availability(temperatureStatus)
+                    + "; encode: " + Availability(encoderStatus) + "; decode: " + Availability(decoderStatus)
+                    + "; clock: " + Availability(clockStatus) + "; power: " + Availability(powerStatus),
+                DedicatedMemory = hasMemory ? memory.Used : null,
+                MemoryKind = "dedicated framebuffer usage",
+                Activity = new(Encode: encode, Decode: decode, Memory: utilizationStatus == 0 ? value.Memory : null),
+                ClockMHz = clock,
+                MemoryClockMHz = memoryClock,
+                PcieReceiveBytes = pcieRx,
+                PcieSendBytes = pcieTx,
+                PerformanceState = pstate,
+                PowerWatts = power,
+                PowerScope = power.HasValue ? "GPU" : null
+            };
         }
     }
 
@@ -109,6 +203,10 @@ internal sealed class NvmlSampler : IDisposable {
     private delegate int MemoryFunction(nint device, out Memory value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int TemperatureFunction(nint device, uint sensor, out uint value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int EngineFunction(nint device, out uint percent, out uint samplingPeriod);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int PowerFunction(nint device, out uint milliwatts);
     private sealed class DriverApi {
         internal readonly InitFunction Init, Shutdown;
         internal readonly CountFunction Count;
@@ -117,6 +215,15 @@ internal sealed class NvmlSampler : IDisposable {
         internal readonly UtilizationFunction Utilization;
         internal readonly MemoryFunction Memory;
         internal readonly TemperatureFunction Temperature;
+        internal readonly EngineFunction? Encoder, Decoder;
+        internal readonly TemperatureFunction? Clock;
+        internal readonly TemperatureFunction? Pcie;
+        internal readonly PowerFunction? State;
+        internal readonly PowerFunction? Power;
+        internal readonly ProcessListFunction? ComputeProcesses, GraphicsProcesses;
+        internal readonly ProcessUtilizationFunction? ProcessUtilization;
+        internal readonly PciFunction? Pci;
+        internal readonly NameFunction? Uuid;
         private DriverApi(nint handle, bool libc) {
             T Resolve<T>(string name)
                 where T : Delegate {
@@ -136,6 +243,25 @@ internal sealed class NvmlSampler : IDisposable {
             Utilization = Resolve<UtilizationFunction>("nvmlDeviceGetUtilizationRates");
             Memory = Resolve<MemoryFunction>("nvmlDeviceGetMemoryInfo");
             Temperature = Resolve<TemperatureFunction>("nvmlDeviceGetTemperature");
+            T? Optional<T>(string name) where T : Delegate {
+                try {
+                    return Resolve<T>(name);
+                }
+                catch (EntryPointNotFoundException) {
+                    return null;
+                }
+            }
+            Encoder = Optional<EngineFunction>("nvmlDeviceGetEncoderUtilization");
+            Decoder = Optional<EngineFunction>("nvmlDeviceGetDecoderUtilization");
+            Clock = Optional<TemperatureFunction>("nvmlDeviceGetClockInfo");
+            Pcie = Optional<TemperatureFunction>("nvmlDeviceGetPcieThroughput");
+            State = Optional<PowerFunction>("nvmlDeviceGetPerformanceState");
+            Power = Optional<PowerFunction>("nvmlDeviceGetPowerUsage");
+            ComputeProcesses = Optional<ProcessListFunction>("nvmlDeviceGetComputeRunningProcesses_v3");
+            GraphicsProcesses = Optional<ProcessListFunction>("nvmlDeviceGetGraphicsRunningProcesses_v3");
+            ProcessUtilization = Optional<ProcessUtilizationFunction>("nvmlDeviceGetProcessUtilization");
+            Pci = Optional<PciFunction>("nvmlDeviceGetPciInfo_v3");
+            Uuid = Optional<NameFunction>("nvmlDeviceGetUUID");
         }
 
         internal static DriverApi? Load() {

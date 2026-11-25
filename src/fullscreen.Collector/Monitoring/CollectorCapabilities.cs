@@ -29,20 +29,42 @@ public enum CollectorCapabilities {
     GpuTotalMemory = 512,
     /// <summary>GPU device temperature.</summary>
     GpuTemperature = 1024,
+    /// <summary>Render engine activity.</summary>
+    GpuRender = 2048,
+    /// <summary>Compute engine activity.</summary>
+    GpuCompute = 4096,
+    /// <summary>Copy engine activity.</summary>
+    GpuCopy = 8192,
+    /// <summary>Unified video engine activity.</summary>
+    GpuVideo = 16384,
+    /// <summary>Video processing activity.</summary>
+    GpuVideoEnhance = 32768,
+    /// <summary>Explicit encoder activity.</summary>
+    GpuEncode = 65536,
+    /// <summary>Explicit decoder activity.</summary>
+    GpuDecode = 131072,
+    /// <summary>Memory read/write activity.</summary>
+    GpuMemoryActivity = 262144,
+    /// <summary>Graphics clock.</summary>
+    GpuClock = 524288,
+    /// <summary>Device or SoC power.</summary>
+    GpuPower = 1048576,
     /// <summary>All optional process GPU metrics.</summary>
     ProcessGraphics = ProcessGpu | ProcessGpuMemory,
     /// <summary>All optional GPU device metrics.</summary>
-    DeviceGraphics = GpuUtilization | GpuUsedMemory | GpuTotalMemory | GpuTemperature
+    DeviceGraphics = GpuUtilization | GpuUsedMemory | GpuTotalMemory | GpuTemperature | GpuRender | GpuCompute | GpuCopy
+        | GpuVideo | GpuVideoEnhance | GpuEncode | GpuDecode | GpuMemoryActivity | GpuClock | GpuPower
 }
 
 internal static class CollectorCapabilityDetection {
     internal static CollectorCapabilities Detect(bool windows, bool linux, bool mac, bool is64Bit, Version version) {
         const CollectorCapabilities identity = CollectorCapabilities.ProcessParent | CollectorCapabilities.ProcessOwner | CollectorCapabilities.ProcessStatus;
         if (linux) {
-            return identity | CollectorCapabilities.ProcessDisk | CollectorCapabilities.DeviceGraphics;
+            return identity | CollectorCapabilities.ProcessDisk | CollectorCapabilities.DeviceGraphics | CollectorCapabilities.ProcessGraphics;
         }
         if (mac) {
-            return identity | CollectorCapabilities.ProcessDisk;
+            return identity | CollectorCapabilities.ProcessDisk | CollectorCapabilities.ProcessGraphics
+                | CollectorCapabilities.GpuUtilization | CollectorCapabilities.GpuUsedMemory | CollectorCapabilities.GpuRender;
         }
         if (!windows) {
             return CollectorCapabilities.None;

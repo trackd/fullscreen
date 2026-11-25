@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
-using fullscreen.Monitoring;
-using XenoAtom.Terminal.UI.Rendering;
 using System.Diagnostics;
 using System.Reflection;
+using fullscreen.Monitoring;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Hosting;
+using XenoAtom.Terminal.UI.Rendering;
 
 namespace fullscreen.Tests;
 
@@ -60,7 +60,7 @@ public sealed class MinimalTests {
         Assert.AreEqual(Summaries | CollectorMetrics.Processes | CollectorMetrics.Owners, surface.RequiredMetrics);
         surface.Model.Filter = "";
         surface.Minimal = false;
-        Assert.AreEqual(CollectorMetrics.Processes | CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu, surface.RequiredMetrics);
+        Assert.AreEqual(CollectorMetrics.Processes | CollectorMetrics.Cpu | CollectorMetrics.Memory | CollectorMetrics.Network | CollectorMetrics.Gpu | CollectorMetrics.Disks, surface.RequiredMetrics);
         VisualSnapshotRenderer.Render(surface, 30, 10);
         Assert.AreEqual(Summaries, surface.RequiredMetrics);
     }

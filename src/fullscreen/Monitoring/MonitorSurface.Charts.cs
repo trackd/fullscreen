@@ -1,7 +1,7 @@
-using MetricHistory = fullscreen.Charts.TimeSeries;
 using System.Globalization;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Rendering;
+using MetricHistory = fullscreen.Charts.TimeSeries;
 
 namespace fullscreen.Monitoring;
 
@@ -11,11 +11,12 @@ public sealed partial class MonitorSurface {
         MonitorView.Services,
         MonitorView.Network,
         MonitorView.Gpu,
+        MonitorView.Disks,
         MonitorView.Users,
         MonitorView.Dashboard
     ];
-    private readonly Charts.BuiltInTrend[] _plots = [.. Enumerable.Range(0, 8).Select(_ => new Charts.BuiltInTrend { Interactive = false })];
-    private readonly XenoAtom.Terminal.UI.Geometry.Rectangle[] _chartBounds = new XenoAtom.Terminal.UI.Geometry.Rectangle[8];
+    private readonly List<Charts.BuiltInTrend> _plots = [.. Enumerable.Range(0, 8).Select(_ => new Charts.BuiltInTrend { Interactive = false })];
+    private XenoAtom.Terminal.UI.Geometry.Rectangle[] _chartBounds = new XenoAtom.Terminal.UI.Geometry.Rectangle[8];
     private int _chartCount;
     private readonly record struct PlotHit(
         int X,
@@ -27,7 +28,7 @@ public sealed partial class MonitorSurface {
         bool Rate,
         bool Bytes
     );
-    private readonly PlotHit[] _plotHits = new PlotHit[8];
+    private PlotHit[] _plotHits = new PlotHit[8];
     private int _plotHitCount;
     private int _inspectX = -1, _inspectY = -1;
     private static readonly TimeSpan PlotWindow = TimeSpan.FromSeconds(120);
@@ -48,9 +49,8 @@ public sealed partial class MonitorSurface {
         }
 
         DateTimeOffset end = secondary is not null && secondary.Latest > history.Latest ? secondary.Latest : history.Latest;
-        if (_plotHitCount < _plotHits.Length) {
-            _plotHits[_plotHitCount++] = new(x, y, width, height, history, secondary, rate, bytes);
-        }
+        if (_plotHitCount == _plotHits.Length) { Array.Resize(ref _plotHits, _plotHits.Length * 2); }
+        _plotHits[_plotHitCount++] = new(x, y, width, height, history, secondary, rate, bytes);
 
         if (_inspectX >= x && _inspectX < x + width && _inspectY >= y && _inspectY < y + height) {
             double seconds = PlotWindow.TotalSeconds * (1 - (double)(_inspectX - x) / Math.Max(1, width - 1));
@@ -79,7 +79,7 @@ public sealed partial class MonitorSurface {
     }
 
     private readonly MetricHistory _receiveHistory = new(), _sendHistory = new(), _vramHistory = new();
-    private int TabWidth => Bounds.Width >= 115 ? 14 : Bounds.Width >= 76 ? 12 : 6;
+    private int TabWidth => Bounds.Width >= 130 ? 14 : Bounds.Width >= 92 ? 12 : 6;
 
     private void RenderNavigation(CellBuffer buffer) {
         ReadOnlySpan<string> labels = TabWidth == 6 ? [
@@ -87,6 +87,7 @@ public sealed partial class MonitorSurface {
             "Svc",
             "Net",
             "GPU",
+            "Dsk",
             "Usr",
             "Da"
         ] : [
@@ -94,6 +95,7 @@ public sealed partial class MonitorSurface {
             "Services",
             "Network",
             "GPU",
+            "Disks",
             "Users",
             "Dashboard"
         ];
@@ -152,7 +154,9 @@ public sealed partial class MonitorSurface {
         Fill(buffer, 0, top, Bounds.Width, Bounds.Height - top, Body);
         int width = Math.Max(12, (Bounds.Width - 3) / 2), right = Bounds.Width - 3 - width;
         var (upper, lower) = DashboardHeights(Bounds.Height);
-        GraphPanel(buffer, 1, top, width, upper, "CPU · 0—100%", _cpuHistory, 100, CpuPercent, Accent, false);
+        int detailRows = ResourceFooterRows(width, upper);
+        string cpuName = Frame.CpuDetails?.Name.Replace("(R)", "", StringComparison.Ordinal).Replace("(TM)", "", StringComparison.Ordinal).Replace(" CPU @", " @", StringComparison.Ordinal) ?? "0—100%";
+        GraphPanel(buffer, 1, top, width, upper, "CPU · " + cpuName, _cpuHistory, 100, CpuPercent, Accent, false, footerRows: detailRows);
         GraphPanel(
             buffer,
             width + 2,
@@ -164,8 +168,10 @@ public sealed partial class MonitorSurface {
             100,
             MemoryPercent,
             Green,
-            false
+            false,
+            footerRows: detailRows
         );
+        if (detailRows > 0) { RenderResourceSummary(buffer, width, upper, top); }
         GraphPanel(
             buffer,
             1,
@@ -186,7 +192,7 @@ public sealed partial class MonitorSurface {
             upper + top,
             right,
             lower,
-            "GPU · busiest device %",
+            "GPU · " + GpuDeviceName + " %",
             _gpuHistory,
             100,
             GpuPercent,
@@ -213,15 +219,20 @@ public sealed partial class MonitorSurface {
         Style style,
         bool rate,
         bool bytes = false,
-        MetricHistory? secondary = null
+        MetricHistory? secondary = null,
+        int footerRows = 0,
+        bool scalar = false,
+        string primaryLabel = "↓ RX",
+        string secondaryLabel = "↑ TX"
     ) {
         Box(buffer, x, y, width, height, label, style);
+        height -= footerRows;
         if (rate || bytes) {
             Quantity(buffer, x + 2, y + 1, current, rate, style, width - 4);
         }
         else {
             Metric(buffer, x + 2, y + 1, current, style, 8);
-            Write(buffer, x + 10, y + 1, "%", Muted);
+            Write(buffer, x + 10, y + 1, scalar ? "IOPS" : "%", Muted);
         }
 
         if (height < 7) {
@@ -238,11 +249,14 @@ public sealed partial class MonitorSurface {
         if (axis > 0) {
             double maximum = scale > 0 ? scale : history.Scale;
             if (secondary is not null) {
-                Write(buffer, x + 2, y + 2, "↓ RX", Green, axis);
-                Write(buffer, x + 2, y + 2 + (plotHeight + 1) / 2, "↑ TX", Purple, axis);
+                Write(buffer, x + 2, y + 2, primaryLabel, Green, axis);
+                Write(buffer, x + 2, y + 2 + (plotHeight + 1) / 2, secondaryLabel, Purple, axis);
                 if (plotHeight >= 6) {
-                    Quantity(buffer, x + 1, y + 3, maximum, false, Muted, axis);
-                    Quantity(
+                    if (scalar) { Metric(buffer, x + 1, y + 3, maximum, Muted, axis, "F0"); }
+                    else { Quantity(buffer, x + 1, y + 3, maximum, false, Muted, axis); }
+                    if (scalar) { Metric(buffer, x + 1, y + 3 + (plotHeight + 1) / 2, scale > 0 ? scale : secondary.Scale, Muted, axis, "F0"); }
+                    else {
+                        Quantity(
                         buffer,
                         x + 1,
                         y + 3 + (plotHeight + 1) / 2,
@@ -251,6 +265,7 @@ public sealed partial class MonitorSurface {
                         Muted,
                         axis
                     );
+                    }
                 }
             }
             else if (rate || bytes) {
@@ -273,25 +288,29 @@ public sealed partial class MonitorSurface {
         }
 
         if (secondary is not null) {
-            Write(buffer, x + width / 2, y + 1, "↑", Purple);
-            Quantity(buffer, x + width / 2 + 2, y + 1, Frame.SendBytesPerSecond, true, Purple, width / 2 - 4);
+            Write(buffer, x + width / 2, y + 1, secondaryLabel, Purple, 7);
+            double? latest = secondary.Count > 0 ? secondary.ValueAt(secondary.Count - 1) : null;
+            if (scalar) { Metric(buffer, x + width / 2 + 8, y + 1, latest, Purple, width / 2 - 10); }
+            else { Quantity(buffer, x + width / 2 + 8, y + 1, latest, true, Purple, width / 2 - 10); }
         }
 
         Write(buffer, x + 2, y + height - 2, "peak", Muted);
+        double? peak = history.HasValues ? history.Maximum : null;
+        double? average = history.HasValues ? history.Average : null;
         if (rate || bytes) {
-            Quantity(buffer, x + 8, y + height - 2, history.Maximum, rate, style, width - 10);
+            Quantity(buffer, x + 8, y + height - 2, peak, rate, style, width - 10);
         }
         else {
-            Metric(buffer, x + 8, y + height - 2, history.Maximum, style, width - 10);
+            Metric(buffer, x + 8, y + height - 2, peak, style, width - 10);
         }
 
         if (width >= 48) {
             Write(buffer, x + width / 2, y + height - 2, "avg", Muted);
             if (rate || bytes) {
-                Quantity(buffer, x + width / 2 + 4, y + height - 2, history.Average, rate, style, width / 2 - 6);
+                Quantity(buffer, x + width / 2 + 4, y + height - 2, average, rate, style, width / 2 - 6);
             }
             else {
-                Metric(buffer, x + width / 2 + 4, y + height - 2, history.Average, style, width / 2 - 6);
+                Metric(buffer, x + width / 2 + 4, y + height - 2, average, style, width / 2 - 6);
             }
         }
     }
@@ -300,16 +319,18 @@ public sealed partial class MonitorSurface {
         int width = Math.Max(12, (Bounds.Width - 3) / 2);
         int height = DetailChartHeight(Bounds.Height);
         if (View == MonitorView.Network) {
+            var network = GraphInterface;
+            var history = network.HasValue && _interfaceHistory.TryGetValue(network.Value.Id, out var selected) ? selected : (_receiveHistory, _sendHistory);
             GraphPanel(
                 buffer,
                 1,
                 2,
                 width,
                 height,
-                "RECEIVE · bytes/s",
-                _receiveHistory,
+                "RECEIVE · " + (network?.Name ?? "all interfaces") + " · [ / ]",
+                history.Item1,
                 0,
-                Frame.ReceiveBytesPerSecond,
+                network.HasValue ? network.Value.ReceiveBytesPerSecond : Frame.ReceiveBytesPerSecond,
                 Green,
                 true
             );
@@ -319,10 +340,10 @@ public sealed partial class MonitorSurface {
                 2,
                 width,
                 height,
-                "SEND · bytes/s",
-                _sendHistory,
+                "SEND · " + (network?.Name ?? "all interfaces") + " · [ / ]",
+                history.Item2,
                 0,
-                Frame.SendBytesPerSecond,
+                network.HasValue ? network.Value.SendBytesPerSecond : Frame.SendBytesPerSecond,
                 Purple,
                 true
             );
@@ -342,7 +363,7 @@ public sealed partial class MonitorSurface {
                 2,
                 width,
                 height,
-                "VRAM · bytes in use",
+                "GPU memory · bytes in use",
                 _vramHistory,
                 0,
                 used,

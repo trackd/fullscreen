@@ -28,7 +28,15 @@ public enum ProcessSort {
     /// <summary>Sorts processes by disk throughput in bytes per second.</summary>
     Disk,
     /// <summary>Sorts processes by network throughput in bytes per second.</summary>
-    Network
+    Network,
+    /// <summary>Sorts by dedicated GPU memory.</summary>
+    GpuDedicatedMemory,
+    /// <summary>Sorts by shared GPU memory.</summary>
+    GpuSharedMemory,
+    /// <summary>Sorts by reported adapter identities.</summary>
+    GpuAdapter,
+    /// <summary>Sorts by reported GPU engine classes.</summary>
+    GpuEngine
 }
 
 /// <summary>Selects the active performance monitor page.</summary>
@@ -44,7 +52,9 @@ public enum MonitorView {
     /// <summary>Shows the users view.</summary>
     Users,
     /// <summary>Shows the dashboard view.</summary>
-    Dashboard
+    Dashboard,
+    /// <summary>Shows storage devices and filesystem capacity.</summary>
+    Disks
 }
 
 /// <summary>Filters, sorts, and navigates process rows while retaining stable process identities.</summary>
@@ -133,13 +143,15 @@ public sealed partial class ProcessView : IComparer<ProcessRow> {
     /// <returns>A negative, zero, or positive value indicating the ordering.</returns>
     public int Compare(ProcessRow left, ProcessRow right) {
         // Unsupported counters stay last in either sort direction.
-        if (Sort is ProcessSort.Gpu or ProcessSort.GpuMemory or ProcessSort.UserName or ProcessSort.ParentId
+        if (Sort is ProcessSort.Gpu or ProcessSort.GpuMemory or ProcessSort.GpuDedicatedMemory or ProcessSort.GpuSharedMemory or ProcessSort.UserName or ProcessSort.ParentId
             or ProcessSort.Disk
             or ProcessSort.Network
             or ProcessSort.Status) {
             bool leftKnown = Sort switch {
                 ProcessSort.Gpu => left.GpuPercent.HasValue,
                 ProcessSort.GpuMemory => left.GpuMemory.HasValue,
+                ProcessSort.GpuDedicatedMemory => left.GpuDedicatedMemory.HasValue,
+                ProcessSort.GpuSharedMemory => left.GpuSharedMemory.HasValue,
                 ProcessSort.UserName => left.UserName is not null,
                 ProcessSort.Disk => left.DiskBytesPerSecond.HasValue,
                 ProcessSort.Network => left.NetworkBytesPerSecond.HasValue,
@@ -149,6 +161,8 @@ public sealed partial class ProcessView : IComparer<ProcessRow> {
             bool rightKnown = Sort switch {
                 ProcessSort.Gpu => right.GpuPercent.HasValue,
                 ProcessSort.GpuMemory => right.GpuMemory.HasValue,
+                ProcessSort.GpuDedicatedMemory => right.GpuDedicatedMemory.HasValue,
+                ProcessSort.GpuSharedMemory => right.GpuSharedMemory.HasValue,
                 ProcessSort.UserName => right.UserName is not null,
                 ProcessSort.Disk => right.DiskBytesPerSecond.HasValue,
                 ProcessSort.Network => right.NetworkBytesPerSecond.HasValue,
@@ -167,6 +181,10 @@ public sealed partial class ProcessView : IComparer<ProcessRow> {
             ProcessSort.Threads => right.Threads.CompareTo(left.Threads),
             ProcessSort.Gpu => CompareNullable(left.GpuPercent, right.GpuPercent),
             ProcessSort.GpuMemory => CompareNullable(left.GpuMemory, right.GpuMemory),
+            ProcessSort.GpuDedicatedMemory => CompareNullable(left.GpuDedicatedMemory, right.GpuDedicatedMemory),
+            ProcessSort.GpuSharedMemory => CompareNullable(left.GpuSharedMemory, right.GpuSharedMemory),
+            ProcessSort.GpuAdapter => StringComparer.OrdinalIgnoreCase.Compare(right.GpuAdapter, left.GpuAdapter),
+            ProcessSort.GpuEngine => StringComparer.OrdinalIgnoreCase.Compare(right.GpuEngine, left.GpuEngine),
             ProcessSort.UserName => StringComparer.OrdinalIgnoreCase.Compare(right.UserName, left.UserName),
             ProcessSort.ParentId => Nullable.Compare(right.ParentId, left.ParentId),
             ProcessSort.CpuTime => right.CpuTimeTicks.CompareTo(left.CpuTimeTicks),

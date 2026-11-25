@@ -17,7 +17,10 @@ public readonly record struct NetworkRow(
     long SentBytes,
     long Errors,
     long Speed
-);
+) {
+    /// <summary>Interface addresses as reported by the monitored host.</summary>
+    public string Addresses { get; init; } = "";
+}
 /// <summary>Stores graphics-device utilization, memory usage, and temperature.</summary>
 /// <param name="Name">The display name.</param>
 /// <param name="Provider">The platform provider that supplied the device metrics.</param>
@@ -32,7 +35,84 @@ public readonly record struct GpuRow(
     ulong? UsedMemory,
     ulong? TotalMemory,
     double? Temperature
-);
+) {
+    /// <summary>Memory clock in MHz when exposed by the vendor driver.</summary>
+    public double? MemoryClockMHz { get; init; }
+    /// <summary>PCIe receive throughput in bytes per second.</summary>
+    public double? PcieReceiveBytes { get; init; }
+    /// <summary>PCIe transmit throughput in bytes per second.</summary>
+    public double? PcieSendBytes { get; init; }
+    /// <summary>Vendor performance-state number; lower NVIDIA P-states indicate higher performance.</summary>
+    public int? PerformanceState { get; init; }
+    /// <summary>Provider identity: Windows LUID, PCI address, or IORegistry entry ID.</summary>
+    public string? Id { get; init; }
+    /// <summary>Dedicated graphics memory currently used, in bytes.</summary>
+    public ulong? DedicatedMemory { get; init; }
+    /// <summary>Shared system memory currently used by the GPU, in bytes.</summary>
+    public ulong? SharedMemory { get; init; }
+    /// <summary>Meaning of UsedMemory, for example resident VRAM or unified allocations.</summary>
+    public string? MemoryKind { get; init; }
+    /// <summary>Provider-specific coverage, warm-up or availability explanation.</summary>
+    public string? Status { get; init; }
+    /// <summary>Gets activity percentages for independently reported GPU engine classes.</summary>
+    public GpuActivity Activity { get; init; }
+    /// <summary>Gets the reported graphics clock in MHz, or null when unavailable.</summary>
+    public double? ClockMHz { get; init; }
+    /// <summary>Gets device or SoC power in watts, or null when unavailable.</summary>
+    public double? PowerWatts { get; init; }
+    /// <summary>Gets the scope of the power reading, for example GPU or GPU/SoC.</summary>
+    public string? PowerScope { get; init; }
+}
+
+/// <summary>One process's reported activity on one identified GPU; unknown readings are null.</summary>
+public readonly record struct ProcessGpuUsage(string AdapterId, string Provider, double? Utilization,
+    ulong? Memory, GpuActivity Activity, string Status) {
+    /// <summary>Independently reported dedicated allocation bytes.</summary>
+    public ulong? DedicatedMemory { get; init; }
+    /// <summary>Independently reported shared allocation bytes.</summary>
+    public ulong? SharedMemory { get; init; }
+    /// <summary>NVIDIA streaming-multiprocessor activity, which is not necessarily compute-only work.</summary>
+    public double? SmActivity { get; init; }
+    /// <summary>Meaning and coverage of the memory reading.</summary>
+    public string? MemoryKind { get; init; }
+}
+
+/// <summary>Independent engine activity; missing counters remain unknown rather than idle.</summary>
+/// <param name="Render">Render activity percentage.</param>
+/// <param name="Compute">Compute activity percentage.</param>
+/// <param name="Copy">Copy activity percentage.</param>
+/// <param name="Video">Combined video activity percentage where encode/decode cannot be distinguished.</param>
+/// <param name="VideoEnhance">Video processing activity percentage.</param>
+/// <param name="Encode">Explicitly reported video encoder activity percentage.</param>
+/// <param name="Decode">Explicitly reported video decoder activity percentage.</param>
+/// <param name="Memory">Memory read/write activity percentage, not allocated memory.</param>
+public readonly record struct GpuActivity(double? Render = null, double? Compute = null, double? Copy = null,
+    double? Video = null, double? VideoEnhance = null, double? Encode = null, double? Decode = null, double? Memory = null) {
+    internal static CollectorCapabilities EngineCapability(string name) => name switch {
+        var engine when engine.StartsWith("render", StringComparison.Ordinal) || engine.StartsWith("rcs", StringComparison.Ordinal) || engine == "gfx" => CollectorCapabilities.GpuRender,
+        var engine when engine.StartsWith("compute", StringComparison.Ordinal) || engine.StartsWith("ccs", StringComparison.Ordinal) => CollectorCapabilities.GpuCompute,
+        var engine when engine.StartsWith("copy", StringComparison.Ordinal) || engine.StartsWith("bcs", StringComparison.Ordinal) || engine.StartsWith("dma", StringComparison.Ordinal) => CollectorCapabilities.GpuCopy,
+        var engine when engine.StartsWith("video-enhance", StringComparison.Ordinal) || engine.StartsWith("vecs", StringComparison.Ordinal) => CollectorCapabilities.GpuVideoEnhance,
+        // AMD's enc ring may perform unified encode/decode; do not invent separate meanings.
+        var engine when engine.StartsWith("video", StringComparison.Ordinal) || engine.StartsWith("vcs", StringComparison.Ordinal) || engine.StartsWith("enc", StringComparison.Ordinal) || engine.StartsWith("dec", StringComparison.Ordinal) => CollectorCapabilities.GpuVideo,
+        _ => CollectorCapabilities.None
+    };
+    internal static GpuActivity FromEngines(IEnumerable<KeyValuePair<string, double>> engines) {
+        var activity = new GpuActivity();
+        foreach (var engine in engines) {
+            double value = Compat.Clamp(engine.Value, 0, 100);
+            activity = EngineCapability(engine.Key) switch {
+                CollectorCapabilities.GpuRender => activity with { Render = Math.Max(activity.Render ?? 0, value) },
+                CollectorCapabilities.GpuCompute => activity with { Compute = Math.Max(activity.Compute ?? 0, value) },
+                CollectorCapabilities.GpuCopy => activity with { Copy = Math.Max(activity.Copy ?? 0, value) },
+                CollectorCapabilities.GpuVideo => activity with { Video = Math.Max(activity.Video ?? 0, value) },
+                CollectorCapabilities.GpuVideoEnhance => activity with { VideoEnhance = Math.Max(activity.VideoEnhance ?? 0, value) },
+                _ => activity
+            };
+        }
+        return activity;
+    }
+}
 /// <summary>Stores a service&apos;s display metadata and optional process ownership.</summary>
 /// <param name="Name">The display name.</param>
 /// <param name="Description">The Windows display name or platform service description.</param>
@@ -86,6 +166,12 @@ public readonly record struct UserSessionRow(
 }
 /// <summary>Reusable snapshot. Counts delimit valid array entries; arrays never escape the source's gate.</summary>
 public sealed class CollectorFrame {
+    /// <summary>Gets or sets CPU identity, logical-processor deltas and scoped sensors.</summary>
+    public CpuDetails? CpuDetails { get; set; }
+    /// <summary>Gets or sets platform-specific memory detail.</summary>
+    public MemoryDetails? MemoryDetails { get; set; }
+    /// <summary>Gets or sets device activity and volume capacity rows.</summary>
+    public DiskRow[] Disks { get; set; } = [];
     /// <summary>Gets or sets the machine that produced the snapshot.</summary>
     public string MachineName { get; set; } = "";
     /// <summary>Gets or sets the operating-system label reported by the collector.</summary>
@@ -143,6 +229,9 @@ public sealed class CollectorFrame {
     /// <summary>Copies the active data in another frame into this frame&apos;s reusable buffers.</summary>
     /// <param name="other">The source frame to copy.</param>
     public void CopyFrom(CollectorFrame other) {
+        CpuDetails = other.CpuDetails;
+        MemoryDetails = other.MemoryDetails;
+        Disks = other.Disks;
         MachineName = other.MachineName;
         Platform = other.Platform;
         Capabilities = other.Capabilities;

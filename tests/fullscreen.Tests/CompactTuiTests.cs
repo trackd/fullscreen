@@ -94,7 +94,8 @@ public sealed class CompactTuiTests {
             () => ui.App.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Any());
         Assert.Contains("Monitor keys and legend", ui.Output);
         Assert.Contains("2 services", ui.Output);
-        Assert.Contains("6 dashboard", ui.Output);
+        Assert.Contains("6 disks", ui.Output);
+        Assert.Contains("7 dashboard", ui.Output);
         Assert.Contains("F12", ui.Output);
     }
     [TestMethod]

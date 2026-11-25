@@ -3,8 +3,32 @@ using System.Diagnostics;
 namespace fullscreen.Monitoring;
 /// <summary>Runtime-only collector; safe to load into a remote PowerShell process without the UI or module.</summary>
 public sealed class PerformanceCollector : IDisposable {
+    private readonly SudoCollector? _sudo;
+    /// <summary>Creates an unprivileged collector.</summary>
+    public PerformanceCollector() { }
+    /// <summary>Creates a collector with an explicit Linux sudo policy.</summary>
+    /// <param name="useSudo">Whether device readers may try non-interactive sudo.</param>
+    public PerformanceCollector(bool useSudo) => _sudo = useSudo ? new() : null;
+    /// <summary>Gets whether a device reader was denied because sudo requires authentication.</summary>
+    public bool NeedsSudoAuthentication => _sudo?.AuthenticationRequired ?? false;
+    /// <summary>Validates sudo credentials on this host without elevating the collector itself.</summary>
+    /// <param name="password">The password passed through sudo's standard input.</param>
+    /// <param name="token">The cancellation token.</param>
+    /// <returns>Whether authentication succeeded.</returns>
+    public bool AuthenticateSudo(System.Security.SecureString password, CancellationToken token) {
+        if (_sudo is null || !NeedsSudoAuthentication) {
+            return false;
+        }
+        bool authenticated = SudoProcess.Authenticate(password, token);
+        if (authenticated) {
+            _sudo?.Dispose();
+        }
+        return authenticated;
+    }
     private ProcessSampler? _processes;
     private readonly SystemSampler _system = new();
+    private readonly ResourceSampler _resources = new();
+    private DiskSampler? _disks;
     private NetworkSampler? _network;
     private GpuSampler? _gpu;
     private WindowsIoSampler? _io;
@@ -27,9 +51,15 @@ public sealed class PerformanceCollector : IDisposable {
     /// <returns>The reusable frame; copy it before retaining it across later captures.</returns>
     public CollectorFrame Capture(CollectorMetrics metrics) {
         var supportedMetrics = Frame.Capabilities!.Value;
-        if ((supportedMetrics & CollectorCapabilities.ProcessGraphics) == 0) { metrics &= ~CollectorMetrics.ProcessGpu; }
-        if ((supportedMetrics & CollectorCapabilities.ProcessDisk) == 0) { metrics &= ~CollectorMetrics.ProcessDisk; }
-        if ((supportedMetrics & CollectorCapabilities.ProcessNetwork) == 0) { metrics &= ~CollectorMetrics.ProcessNetwork; }
+        if ((supportedMetrics & CollectorCapabilities.ProcessGraphics) == 0) {
+            metrics &= ~CollectorMetrics.ProcessGpu;
+        }
+        if ((supportedMetrics & CollectorCapabilities.ProcessDisk) == 0) {
+            metrics &= ~CollectorMetrics.ProcessDisk;
+        }
+        if ((supportedMetrics & CollectorCapabilities.ProcessNetwork) == 0) {
+            metrics &= ~CollectorMetrics.ProcessNetwork;
+        }
         long start = Stopwatch.GetTimestamp();
         long allocated = Compat.AllocatedBytes();
         Frame.ProcessCount = Frame.NetworkCount = Frame.GpuCount = 0;
@@ -51,6 +81,15 @@ public sealed class PerformanceCollector : IDisposable {
         Frame.ReceiveBytesPerSecond = Frame.SendBytesPerSecond = null;
         Frame.GpuStatus = Frame.NetworkStatus = "Not requested by the current view";
         _system.Sample((metrics & CollectorMetrics.Cpu) != 0, (metrics & CollectorMetrics.Memory) != 0);
+        _resources.Sample(Frame, (metrics & CollectorMetrics.Cpu) != 0, (metrics & CollectorMetrics.Memory) != 0);
+        Frame.Disks = [];
+        if ((metrics & CollectorMetrics.Disks) != 0) {
+            (_disks ??= new()).Sample(Frame);
+        }
+        else {
+            _disks?.Dispose();
+            _disks = null;
+        }
         if ((metrics & CollectorMetrics.Network) != 0) {
             (_network ??= new()).Sample(Frame);
         }
@@ -59,7 +98,7 @@ public sealed class PerformanceCollector : IDisposable {
         }
 
         if ((metrics & (CollectorMetrics.Gpu | CollectorMetrics.ProcessGpu)) != 0) {
-            (_gpu ??= new()).Sample(
+            (_gpu ??= new(_sudo)).Sample(
                 Frame,
                 (metrics & CollectorMetrics.Gpu) != 0,
                 (metrics & CollectorMetrics.ProcessGpu) != 0
@@ -146,6 +185,8 @@ public sealed class PerformanceCollector : IDisposable {
         Convert.ToBase64String(FrameCodec.Encode(Capture((CollectorMetrics)metrics)));
     /// <inheritdoc/>
     public void Dispose() {
+        _resources.Dispose();
+        _disks?.Dispose();
         try {
             _io?.Dispose();
         }
@@ -155,6 +196,7 @@ public sealed class PerformanceCollector : IDisposable {
             }
             finally {
                 _processes?.Dispose();
+                _sudo?.Dispose();
             }
         }
     }

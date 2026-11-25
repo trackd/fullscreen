@@ -24,8 +24,22 @@ public interface IMonitorSource : IDisposable {
 }
 
 /// <summary>Collects local machine metrics and executes local monitor actions.</summary>
-public sealed class LocalMonitorSource : IMonitorSource, IMonitorControlSource, IMonitorProcessDetailSource {
-    private readonly PerformanceCollector _collector = new();
+public sealed class LocalMonitorSource : IMonitorSource, IMonitorControlSource, IMonitorProcessDetailSource, IMonitorSudoSource {
+    private readonly PerformanceCollector _collector;
+    /// <summary>Creates an unprivileged local source.</summary>
+    public LocalMonitorSource() : this(false) { }
+    /// <summary>Creates a local source with optional sudo device readers.</summary>
+    /// <param name="useSudo">Whether sudo is permitted.</param>
+    public LocalMonitorSource(bool useSudo) => _collector = new(useSudo);
+    /// <inheritdoc/>
+    public string SudoReason => "Read protected Linux GPU counters";
+    /// <inheritdoc/>
+    public bool NeedsSudoAuthentication(CancellationToken token) {
+        token.ThrowIfCancellationRequested();
+        return _collector.NeedsSudoAuthentication;
+    }
+    /// <inheritdoc/>
+    public bool AuthenticateSudo(System.Security.SecureString password, CancellationToken token) => _collector.AuthenticateSudo(password, token);
     /// <summary>Gets the human-readable label.</summary>
     public string Label => Environment.MachineName;
     /// <summary>Gets whether collection targets a remote computer.</summary>

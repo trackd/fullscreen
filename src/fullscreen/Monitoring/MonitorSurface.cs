@@ -24,15 +24,20 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
     /// <summary>Gets the backing table or directory model.</summary>
     public ProcessView Model { get; } = new();
 
-    private MonitorView _view = MonitorView.Processes;
+    [Bindable]
+    private partial MonitorView ActiveView { get; set; }
     /// <summary>Gets or sets whether only the user-session view is available.</summary>
     public bool UsersOnly { get; init; }
     /// <summary>Gets or sets whether owned processes are shown in the user-session tree.</summary>
     public bool IncludeUserProcesses { get; set; } = true;
     /// <summary>Gets or sets the resource or monitor view index.</summary>
     public MonitorView View {
-        get => UsersOnly ? MonitorView.Users : _view;
-        set => _view = value;
+        get => UsersOnly ? MonitorView.Users : ActiveView;
+        set {
+            if (ActiveView == value) { return; }
+            ActiveView = value;
+            Refresh();
+        }
     }
     /// <summary>Gets whether live updates are paused.</summary>
     public bool Paused { get; private set; }
@@ -65,7 +70,7 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
     }
 
     private bool ProcessTable => View == MonitorView.Processes;
-    private int TableTop => Minimal ? (_editingFilter ? 2 : 1) : Bounds.Width >= 76 && Bounds.Height >= 20 ? 5 + (View is MonitorView.Network or MonitorView.Gpu ? DetailChartHeight(Bounds.Height) : CardHeight) : 8;
+    private int TableTop => Minimal ? (_editingFilter ? 2 : 1) : Bounds.Width >= 76 && Bounds.Height >= 20 ? 5 + (View is MonitorView.Network or MonitorView.Gpu ? DetailChartHeight(Bounds.Height) : CardHeight + (ProcessTable ? 3 : 0)) : 8;
     private int Footer => Minimal ? 0 : 1;
     private int PageSize => Math.Max(1, Bounds.Height - TableTop - Footer);
 
@@ -92,17 +97,17 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
     public void Refresh() =>
         Revision++;
     /// <inheritdoc/>
-    protected override int ChildrenCount => _plots.Length + 2;
+    protected override int ChildrenCount => _plots.Count + 2;
 
     /// <inheritdoc/>
     protected override Visual GetChild(int index) =>
-        index < _plots.Length ? _plots[index] : index == _plots.Length ? _markSessionsButton : _logoffSessionsButton;
+        index < _plots.Count ? _plots[index] : index == _plots.Count ? _markSessionsButton : _logoffSessionsButton;
     /// <inheritdoc/>
     protected override SizeHints MeasureCore(in LayoutConstraints constraints) {
         _ = Revision;
         PrepareCharts(Math.Min(constraints.MaxWidth, 2000), Math.Min(constraints.MaxHeight, 1000));
         MeasureUserButtons(constraints.MaxWidth, constraints.MaxHeight);
-        for (int i = 0; i < _plots.Length; i++) {
+        for (int i = 0; i < _plots.Count; i++) {
             _plots[i].Measure(new Size(_chartBounds[i].Width, _chartBounds[i].Height));
         }
 
@@ -112,7 +117,7 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
     /// <inheritdoc/>
     protected override void ArrangeCore(in Rectangle finalRect) {
         PrepareCharts(finalRect.Width, finalRect.Height);
-        for (int i = 0; i < _plots.Length; i++) {
+        for (int i = 0; i < _plots.Count; i++) {
             var bounds = _chartBounds[i];
             _plots[i].Measure(new Size(bounds.Width, bounds.Height));
             _plots[i].Arrange(new(finalRect.X + bounds.X, finalRect.Y + bounds.Y, bounds.Width, bounds.Height));
@@ -120,6 +125,18 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
         ArrangeUserButtons(finalRect);
     }
 
+    private readonly List<Rectangle> _panelAreas = [];
+    private Style SurfaceStyle(int x, int y, Style style) {
+        if (style.TryGetBackground(out var background) && background == Palette.Background
+            && Panel.TryGetBackground(out var panelBackground)) {
+            foreach (var area in _panelAreas) {
+                if (x >= area.X && x < area.X + area.Width && y >= area.Y && y < area.Y + area.Height) {
+                    return style.WithBackground(panelBackground);
+                }
+            }
+        }
+        return style;
+    }
     private void Write(
         CellBuffer buffer,
         int x,
@@ -138,7 +155,7 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
             safe[i] = char.IsControl(text[i]) ? ' ' : text[i];
         }
 
-        buffer.WriteText(Bounds.X + x, Bounds.Y + y, safe, style);
+        buffer.WriteText(Bounds.X + x, Bounds.Y + y, safe, SurfaceStyle(x, y, style));
         buffer.PopClip();
     }
 
@@ -217,6 +234,7 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
         if (View == MonitorView.Services && ServiceKey(e)) {
             return;
         }
+        if (View == MonitorView.Disks && DiskKey(e)) { return; }
 
         if (View is MonitorView.Network or MonitorView.Gpu) {
             int? movement = e.Key switch {
@@ -237,6 +255,12 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
         }
 
         switch (e.Key) {
+            case TerminalKey.Left when View == MonitorView.Gpu:
+                ScrollGpuColumns(-1);
+                break;
+            case TerminalKey.Right when View == MonitorView.Gpu:
+                ScrollGpuColumns(1);
+                break;
             case TerminalKey.Escape:
                 ClearFilter();
                 break;
@@ -332,6 +356,10 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
                     break;
                 case "d":
                 case "D":
+                    if (View == MonitorView.Gpu) { ShowGpuDetails(); break; }
+                    if (View == MonitorView.Dashboard) { ShowResourceDetails(); break; }
+                    if (View == MonitorView.Network) { ShowNetworkDetails(); break; }
+                    if (View == MonitorView.Disks) { ShowDiskDetails(); break; }
                     if (ProcessTable) {
                         ShowSelectedProcessDetails();
                         break;
@@ -433,10 +461,19 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
                     View = MonitorView.Gpu;
                     break;
                 case "5":
-                    ShowUserSessions();
+                    View = MonitorView.Disks;
                     break;
                 case "6":
+                    ShowUserSessions();
+                    break;
+                case "7":
                     View = MonitorView.Dashboard;
+                    break;
+                case "[" when View == MonitorView.Network:
+                    CycleInterface(-1);
+                    break;
+                case "]" when View == MonitorView.Network:
+                    CycleInterface(1);
                     break;
                 default:
                     return;
@@ -523,7 +560,8 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
             return;
         }
 
-        if (View is MonitorView.Network or MonitorView.Gpu) {
+        if (View == MonitorView.Disks) { MoveDisk(e.WheelDelta > 0 ? -3 : 3); }
+        else if (View is MonitorView.Network or MonitorView.Gpu) {
             MoveDetail(e.WheelDelta > 0 ? -3 : 3);
         }
         else {
@@ -562,6 +600,7 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
         }
 
         if (e.Button == TerminalMouseButton.Right) {
+            if (View == MonitorView.Disks) { ShowDiskDetails(); e.Handled = true; return; }
             OpenProcessMenu(e);
             return;
         }
@@ -595,6 +634,7 @@ public sealed partial class MonitorSurface : Themes.ThemedSurface {
                 View = NavigationViews[tab];
             }
         }
+        else if (View == MonitorView.Disks) { SelectDiskAt(y); }
         else if (y == TableTop - 1 && View is MonitorView.Network or MonitorView.Gpu) {
             OpenDetailHeaderMenu(e);
             return;

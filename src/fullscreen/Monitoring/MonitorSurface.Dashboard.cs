@@ -1,8 +1,8 @@
-using MetricHistory = fullscreen.Charts.TimeSeries;
 using System.Globalization;
 using System.Text;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Rendering;
+using MetricHistory = fullscreen.Charts.TimeSeries;
 
 namespace fullscreen.Monitoring;
 
@@ -54,16 +54,34 @@ public sealed partial class MonitorSurface {
         _detailOffset = (int)Math.Clamp((long)_detailOffset + delta, 0, Math.Max(0, DetailCount - PageSize));
     private double? MemoryPercent => TotalMemory is > 0 && AvailableMemory is ulong available ? Math.Clamp(100.0 * (1 - (double)available / TotalMemory.Value), 0, 100) : null;
 
-    private double? GpuPercent {
+    private GpuRow? DisplayGpu {
         get {
-            double? result = null;
+            GpuRow? result = null;
             foreach (ref readonly var gpu in Frame.Gpus.AsSpan(0, Frame.GpuCount)) {
-                if (gpu.Utilization.HasValue) {
-                    result = Math.Max(result ?? 0, gpu.Utilization.Value);
+                if (gpu.Utilization.HasValue && (!result.HasValue || gpu.Utilization > result.Value.Utilization)) {
+                    result = gpu;
                 }
             }
-
-            return result;
+            return result ?? (Frame.GpuCount == 1 ? Frame.Gpus[0] : null);
+        }
+    }
+    private double? GpuPercent => DisplayGpu?.Utilization;
+    internal string GpuDeviceName {
+        get {
+            if (DisplayGpu is not { } gpu) { return Frame.GpuCount > 0 ? "activity unavailable" : "no provider"; }
+            string name = gpu.Name;
+            int space = name.IndexOf(' ');
+            if (space > 4 && name.StartsWith("card", StringComparison.Ordinal) && int.TryParse(name.AsSpan(4, space - 4), out _)) {
+                name = name[(space + 1)..];
+                int id = name.LastIndexOf(" 0x", StringComparison.Ordinal);
+                if (id >= 0) { name = name[..id]; }
+                name = name.Replace("vmwgfx", "VMware", StringComparison.Ordinal).Replace("amdgpu", "AMD", StringComparison.Ordinal)
+                    .Replace(" GPU", " graphics", StringComparison.Ordinal);
+                if (name.StartsWith("hyperv_drm", StringComparison.Ordinal) || name.StartsWith("hyperv_fb", StringComparison.Ordinal)) {
+                    name = "Microsoft Hyper-V Video";
+                }
+            }
+            return name;
         }
     }
 
@@ -72,6 +90,7 @@ public sealed partial class MonitorSurface {
     public void SetFrame(CollectorFrame frame) {
         _columnLayoutWidth = -1;
         Frame = frame;
+        UpdateResourceHistory(frame);
         if (ColumnsOpen && _pickerCapabilities != frame.Capabilities) {
             UpdatePickerCapabilities();
         }
@@ -100,8 +119,14 @@ public sealed partial class MonitorSurface {
     /// <inheritdoc/>
     protected override void RenderOverride(CellBuffer buffer) {
         _ = Revision;
+        _panelAreas.Clear();
         _plotHitCount = 0;
         Fill(buffer, 0, 0, Bounds.Width, Bounds.Height, Body);
+        if (View == MonitorView.Disks) {
+            if (!Minimal) { RenderNavigation(buffer); }
+            RenderDisks(buffer);
+            return;
+        }
         if (Bounds.Width < 35 || Bounds.Height < 12) {
             Write(buffer, 1, 0, "FULLSCREEN · resize to 35 × 12", Accent);
             return;
@@ -217,7 +242,10 @@ public sealed partial class MonitorSurface {
     private void RenderCards(CellBuffer buffer) {
         int height = CardHeight;
         int width = (Bounds.Width - 5) / 4;
-        Card(buffer, 1, width, height, "CPU", CpuPercent, Accent, _cpuHistory, "system load");
+        string cpuSummary = Frame.CpuDetails is { } cpu
+            ? (cpu.PhysicalCores?.ToString(CultureInfo.InvariantCulture) ?? "?") + " cores / " + cpu.Cores.Length.ToString(CultureInfo.InvariantCulture) + " threads"
+                + (cpu.Temperatures.Length > 0 ? " · " + ResourceNumber(cpu.Temperatures.Max(sensor => sensor.Celsius), "0") + "°C" : "") : "system load";
+        Card(buffer, 1, width, height, "CPU", CpuPercent, Accent, _cpuHistory, cpuSummary);
         Card(buffer, 2 + width, width, height, "MEMORY", MemoryPercent, Green, _memoryHistory, "physical RAM");
         Card(
             buffer,
@@ -228,7 +256,7 @@ public sealed partial class MonitorSurface {
             GpuPercent,
             Purple,
             _gpuHistory,
-            Frame.GpuCount > 0 ? Frame.Gpus[0].Name : "no provider"
+            GpuDeviceName
         );
         int netX = 4 + 3 * width;
         Box(buffer, netX, 2, width, height, "NETWORK", Accent);
@@ -261,6 +289,13 @@ public sealed partial class MonitorSurface {
                     Quantity(buffer, x + width / 2 + 2, 3, total, false, Muted, width / 2 - 3);
                 }
             }
+        }
+        if (ProcessTable) {
+            var overview = StorageOverview(Frame.Disks);
+            Box(buffer, 1, height + 2, Bounds.Width - 2, 4, "DISK IOPS", Accent);
+            Write(buffer, 2, height + 3, "DISK IOPS " + ResourceNumber(overview.Reads + overview.Writes), Accent, 25);
+            Write(buffer, 2, height + 4, "R " + ResourceNumber(overview.Reads) + " / W " + ResourceNumber(overview.Writes), Muted, 25);
+            InspectPlot(buffer, 28, height + 3, Math.Max(1, Bounds.Width - 30), 2, _storageIops, Accent);
         }
     }
 
@@ -355,8 +390,21 @@ public sealed partial class MonitorSurface {
                     case "GPU%":
                         Metric(buffer, column.X, y, row.GpuPercent, metric, column.Width, rightAlign: true);
                         break;
+                    case "GPU adapter":
+                        Write(buffer, column.X, y, row.GpuAdapter ?? "—", metric, column.Width);
+                        break;
+                    case "GPU engine":
+                        Write(buffer, column.X, y, row.GpuEngine ?? "—", metric, column.Width);
+                        break;
                     case "VRAM":
+                    case "GPU memory":
                         Quantity(buffer, column.X, y, row.GpuMemory, false, metric, column.Width, rightAlign: true);
+                        break;
+                    case "GPU dedicated":
+                        Quantity(buffer, column.X, y, row.GpuDedicatedMemory, false, metric, column.Width, rightAlign: true);
+                        break;
+                    case "GPU shared":
+                        Quantity(buffer, column.X, y, row.GpuSharedMemory, false, metric, column.Width, rightAlign: true);
                         break;
                     case "TIME":
                         CpuTime(buffer, column.X, y, row.CpuTimeTicks, metric, column.Width);
@@ -496,6 +544,7 @@ public sealed partial class MonitorSurface {
     }
 
     private void Box(CellBuffer buffer, int x, int y, int width, int height, string label, Style style) {
+        _panelAreas.Add(new(x, y, width, height));
         Fill(buffer, x, y, width, height, Panel);
         for (int i = 1; i < width - 1; i++) {
             Cell(buffer, x + i, y, '─', Muted);
@@ -530,7 +579,7 @@ public sealed partial class MonitorSurface {
 
     private void Cell(CellBuffer buffer, int x, int y, char glyph, Style style) {
         if ((uint)x < (uint)Bounds.Width && (uint)y < (uint)Bounds.Height) {
-            buffer.SetCell(Bounds.X + x, Bounds.Y + y, new Rune(glyph), style);
+            buffer.SetCell(Bounds.X + x, Bounds.Y + y, new Rune(glyph), SurfaceStyle(x, y, style));
         }
     }
 }

@@ -1,9 +1,9 @@
 using System.Collections;
 using System.Management.Automation;
-using fullscreen.Hosting;
-using fullscreen.Monitoring;
 using System.Management.Automation.Runspaces;
 using fullscreen.Charts;
+using fullscreen.Hosting;
+using fullscreen.Monitoring;
 
 namespace fullscreen.Commands;
 
@@ -64,12 +64,8 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
     [Parameter]
     public ProcessSort SortBy { get; set; } = ProcessSort.Cpu;
 
-    /// <summary>Processes, Services, Network, Gpu, Users or Dashboard. Overview remains an alias for
-    /// Processes. Keys 1 through 6 switch to Processes, Services, Network, GPU, Users and Dashboard
-    /// respectively. F8 also opens Users. Processes is the default. Press A or right-click a
-    /// process/service for confirmed actions. Service headers provide sorting and column filters; F6 cycles
-    /// sort columns and R reverses. The Users view groups named Windows WTS sessions in any state, including disconnected sessions.
-    /// P pauses; Q or Ctrl+Q exits. Q or Escape closes help and read-only dialogs without exiting.</summary>
+    /// <summary>Selects Processes, Services, Network, Gpu, Disks, Users or Dashboard.
+    /// Processes is the default; Overview remains its alias.</summary>
     [Parameter]
     [MonitorViewTransformation]
     public MonitorView View { get; set; } = MonitorView.Processes;
@@ -165,11 +161,22 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
     [Parameter]
     [ValidateRange(1, 120)]
     public int TimeoutSeconds { get; set; } = 15;
+    /// <summary>Permits sudo for protected Linux telemetry. Disabled by default; does not elevate monitor actions.</summary>
+    [Parameter]
+    public SwitchParameter Sudo { get; set; }
+    /// <summary>Optional pre-TUI callback receiving SudoPromptRequest and returning SecureString or no output.</summary>
+    [Parameter]
+    [ValidateNotNull]
+    public ScriptBlock? SudoPrompt { get; set; }
 
     /// <inheritdoc/>
     protected override void EndProcessing() {
         PSSession? ownedSession = null;
+        IMonitorSource? pendingSource = null;
         try {
+            if (SudoPrompt is not null && !Sudo.IsPresent) {
+                ThrowTerminatingError(new ErrorRecord(new ArgumentException("SudoPrompt requires -Sudo."), "SudoPromptRequiresSudo", ErrorCategory.InvalidArgument, nameof(SudoPrompt)));
+            }
             var columns = new ProcessColumns();
             columns.Configure(Column, ExcludeColumn, Tree.IsPresent);
             if (ComputerName is not null) {
@@ -181,7 +188,18 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
             }
 
             var session = Session ?? ownedSession;
-            IMonitorSource source = session is null ? new LocalMonitorSource() : new RemoteMonitorSource(session, TimeoutSeconds);
+            IMonitorSource source = session is null ? new LocalMonitorSource(Sudo.IsPresent) : new RemoteMonitorSource(session, TimeoutSeconds, Sudo.IsPresent);
+            pendingSource = source;
+            if (SudoPrompt is not null) {
+                var preparation = MonitorSudo.Prepare(source, request => {
+                    try { return MonitorSudo.PasswordFromPrompt(SudoPrompt.Invoke(request)); }
+                    catch (ArgumentException error) {
+                        ThrowTerminatingError(new ErrorRecord(error, "InvalidSudoPromptResult", ErrorCategory.InvalidType, nameof(SudoPrompt)));
+                        return null;
+                    }
+                }, PipelineStopToken);
+                if (preparation == SudoPreparation.Failed) { WriteWarning("Sudo authentication failed; continuing with unprivileged telemetry."); }
+            }
             int interval = session is not null && !MyInvocation.BoundParameters.ContainsKey(nameof(SampleInterval)) ? 2000 : SampleInterval;
             using var app = new MonitorApp(
                 RefreshRate,
@@ -198,6 +216,7 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
                 ExcludeGpuColumn,
                 Minimal.IsPresent
             );
+            pendingSource = null; // MonitorApp now owns the source.
             app.GraphType = GraphType;
             FullscreenHost.Run(app, PipelineStopToken, ResolveTheme(), Minimal.IsPresent, ChartRenderer);
         }
@@ -208,6 +227,7 @@ public sealed class ShowSystemMonitorCommand : FullscreenCommand {
             ThrowTerminatingError(RemoteSessionOptions.Failure(error, ComputerName ?? (object?)Session));
         }
         finally {
+            pendingSource?.Dispose();
             if (ownedSession is not null) {
                 // A stopped pipeline cannot run Remove-PSSession, so close the remote shell directly first.
                 ownedSession.Runspace.Dispose();

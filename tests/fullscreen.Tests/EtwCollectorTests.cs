@@ -58,6 +58,8 @@ public sealed class EtwCollectorTests {
         counters.Accept(EtwIoCounters.DiskProvider, 10, 2, 0x40, 42, 999, Birth + 12, Disk(1024, 999));
         counters.Sample(rows, [], 1, 0, Birth + 20);
         Assert.AreEqual(7168d, rows[0].DiskBytesPerSecond);
+        Assert.AreEqual(5120d, rows[0].DiskReadBytesPerSecond);
+        Assert.AreEqual(2048d, rows[0].DiskWriteBytesPerSecond);
     }
     [TestMethod]
     public void ThreadEventsTrackShortLivedThreadsBetweenProcessSnapshots() {

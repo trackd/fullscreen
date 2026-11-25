@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
 using fullscreen.Interop;
+using Microsoft.Win32.SafeHandles;
 
 namespace fullscreen.Monitoring;
 /// <summary>OS CPU deltas and physical memory. Unknown values remain null.</summary>

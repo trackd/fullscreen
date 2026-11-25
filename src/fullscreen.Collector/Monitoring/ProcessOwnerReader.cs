@@ -224,7 +224,9 @@ public sealed partial class ProcessOwnerReader {
 
     // rusage_info_v2 is a stable 160-byte Darwin ABI: disk read/write totals at 144/152.
     // The caller validates proc_bsdinfo's creation time after this read to reject PID reuse.
-    internal static unsafe long? ReadMacDisk(int id) {
+    internal static long? ReadMacDisk(int id) => ReadMacDisk(id, out _, out _);
+    internal static unsafe long? ReadMacDisk(int id, out long? readTotal, out long? writeTotal) {
+        readTotal = writeTotal = null;
         byte* memory = stackalloc byte[160];
         if (proc_pid_rusage(id, 2, memory) != 0) {
             return null;
@@ -232,6 +234,8 @@ public sealed partial class ProcessOwnerReader {
 
         var bytes = new ByteWindow(memory, 160);
         ulong read = ByteNumbers.UInt64(bytes[144..]), write = ByteNumbers.UInt64(bytes[152..]);
+        readTotal = read <= long.MaxValue ? (long)read : null;
+        writeTotal = write <= long.MaxValue ? (long)write : null;
         return read <= long.MaxValue && write <= (ulong)long.MaxValue - read ? (long)(read + write) : null;
     }
 

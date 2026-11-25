@@ -1,8 +1,8 @@
 using System.Globalization;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Commands;
+using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Rendering;
@@ -49,6 +49,7 @@ public sealed partial class MonitorSurface {
                 MonitorView.Services => "services",
                 MonitorView.Network => "interfaces",
                 MonitorView.Gpu => "devices",
+                MonitorView.Disks => "disks",
                 _ => "processes"
             };
             filterText = "all " + itemName;
@@ -68,6 +69,9 @@ public sealed partial class MonitorSurface {
         }
         else if (View == MonitorView.Users) {
             status = Frame.UserStatus;
+        }
+        else if (View == MonitorView.Gpu) {
+            status = "LIVE · ←/→ columns";
         }
         else if (ProcessTable) {
             status = $"{Model.Count} processes";
@@ -119,13 +123,14 @@ public sealed partial class MonitorSurface {
 
     internal string HelpText(int width, int height) {
         string[] bindings = [
-            "1: processes", "2: services", "3: network", "4: GPU", "5 / F8: users", "6: dashboard",
+            "1: processes", "2: services", "3: network", "4: GPU", "5 / F8: users", "6: disks", "7: dashboard",
+            "Disks ←/→: activity/capacity/latency · Network [/]: graph interface",
             "↑/↓: select or scroll", "PgUp/PgDn: select or scroll a page", "Home/End: first/last row",
             "Enter: toggle user group / process tree, or actions", "A: process, service or session actions",
-            "D: process or user session details", "Space: mark account sessions · M: mark/unmark all · X: logoff picker",
+            "D: process, CPU/memory, disk, network, GPU or session details", "Space: mark account sessions · M: mark/unmark all · X: logoff picker",
             "/: edit filter", "Esc: clear filter / close dialog",
             "Ctrl+U: clear search text", "P: pause/resume", "Q / Ctrl+Q: quit (close dialogs first)",
-            "T: process tree", "←/→: process columns (Shift in tree) / user branches",
+            "T: process tree", "←/→: process/GPU columns (Shift in tree) / user branches",
             "Right-click: menus / expand or collapse all",
             "C: columns", "F6: sort", "R: reverse sort", "E: exclude process name", "U: restore excluded processes",
             "L: include user processes", "G: change graph type", "Click chart: inspect",
@@ -139,7 +144,7 @@ public sealed partial class MonitorSurface {
             return detailed;
         }
 
-        return "Views: 1 processes · 2 services · 3 network · 4 GPU · 5/F8 users · 6 dashboard\n" +
+        return "Views: 1 processes · 2 services · 3 network · 4 GPU · 5/F8 users · 6 disks · 7 dashboard\n" +
             "↑↓ / PgUp/PgDn / Home/End: select or scroll · Enter: toggle branch/actions · A: actions · D: details\n" +
             "Users: Space marks account · M marks/unmarks all · X selects sessions for confirmed logoff\n" +
             "/: edit filter · Esc: clear filter/close dialog · Ctrl+U: clear search · P: pause/resume · Q/Ctrl+Q: quit (close dialogs first)\n" +

@@ -61,7 +61,7 @@ public sealed class NetworkSampler {
                         stats.BytesSent,
                         stats.IncomingPacketsWithErrors + stats.OutgoingPacketsWithErrors,
                         adapter.Speed
-                    );
+                    ) { Addresses = string.Join(", ", adapter.GetIPProperties().UnicastAddresses.Select(address => address.Address.ToString())) };
                     if (rx.HasValue && tx.HasValue) {
                         measured = true;
                         receive += rx.Value;

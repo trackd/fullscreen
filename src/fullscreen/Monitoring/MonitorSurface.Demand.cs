@@ -18,6 +18,7 @@ public sealed partial class MonitorSurface {
             if (View == MonitorView.Dashboard) {
                 return summaries;
             }
+            if (View == MonitorView.Disks) { return summaries | CollectorMetrics.Disks; }
 
             if (View == MonitorView.Services) {
                 return CollectorMetrics.Services | background;
@@ -41,6 +42,7 @@ public sealed partial class MonitorSurface {
             }
 
             required |= CollectorMetrics.Processes;
+            if (ProcessTable && !Minimal && (Bounds.Width == 0 || Bounds.Width >= 76 && Bounds.Height >= 20)) { required |= CollectorMetrics.Disks; }
             foreach (var column in AvailableProcessColumns) {
                 required |= ColumnMetrics(column);
             }
@@ -63,8 +65,8 @@ public sealed partial class MonitorSurface {
     }
 
     private CollectorMetrics SortMetrics(ProcessSort sort) => sort switch {
-        ProcessSort.Gpu when Supports(CollectorCapabilities.ProcessGpu) => CollectorMetrics.ProcessGpu,
-        ProcessSort.GpuMemory when Supports(CollectorCapabilities.ProcessGpuMemory) => CollectorMetrics.ProcessGpu,
+        ProcessSort.Gpu or ProcessSort.GpuAdapter or ProcessSort.GpuEngine when Supports(CollectorCapabilities.ProcessGpu) => CollectorMetrics.ProcessGpu,
+        ProcessSort.GpuMemory or ProcessSort.GpuDedicatedMemory or ProcessSort.GpuSharedMemory when Supports(CollectorCapabilities.ProcessGpuMemory) => CollectorMetrics.ProcessGpu,
         ProcessSort.Disk when Supports(CollectorCapabilities.ProcessDisk) => CollectorMetrics.ProcessDisk,
         ProcessSort.Network when Supports(CollectorCapabilities.ProcessNetwork) => CollectorMetrics.ProcessNetwork,
         _ => CollectorMetrics.None
@@ -74,7 +76,7 @@ public sealed partial class MonitorSurface {
         column switch {
             ProcessColumn.UserName => CollectorMetrics.Owners,
             ProcessColumn.MemoryPercent => CollectorMetrics.Memory,
-            ProcessColumn.Gpu or ProcessColumn.GpuMemory => CollectorMetrics.ProcessGpu,
+            ProcessColumn.Gpu or ProcessColumn.GpuAdapter or ProcessColumn.GpuEngine or ProcessColumn.GpuMemory or ProcessColumn.GpuDedicatedMemory or ProcessColumn.GpuSharedMemory => CollectorMetrics.ProcessGpu,
             ProcessColumn.Disk => CollectorMetrics.ProcessDisk,
             ProcessColumn.Network => CollectorMetrics.ProcessNetwork,
             _ => CollectorMetrics.None

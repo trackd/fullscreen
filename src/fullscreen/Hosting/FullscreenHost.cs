@@ -81,6 +81,7 @@ public static class FullscreenHost {
             // Run keeps XenoAtom's app-wide F12 diagnostics gesture. It runs before
             // control input, including focused embedded components and modal dialogs.
             session.Instance.Run(root, context => {
+                root.UpdateDiagnostics(chartRenderer, graphics);
                 if (graphics is Charts.SixelChartPresenter { HasPresented: true }) {
                     startupRefresh?.Update(context.App, context.Timestamp);
                 }

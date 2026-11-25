@@ -1,6 +1,6 @@
-using System.Runtime.InteropServices;
-using System.Globalization;
 using System.ComponentModel;
+using System.Globalization;
+using System.Runtime.InteropServices;
 
 namespace fullscreen.Monitoring;
 

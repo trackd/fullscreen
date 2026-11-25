@@ -13,7 +13,7 @@ public sealed partial class MonitorSurface {
     public bool ColumnsOpen { get; private set; }
 
     private int _columnPickerIndex;
-    private readonly Column[] _columns = new Column[14];
+    private readonly Column[] _columns = new Column[Enum.GetValues<ProcessColumn>().Length];
     private int _columnCount, _columnLayoutWidth = -1, _columnLayoutVersion = -1;
     private int _firstProcessColumn;
     private readonly List<ProcessColumn> _availableProcessColumns = [];
@@ -49,7 +49,11 @@ public sealed partial class MonitorSurface {
             ProcessColumn.Memory => ("RSS", 10, 7, ProcessSort.Memory),
             ProcessColumn.MemoryPercent => ("MEM%", 7, 1, ProcessSort.Memory),
             ProcessColumn.Gpu => ("GPU%", 6, 4, ProcessSort.Gpu),
-            ProcessColumn.GpuMemory => ("VRAM", 11, 2, ProcessSort.GpuMemory),
+            ProcessColumn.GpuMemory => ("GPU memory", 11, 2, ProcessSort.GpuMemory),
+            ProcessColumn.GpuDedicatedMemory => ("GPU dedicated", 14, 2, ProcessSort.GpuDedicatedMemory),
+            ProcessColumn.GpuSharedMemory => ("GPU shared", 14, 2, ProcessSort.GpuSharedMemory),
+            ProcessColumn.GpuAdapter => ("GPU adapter", 34, 2, ProcessSort.GpuAdapter),
+            ProcessColumn.GpuEngine => ("GPU engine", 24, 2, ProcessSort.GpuEngine),
             ProcessColumn.CpuTime => ("TIME", 14, 3, ProcessSort.CpuTime),
             ProcessColumn.Status => ("STATUS", 12, 4, ProcessSort.Status),
             ProcessColumn.Disk => ("DISK/s", 12, 5, ProcessSort.Disk),
